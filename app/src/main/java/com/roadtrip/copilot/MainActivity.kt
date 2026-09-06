@@ -92,6 +92,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRouteSpinner() {
         val routes = listOf(
+            "Nassau to Albany (Return Test Run)",
             "Albany to Nassau (NY 19-mi Test Run)",
             "Phoenix to Albuquerque (Day 1: PHX -> Flagstaff)",
             "Phoenix to Albuquerque (Day 2: Flagstaff -> Chama)",
@@ -178,18 +179,22 @@ class MainActivity : AppCompatActivity() {
 
         when (selectedIdx) {
             0 -> {
-                routeFile = "test_itinerary.json"
+                routeFile = "test_itinerary_return.json"
                 dayNumber = 1
             }
             1 -> {
-                routeFile = "itinerary.json"
+                routeFile = "test_itinerary.json"
                 dayNumber = 1
             }
             2 -> {
                 routeFile = "itinerary.json"
-                dayNumber = 2
+                dayNumber = 1
             }
             3 -> {
+                routeFile = "itinerary.json"
+                dayNumber = 2
+            }
+            4 -> {
                 routeFile = "itinerary.json"
                 dayNumber = 3
             }

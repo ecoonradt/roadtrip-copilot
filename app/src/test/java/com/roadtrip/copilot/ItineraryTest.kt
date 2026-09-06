@@ -61,6 +61,20 @@ class ItineraryTest {
     }
 
     @Test
+    fun testParseReturnItinerary() {
+        val file = File("src/main/assets/test_itinerary_return.json")
+        assertTrue("test_itinerary_return.json must exist in assets", file.exists())
+
+        val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
+        assertEquals("Return Run: Nassau to Albany", itinerary.tripName)
+
+        val checkpoints = itinerary.getCheckpointsForDay(1)
+        assertEquals(5, checkpoints.size)
+        assertEquals("depart_nassau", checkpoints[0].id)
+        assertEquals("Albany_arrival", checkpoints[4].id)
+    }
+
+    @Test
     fun testHaversineDistanceAccuracy() {
         // Empire State Plaza Departure
         val lat1 = 42.65260
