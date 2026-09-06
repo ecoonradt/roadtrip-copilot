@@ -88,7 +88,8 @@ class AudioDuckEngine(
 
         val utteranceId = UUID.randomUUID().toString()
         val params = Bundle().apply {
-            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_NOTIFICATION)
+            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
         }
 
         val speechAttributes = AudioAttributes.Builder()
@@ -106,7 +107,7 @@ class AudioDuckEngine(
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(audioAttributes)
             .setAcceptsDelayedFocusGain(false)
             .setOnAudioFocusChangeListener { focusChange ->

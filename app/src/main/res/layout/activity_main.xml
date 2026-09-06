@@ -226,7 +226,18 @@
             android:layout_height="48dp"
             android:layout_marginTop="10dp"
             android:strokeColor="@color/accent"
-            android:text="Test Car Audio &amp; Ducking"
+            android:text="Test Audio Speech"
+            android:textColor="@color/accent"
+            app:cornerRadius="12dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTestAlert"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="10dp"
+            android:strokeColor="@color/accent"
+            android:text="Test Heads-Up Card &amp; Audio Ducking"
             android:textColor="@color/accent"
             app:cornerRadius="12dp" />
 

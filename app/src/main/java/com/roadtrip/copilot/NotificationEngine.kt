@@ -15,7 +15,7 @@ class NotificationEngine(private val context: Context) {
 
     companion object {
         const val CHANNEL_STATUS_ID = "copilot_status_channel"
-        const val CHANNEL_ALERT_ID = "copilot_alert_channel"
+        const val CHANNEL_ALERT_ID = "copilot_alert_channel_v2"
         const val FOREGROUND_NOTIFICATION_ID = 1001
         private const val ALERT_NOTIFICATION_ID_BASE = 2000
     }
@@ -41,6 +41,12 @@ class NotificationEngine(private val context: Context) {
         }
 
         // Heads-up alert channel for upcoming waypoints
+        val soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+        val audioAttr = android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
         val alertChannel = NotificationChannel(
             CHANNEL_ALERT_ID,
             context.getString(R.string.channel_alert_name),
@@ -48,7 +54,10 @@ class NotificationEngine(private val context: Context) {
         ).apply {
             description = context.getString(R.string.channel_alert_desc)
             enableVibration(true)
+            vibrationPattern = longArrayOf(0, 350, 200, 350)
+            setSound(soundUri, audioAttr)
             setShowBadge(true)
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
 
         sysManager.createNotificationChannel(statusChannel)
@@ -94,6 +103,24 @@ class NotificationEngine(private val context: Context) {
      * Posts a high-priority heads-up card over Google Maps in Android Auto.
      */
     fun postHeadsUpAlert(title: String, message: String) {
+        val alertId = ALERT_NOTIFICATION_ID_BASE + (alertCounter++ % 50)
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            alertId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val dismissAction = NotificationCompat.Action.Builder(
+            R.drawable.ic_copilot,
+            "Acknowledge",
+            pendingIntent
+        ).build()
+
         val carExtender = CarExtender()
             .setColor(context.getColor(R.color.accent))
 
@@ -102,14 +129,18 @@ class NotificationEngine(private val context: Context) {
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setSmallIcon(R.drawable.ic_copilot)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            .setContentIntent(pendingIntent)
+            .addAction(dismissAction)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setAutoCancel(true)
-            .setTimeoutAfter(8000) // Tucks away after 8 seconds into the drawer
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVibrate(longArrayOf(0, 350, 200, 350))
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setTimeoutAfter(12000) // Tucks away after 12 seconds into the drawer
             .extend(carExtender)
             .build()
 
-        val alertId = ALERT_NOTIFICATION_ID_BASE + (alertCounter++ % 50)
         try {
             notificationManager.notify(alertId, notification)
         } catch (e: SecurityException) {

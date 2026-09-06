@@ -125,6 +125,20 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Starting service for audio test...", Toast.LENGTH_SHORT).show()
             }
         }
+
+        binding.btnTestAlert.setOnClickListener {
+            if (copilotService != null) {
+                copilotService?.testAlert()
+            } else {
+                val intent = Intent(this, CopilotService::class.java).apply {
+                    action = CopilotService.ACTION_START
+                    putExtra(CopilotService.EXTRA_ROUTE_FILE, "test_itinerary.json")
+                    putExtra(CopilotService.EXTRA_DAY_NUMBER, 1)
+                }
+                ContextCompat.startForegroundService(this, intent)
+                Toast.makeText(this, "Starting service for alert test...", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun checkPermissionsAndStart() {

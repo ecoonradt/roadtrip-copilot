@@ -164,6 +164,15 @@ class CopilotService : Service() {
         audioDuckEngine.speakWithDucking("Roadtrip co-pilot audio test. Navigation guidance channel connected and ducking is operational.")
     }
 
+    fun testAlert() {
+        emitLog("Posting test heads-up card and speaking...")
+        notificationEngine.postHeadsUpAlert(
+            "Test Checkpoint • 14 min ahead",
+            "Approaching Scenic Vista pull-off. Audio pause and heads-up banner test."
+        )
+        audioDuckEngine.speakWithDucking("Approaching Scenic Vista. You are currently fourteen minutes ahead of schedule.")
+    }
+
     private fun stopCopilot() {
         locationTracker.stopTracking()
         _isRunning.value = false
