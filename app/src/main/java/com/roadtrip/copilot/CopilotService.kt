@@ -1,6 +1,7 @@
 package com.roadtrip.copilot
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Binder
@@ -65,9 +66,16 @@ class CopilotService : Service() {
             }
         }
 
+        val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
+        audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", false)
+
         locationTracker = LocationTracker(this) { evalResult ->
             handleEvaluationResult(evalResult)
         }
+    }
+
+    fun setPauseMusicInsteadOfDuck(pause: Boolean) {
+        audioDuckEngine.pauseMusicInsteadOfDuck = pause
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -70,8 +70,10 @@ class AudioDuckEngine(
         }
     }
 
+    var pauseMusicInsteadOfDuck: Boolean = false
+
     /**
-     * Ducks active media (Spotify, Podcasts), speaks the provided text through
+     * Ducks active media (like Google Maps) or pauses it, speaks the provided text through
      * the navigation guidance audio channel, and immediately restores music volume on completion.
      */
     fun speakWithDucking(text: CharSequence) {
@@ -88,7 +90,8 @@ class AudioDuckEngine(
 
         val utteranceId = UUID.randomUUID().toString()
         val params = Bundle().apply {
-            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+            // Note: Omitting KEY_PARAM_STREAM ensures AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+            // is not overridden by a legacy stream type.
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
         }
 
@@ -107,7 +110,13 @@ class AudioDuckEngine(
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        val gain = if (pauseMusicInsteadOfDuck) {
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+        } else {
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        }
+
+        val focusRequest = AudioFocusRequest.Builder(gain)
             .setAudioAttributes(audioAttributes)
             .setAcceptsDelayedFocusGain(false)
             .setOnAudioFocusChangeListener { focusChange ->

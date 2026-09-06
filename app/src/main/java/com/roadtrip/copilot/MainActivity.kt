@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
             val binder = service as CopilotService.LocalBinder
             copilotService = binder.getService()
             isBound = true
+            copilotService?.setPauseMusicInsteadOfDuck(binding.switchPauseMusic.isChecked)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -138,6 +139,14 @@ class MainActivity : AppCompatActivity() {
                 ContextCompat.startForegroundService(this, intent)
                 Toast.makeText(this, "Starting service for alert test...", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
+        binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
+        binding.switchPauseMusic.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("pref_pause_music", isChecked).apply()
+            copilotService?.setPauseMusicInsteadOfDuck(isChecked)
+            appendLog("Audio mode: ${if (isChecked) "Pause music completely" else "Duck volume (Google Maps style)"}")
         }
     }
 

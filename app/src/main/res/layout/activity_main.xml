@@ -241,6 +241,16 @@
             android:textColor="@color/accent"
             app:cornerRadius="12dp" />
 
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchPauseMusic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="Pause music completely (Default: Duck volume like Google Maps)"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp"
+            app:useMaterialThemeColors="true" />
+
         <!-- Event Log -->
         <TextView
             android:layout_width="wrap_content"
