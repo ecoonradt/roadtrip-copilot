@@ -1,68 +1,89 @@
-# Road Trip Co-Pilot for Android Auto
+# Roadtrip Co-Pilot for Android Auto
 
-A smart, context-aware road trip assistant designed to run alongside Google Maps in Android Auto.
+A lightweight, unkillable native Android background assistant designed to run alongside Google Maps in Android Auto.
+
+---
 
 ## Trip Overview: Phoenix (PHX) to Albuquerque (ABQ)
-- **Dates:** Friday, October 9 – Monday, October 12
-- **Route:** Phoenix $\to$ Sedona $\to$ Oak Creek Canyon $\to$ Flagstaff $\to$ Shiprock $\to$ Chama $\to$ Brazos Pass $\to$ Taos $\to$ High Road $\to$ Santa Fe $\to$ Albuquerque
+* **Dates:** Friday, October 9 – Monday, October 12
+* **Route:** Phoenix $\to$ Sedona $\to$ Oak Creek Canyon $\to$ Flagstaff $\to$ Shiprock / Navajo Nation $\to$ Chama $\to$ Brazos Mountain Pass $\to$ Taos $\to$ High Road $\to$ Santa Fe $\to$ Albuquerque Sunport (ABQ)
 
 ---
 
-## Why Option 1: The "Heads-Up & Spoken Audio" Co-Pilot?
-Android Auto has strict dashboard limits (navigation + media player occupy the main split-screen). By running as a background service on your phone that posts high-priority notifications and voice prompts:
-1. **Zero Screen Conflict:** You keep full Google Maps turn-by-turn navigation on screen at all times.
-2. **Heads-Up Alerts:** Android Auto displays notifications as top banners over Google Maps with custom notes (e.g., *"Approaching Shiprock Peak on your left in 3 miles"*).
-3. **Voice Prompts:** The co-pilot can use Android Text-to-Speech (TTS) to duck your music and speak upcoming scenic highlights, photo pull-offs, and dining details.
-4. **Pace & Timeline Tracking:** Compares current GPS time vs. target arrival times (e.g., *"You are 14 minutes ahead of schedule for Taos"*).
+## Why a Native Background App?
+Android Auto's split-screen dashboard is limited to two active app tiles (typically Google Maps navigation on the left, Media/Spotify on the right). A custom 3rd-party navigation app would compete with your music.
+
+Roadtrip Co-Pilot solves this by running as an unkillable **Foreground Service** on your phone:
+1. **Zero Screen Conflict:** Google Maps stays on your car's touchscreen 100% of the time.
+2. **Audio Ducking:** When approaching a waypoint, your music/podcast ducks down cleanly, speaks the scenic or navigational announcement over your car speakers, and returns to full volume.
+3. **Android Auto Heads-Up Banners:** Displays high-priority heads-up cards over Google Maps on the car screen for 5–7 seconds as you approach waypoints and scenic pull-offs.
+4. **100% Offline:** Runs directly off your phone's GNSS satellite receiver and baked-in itinerary. No cell reception or internet connection needed in remote canyons or mountain passes.
 
 ---
 
-## Project Structure
-```
-~/code/roadtrip-copilot/
-├── itinerary.json      # Complete parsed itinerary with lat/lng, schedule, & alerts
-├── copilot_engine.py   # Core logic: Haversine distance, trigger radius, timeline delta
-└── README.md           # Documentation and setup instructions
-```
+## Prerequisites & Machine Setup
 
----
-
-## Quick Start / Testing Locally
-
-Test the engine right in your terminal:
+### 1. JDK 17
+Ensure Java 17 is installed on your development machine:
 ```bash
-python3 copilot_engine.py
+sudo apt update && sudo apt install -y openjdk-17-jdk
 ```
-
-This runs a simulated drive approaching Sedona, demonstrating how proximity triggers and schedule deltas are computed.
-
----
-
-## Deployment Options to Android
-
-### Option A: Termux + Termux:API (Easiest & Most Direct)
-If you install [Termux](https://f-droid.org/en/packages/com.termux/) and Termux:API from F-Droid on your Android phone:
-1. Copy `itinerary.json` and `copilot_engine.py` to your phone.
-2. Termux provides CLI access to Android device capabilities:
-   - `termux-location`: Gets current phone GPS coordinates.
-   - `termux-notification`: Directly posts heads-up banners to Android Auto.
-   - `termux-tts-speak`: Speaks announcements through car speakers over Bluetooth/USB.
-3. A simple Python loop can poll every 30–60 seconds while driving.
-
-### Option B: Tasker or MacroDroid
-Import `itinerary.json` into Tasker:
-- Set up location geofences corresponding to the waypoints.
-- Tasker native actions:
-  - **Notify:** Set Priority = Max (displays banner in Android Auto).
-  - **Say:** Uses Android TTS over the Media / Car audio channel.
-
----
-
-## Resuming This Conversation
-
-To resume this AI assistant pair-programming session inside this directory:
+Verify with:
 ```bash
-cd ~/code/roadtrip-copilot
-agy --conversation ed4c4f80-5235-4d91-bc71-12b47fe93f92 --add-dir .
+java -version
+javac -version
 ```
-*(Or simply `agy -c --add-dir .` if this was your most recent session).*
+
+### 2. Android Debug Bridge (ADB)
+ADB is installed at `/usr/bin/adb`. Verify phone connection:
+```bash
+adb devices
+```
+*(Ensure "USB Debugging" is enabled under Developer Options on your phone).*
+
+### 3. Android SDK
+If building headlessly via the command line, configure your Android SDK location in `local.properties`:
+```properties
+sdk.dir=/home/eric/Android/Sdk
+```
+
+---
+
+## Phone Preparation (Crucial for Offline Use)
+In remote parts of Arizona and New Mexico, cellular service will drop. Complete this one-time step on your phone:
+
+### Download Offline English TTS Voice Pack
+1. Open phone **Settings $\to$ Accessibility** (or **System**) $\to$ **Text-to-speech output**.
+2. Tap the **gear icon** next to **Preferred engine** (Speech Services by Google).
+3. Tap **Install voice data $\to$ English (United States)**.
+4. Download a voice pack so your phone can speak without internet.
+
+---
+
+## Building and Installing
+
+### Build Debug APK
+```bash
+./gradlew assembleDebug
+```
+
+### Install Directly to Your Phone
+```bash
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Stream Live Logs
+```bash
+adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationEngine:V
+```
+
+---
+
+## Architecture & Code Structure
+* **`app/src/main/assets/itinerary.json`**: Complete waypoint schedule, GPS coordinates, trigger radiuses, and speech announcements.
+* **`app/src/main/assets/test_itinerary.json`**: 19-mile local test drive route (Empire State Plaza to Nassau, NY).
+* **`CopilotService.kt`**: Unkillable `ForegroundService` with `location` foreground service type.
+* **`LocationTracker.kt`**: Event-driven GNSS listener and Haversine distance calculator.
+* **`AudioDuckEngine.kt`**: Transient audio focus management (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) and offline Text-to-Speech.
+* **`NotificationEngine.kt`**: High-priority notifications with `NotificationCompat.CarExtender` for Android Auto.
+* **`MainActivity.kt`**: Simple single-tap dashboard to select route and toggle the Co-Pilot service.

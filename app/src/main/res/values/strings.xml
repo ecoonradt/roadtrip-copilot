@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Roadtrip Co-Pilot</string>
+    <string name="status_idle">Service Idle (Standby)</string>
+    <string name="status_running">Co-Pilot Active &amp; Tracking</string>
+    <string name="btn_start">Start Co-Pilot Service</string>
+    <string name="btn_stop">Stop Co-Pilot Service</string>
+    <string name="route_phx_abq">Phoenix to Albuquerque (Oct 9–12)</string>
+    <string name="route_ny_test">Albany to Nassau (NY 19-mi Test)</string>
+    <string name="channel_status_name">Roadtrip Status Service</string>
+    <string name="channel_status_desc">Persistent background notification keeping the co-pilot alive.</string>
+    <string name="channel_alert_name">Roadtrip Scenic &amp; Waypoint Alerts</string>
+    <string name="channel_alert_desc">High priority heads-up cards for upcoming waypoints.</string>
+</resources>

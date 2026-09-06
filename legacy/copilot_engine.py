@@ -102,11 +102,76 @@ class RoadtripCoPilot:
 
         return results
 
+    def evaluate_test_position(self, current_lat: float, current_lng: float, elapsed_minutes: float = 0):
+        """
+        Evaluates position against test_itinerary.json checkpoints.
+        """
+        checkpoints = self.data.get("checkpoints", [])
+        results = {
+            "current_location": {"lat": current_lat, "lng": current_lng},
+            "alerts": [],
+            "next_checkpoint": None,
+            "distance_to_next_miles": None
+        }
+
+        closest_checkpoint = None
+        closest_distance = float("inf")
+
+        for cp in checkpoints:
+            dist = haversine_miles(current_lat, current_lng, cp["lat"], cp["lng"])
+            radius = cp.get("trigger_radius_miles", 0.5)
+
+            if dist <= radius and cp["id"] not in self.visited_checkpoints:
+                self.visited_checkpoints.add(cp["id"])
+                results["alerts"].append({
+                    "id": cp["id"],
+                    "name": cp["name"],
+                    "distance_miles": round(dist, 2),
+                    "notification": cp["notification"]
+                })
+
+            if cp["id"] not in self.visited_checkpoints and dist < closest_distance:
+                closest_distance = dist
+                closest_checkpoint = cp
+
+        if closest_checkpoint:
+            results["next_checkpoint"] = closest_checkpoint["name"]
+            results["distance_to_next_miles"] = round(closest_distance, 2)
+            target_offset = cp.get("offset_minutes_from_start", 0)
+            delta = int(target_offset - elapsed_minutes)
+            
+            if delta > 1:
+                status = f"{delta} min ahead of schedule"
+            elif delta < -1:
+                status = f"{abs(delta)} min behind schedule"
+            else:
+                status = "On schedule"
+
+            results["schedule_delta"] = {
+                "target_offset_mins": target_offset,
+                "elapsed_mins": round(elapsed_minutes, 1),
+                "delta_minutes": delta,
+                "status_text": status
+            }
+
+        return results
+
 if __name__ == "__main__":
-    copilot = RoadtripCoPilot()
-    print("=== Testing Day 1: Approaching Sedona ===")
-    # Bell Rock coordinates approx: 34.8010, -111.7645 (simulate approaching 1.5 miles away at 4:18 PM)
-    sim_lat = 34.7800
-    sim_lng = -111.7645
-    status = copilot.evaluate_position(day_number=1, current_lat=sim_lat, current_lng=sim_lng, current_time_str="16:18:00")
-    print(json.dumps(status, indent=2))
+    import sys
+    if "--test" in sys.argv:
+        print("=== Testing Local Drive: Approaching Hudson River / Patroon Island Bridge ===")
+        test_copilot = RoadtripCoPilot("test_itinerary.json")
+        # Patroon Island Bridge: 42.66517, -73.72953 (simulate 0.4 miles away, 12 mins in)
+        status = test_copilot.evaluate_test_position(
+            current_lat=42.6680, 
+            current_lng=-73.7295, 
+            elapsed_minutes=12.0
+        )
+        print(json.dumps(status, indent=2))
+    else:
+        copilot = RoadtripCoPilot("itinerary.json")
+        print("=== Testing Day 1: Approaching Sedona ===")
+        sim_lat = 34.7800
+        sim_lng = -111.7645
+        status = copilot.evaluate_position(day_number=1, current_lat=sim_lat, current_lng=sim_lng, current_time_str="16:18:00")
+        print(json.dumps(status, indent=2))
