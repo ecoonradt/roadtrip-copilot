@@ -123,6 +123,7 @@ class CopilotService : Service() {
         val initialNotification = notificationEngine.buildForegroundNotification(
             nextCheckpoint = "Initializing Route...",
             distanceMiles = null,
+            targetTime = null,
             paceStatus = "Standby"
         )
 
@@ -151,8 +152,9 @@ class CopilotService : Service() {
                     }
                 }
 
-                val checkpoints = itinerary.getCheckpointsForDay(dayNumber)
-                locationTracker.setCheckpoints(checkpoints)
+                val startTime = System.currentTimeMillis()
+                val checkpoints = itinerary.resolveCheckpointsForDay(dayNumber, startTime)
+                locationTracker.setCheckpoints(checkpoints, startTime)
                 locationTracker.startTracking()
 
                 emitLog("Loaded ${checkpoints.size} waypoints for ${itinerary.tripName} (Day $dayNumber).")
@@ -169,11 +171,13 @@ class CopilotService : Service() {
         // Update persistent status notification
         val nextCpName = result.nextCheckpoint?.name ?: "All Waypoints Passed"
         val dist = result.distanceToNextMiles
+        val targetTime = result.nextCheckpoint?.formattedTargetTime
         val pace = result.scheduleDelta?.statusText ?: "On Schedule"
 
         val updatedNotification = notificationEngine.buildForegroundNotification(
             nextCheckpoint = nextCpName,
             distanceMiles = dist,
+            targetTime = targetTime,
             paceStatus = pace
         )
 
@@ -203,12 +207,13 @@ class CopilotService : Service() {
     }
 
     fun testAlert() {
+        val currentPace = _telemetryFlow.value?.scheduleDelta?.statusText ?: "On schedule"
         emitLog("Posting Android Auto heads-up card and speaking...")
         notificationEngine.postHeadsUpAlert(
-            "Scenic Vista • 14 min ahead",
-            "Approaching Oak Creek Vista pull-off. Heads-up alert and audio test."
+            "Scenic Vista • $currentPace",
+            "Approaching Oak Creek Vista pull-off. Android Auto heads-up alert and audio ducking operational."
         )
-        audioDuckEngine.speakWithDucking("Approaching Scenic Vista. You are currently fourteen minutes ahead of schedule.")
+        audioDuckEngine.speakWithDucking("Approaching Scenic Vista. Roadtrip co-pilot alert and audio ducking operational.")
     }
 
     private fun stopCopilot() {

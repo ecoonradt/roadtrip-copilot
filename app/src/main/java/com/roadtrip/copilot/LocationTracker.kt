@@ -11,9 +11,6 @@ import com.roadtrip.copilot.model.Checkpoint
 import com.roadtrip.copilot.model.EvaluationResult
 import com.roadtrip.copilot.model.ScheduleDelta
 import com.roadtrip.copilot.model.TriggeredAlert
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
@@ -30,17 +27,29 @@ class LocationTracker(
     private val visitedCheckpoints = mutableSetOf<String>()
     private var startTimeMillis: Long? = null
     private var isTracking = false
+    private var lastVisitedPace: ScheduleDelta = ScheduleDelta(0, "On schedule", true)
 
     companion object {
         private const val TAG = "LocationTracker"
         private const val EARTH_RADIUS_MILES = 3958.8
     }
 
-    fun setCheckpoints(checkpoints: List<Checkpoint>) {
+    fun setCheckpoints(checkpoints: List<Checkpoint>, initialStartTimeMillis: Long? = null) {
         activeCheckpoints = checkpoints
         visitedCheckpoints.clear()
-        startTimeMillis = System.currentTimeMillis()
-        Log.i(TAG, "Loaded ${checkpoints.size} checkpoints into LocationTracker.")
+        val start = initialStartTimeMillis ?: System.currentTimeMillis()
+        startTimeMillis = start
+
+        // Initial pace: for fixed itinerary before any checkpoint is visited,
+        // evaluate against the first milestone if available.
+        val firstCp = checkpoints.firstOrNull()
+        lastVisitedPace = if (firstCp?.targetEpochMillis != null && !firstCp.targetTime.isNullOrBlank()) {
+            calculateScheduleDelta(firstCp, start) ?: ScheduleDelta(0, "On schedule", true)
+        } else {
+            ScheduleDelta(0, "On schedule", true)
+        }
+
+        Log.i(TAG, "Loaded ${checkpoints.size} checkpoints into LocationTracker. Initial pace: ${lastVisitedPace.statusText}")
     }
 
     @SuppressLint("MissingPermission")
@@ -86,7 +95,7 @@ class LocationTracker(
         evaluate(location.latitude, location.longitude, speedMph)
     }
 
-    fun evaluate(currentLat: Double, currentLng: Double, speedMph: Double) {
+    fun evaluate(currentLat: Double, currentLng: Double, speedMph: Double, evalTimeMillis: Long = System.currentTimeMillis()) {
         val newAlerts = mutableListOf<TriggeredAlert>()
         var closestCheckpoint: Checkpoint? = null
         var closestDist = Double.MAX_VALUE
@@ -98,14 +107,12 @@ class LocationTracker(
             if (dist <= cp.triggerRadiusMiles && cp.id !in visitedCheckpoints) {
                 visitedCheckpoints.add(cp.id)
                 val notif = cp.notification
-                val delta = calculateScheduleDelta(cp)
-
-                val paceSpeech = when {
-                    delta == null -> ""
-                    delta.deltaMinutes > 1 -> " You are currently ${delta.deltaMinutes} minutes ahead of schedule."
-                    delta.deltaMinutes < -1 -> " You are currently ${-delta.deltaMinutes} minutes behind schedule."
-                    else -> " You are on schedule."
+                val delta = calculateScheduleDelta(cp, evalTimeMillis)
+                if (delta != null) {
+                    lastVisitedPace = delta
                 }
+
+                val paceSpeech = delta?.formatForSpeech() ?: ""
 
                 val titleText = if (delta != null && delta.statusText.isNotBlank()) {
                     "${notif?.title ?: cp.name} • ${delta.statusText}"
@@ -140,8 +147,9 @@ class LocationTracker(
             }
         }
 
-        val scheduleDelta = calculateScheduleDelta(closestCheckpoint)
-
+        // The ongoing schedule delta reflects the confirmed pace from the last visited milestone
+        // (or route start), avoiding the false impression of being ahead/behind based on
+        // remaining transit time to an unreached waypoint.
         val result = EvaluationResult(
             currentLat = currentLat,
             currentLng = currentLng,
@@ -149,52 +157,29 @@ class LocationTracker(
             alerts = newAlerts,
             nextCheckpoint = closestCheckpoint,
             distanceToNextMiles = if (closestCheckpoint != null) closestDist else null,
-            scheduleDelta = scheduleDelta
+            scheduleDelta = lastVisitedPace
         )
 
         onEvaluationResult(result)
     }
 
-    private fun calculateScheduleDelta(checkpoint: Checkpoint?): ScheduleDelta? {
+    fun calculateScheduleDelta(checkpoint: Checkpoint?, currentTimeMillis: Long = System.currentTimeMillis()): ScheduleDelta? {
         if (checkpoint == null) return null
 
-        // 1. If target_time is present (e.g. "14:30:00")
-        val targetStr = checkpoint.targetTime
-        if (!targetStr.isNullOrBlank()) {
-            try {
-                val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
-                val targetDate = timeFormat.parse(targetStr)
-                val currentStr = timeFormat.format(Date())
-                val currentDate = timeFormat.parse(currentStr)
-
-                if (targetDate != null && currentDate != null) {
-                    val diffMinutes = ((targetDate.time - currentDate.time) / 60000L).toInt()
-                    val isAhead = diffMinutes >= 0
-                    val text = when {
-                        diffMinutes > 0 -> "$diffMinutes min ahead of schedule"
-                        diffMinutes < 0 -> "${-diffMinutes} min behind schedule"
-                        else -> "Exactly on schedule"
-                    }
-                    return ScheduleDelta(diffMinutes, text, isAhead)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error parsing target time: $targetStr", e)
-            }
+        // 1. Unified targetEpochMillis from pre-resolution (Fixed or Ad-hoc)
+        val targetEpoch = checkpoint.targetEpochMillis
+        if (targetEpoch != null) {
+            val deltaMillis = targetEpoch - currentTimeMillis
+            return ScheduleDelta.fromDeltaMillis(deltaMillis)
         }
 
-        // 2. If offset_minutes_from_start is present
+        // 2. Fallback if not pre-resolved:
         val offsetMinutes = checkpoint.offsetMinutesFromStart
         val start = startTimeMillis
         if (offsetMinutes != null && start != null) {
-            val elapsedMinutes = ((System.currentTimeMillis() - start) / 60000L).toInt()
-            val delta = offsetMinutes - elapsedMinutes
-            val isAhead = delta >= 0
-            val text = when {
-                delta > 0 -> "$delta min ahead of schedule"
-                delta < 0 -> "${-delta} min behind schedule"
-                else -> "Exactly on schedule"
-            }
-            return ScheduleDelta(delta, text, isAhead)
+            val targetMillis = start + (offsetMinutes * 60_000L)
+            val deltaMillis = targetMillis - currentTimeMillis
+            return ScheduleDelta.fromDeltaMillis(deltaMillis)
         }
 
         return null

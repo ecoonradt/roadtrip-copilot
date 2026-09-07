@@ -344,9 +344,12 @@ class MainActivity : AppCompatActivity() {
                     if (result.nextCheckpoint != null && result.distanceToNextMiles != null) {
                         binding.tvNextWaypoint.text = result.nextCheckpoint.name
                         binding.tvDistanceNext.text = "%.1f mi away".format(result.distanceToNextMiles)
+                        val targetTime = result.nextCheckpoint.formattedTargetTime
+                        binding.tvTargetTime.text = if (!targetTime.isNullOrBlank()) "Target: $targetTime" else "Target: --"
                     } else {
                         binding.tvNextWaypoint.text = "All Checkpoints Visited"
                         binding.tvDistanceNext.text = "--"
+                        binding.tvTargetTime.text = "Target: --"
                     }
 
                     if (result.scheduleDelta != null) {

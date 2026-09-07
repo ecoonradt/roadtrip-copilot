@@ -143,6 +143,16 @@
                     android:textSize="28sp"
                     android:textStyle="bold" />
 
+                <TextView
+                    android:id="@+id/tvTargetTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Target: --"
+                    android:textColor="@color/text_muted"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"

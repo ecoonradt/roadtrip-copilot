@@ -72,6 +72,7 @@ class NotificationEngine(private val context: Context) {
     fun buildForegroundNotification(
         nextCheckpoint: String = "Monitoring Route",
         distanceMiles: Double? = null,
+        targetTime: String? = null,
         paceStatus: String = "On Schedule"
     ): Notification {
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -84,11 +85,16 @@ class NotificationEngine(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val subtext = if (distanceMiles != null) {
-            "Next: $nextCheckpoint (%.1f mi) • %s".format(distanceMiles, paceStatus)
-        } else {
-            "Next: $nextCheckpoint • $paceStatus"
+        val nextPart = buildString {
+            append("Next: $nextCheckpoint")
+            if (distanceMiles != null) {
+                append(" (%.1f mi)".format(distanceMiles))
+            }
+            if (!targetTime.isNullOrBlank()) {
+                append(" • Target: $targetTime")
+            }
         }
+        val subtext = "$nextPart • Pace: $paceStatus"
 
         return NotificationCompat.Builder(context, CHANNEL_STATUS_ID)
             .setContentTitle("Roadtrip Co-Pilot Active")
