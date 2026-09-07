@@ -24,24 +24,32 @@
   * `android.permission.POST_NOTIFICATIONS`
 * A persistent low-priority ongoing notification keeps the service active (OOM score -1000) so Android OS never kills it while driving.
 
-### B. Audio Ducking & In-Car Routing
-* When approaching a waypoint, the app must **duck** whatever is playing (Spotify, podcasts) rather than talking over it or silencing it permanently.
+### B. Audio Ducking, Stream Routing & Calibration
+* When approaching a waypoint, the app must duck or optionally pause whatever is playing (Spotify, podcasts) rather than talking over it.
 * Uses Android's `AudioManager` with `AudioFocusRequest`:
-  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`
-  * Audio Usage: `AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE`
-  * Content Type: `AudioAttributes.CONTENT_TYPE_SPEECH`
-* Routing speech through `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` ensures Android Auto routes voice through the car's navigation audio channel, controllable by the steering wheel's navigation volume.
+  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (default) or `AUDIOFOCUS_GAIN_TRANSIENT` (when "Pause music completely" is toggled).
+  * Audio Usage: `AudioAttributes.USAGE_MEDIA` (default, pegged to the car stereo's volume knob) or `AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` (car navigation guidance channel).
+  * Content Type: `AudioAttributes.CONTENT_TYPE_SPEECH`.
+* Provides a 12-second continuous calibration speech loop so the driver can adjust the car volume knob in real time.
 * Focus must be abandoned immediately upon speech completion (`TextToSpeech.OnUtteranceProgressListener.onDone`) so music smoothly returns to 100% volume.
 
-### C. Android Auto Heads-Up Notifications
-* Approaching waypoints triggers an immediate high-priority notification.
+### C. Android Auto Heads-Up Notifications & Requirements
+* Approaching waypoints triggers an immediate high-priority heads-up notification projected onto the car screen over Google Maps.
 * Uses `NotificationCompat.Builder` with:
-  * Channel: `IMPORTANCE_HIGH`
-  * Category: `NotificationCompat.CATEGORY_NAVIGATION`
-  * Extender: `NotificationCompat.CarExtender()`
-* This ensures the banner drops down over Google Maps on the car's screen for 5–7 seconds, then tucks away into Android Auto's notification center.
+  * Style: `NotificationCompat.MessagingStyle` with `setGroupConversation(false)` and `Person` sender formatted as `"Co-Pilot: <Waypoint Title>"`. (Setting 1-to-1 conversation prevents Android Auto from filtering alerts through its "Show group message notifications" mute filter).
+  * Actions: Actionable voice `RemoteInput` reply ("Acknowledge") and mark-as-read ("Dismiss") wired to `NotificationReceiver`.
+  * Automotive Descriptor: Declared in `res/xml/automotive_app_desc.xml` (`<uses name="notification" />`) and registered via `<meta-data>` in `AndroidManifest.xml`.
+  * Channel: `IMPORTANCE_HIGH`, Category: `CATEGORY_MESSAGE`, Extender: `NotificationCompat.CarExtender()`.
+* **Required In-Car Device Settings (One-time setup for sideloaded / ADB builds):**
+  * Android Auto blocks sideloaded apps by default. In Android Auto settings, unlock Developer Settings (tap Version 10 times) $\to$ open Developer Settings $\to$ check **"Unknown sources"**.
+  * Under Android Auto Notification settings: ensure **"Show message notifications"** and **"Show first line of conversations"** are toggled **ON**.
 
-### D. 100% Offline Resilience (Zero Cellular Dependency)
+### D. Pace & Schedule Telemetry Engine
+* Dynamically calculates ahead/behind schedule deltas relative to planned waypoint target times.
+* Supports both fixed ISO-dated itineraries (e.g. PHX $\to$ ABQ with AZ $\to$ NM timezone offset adjustments) and dynamic ad-hoc drive routes (calculated relative to trip start time).
+* Locks in-transit pace telemetry to the last confirmed milestone to eliminate false ahead-of-schedule readings while parked before departure.
+
+### E. 100% Offline Resilience (Zero Cellular Dependency)
 * Much of the route (Oak Creek Canyon, Navajo Nation, Chama, Brazos Pass) has **zero cellular connectivity**.
 * **GPS:** Hardware GNSS satellite radio receives lat/long directly from orbit. No network calls.
 * **Proximity Math:** Local Haversine formula executed on-device.
@@ -56,8 +64,10 @@ roadtrip-copilot/
 ├── AGENTS.md                  # This file
 ├── README.md                  # Human-facing setup & usage guide
 ├── itinerary.json             # Core 4-day itinerary (PHX -> ABQ)
-├── test_itinerary.json        # Upstate NY 19-mile local test drive route
+├── test_itinerary.json        # Upstate NY 19-mile outbound test route
+├── test_itinerary_return.json # Upstate NY return test route (Nassau -> Albany)
 ├── legacy/                    # Archived prototypes (copilot_engine.py)
+├── scripts/                   # Environment setup scripts
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
 ├── settings.gradle.kts        # Multi-project gradle settings
 ├── build.gradle.kts           # Root build configuration
@@ -68,17 +78,21 @@ roadtrip-copilot/
             ├── AndroidManifest.xml
             ├── assets/
             │   ├── itinerary.json
-            │   └── test_itinerary.json
+            │   ├── test_itinerary.json
+            │   └── test_itinerary_return.json
             ├── res/
+            │   ├── layout/            # Dashboard and custom spinner layouts
+            │   └── xml/
+            │       └── automotive_app_desc.xml
             └── java/com/roadtrip/copilot/
-                ├── MainActivity.kt        # Minimal start/stop dashboard & route picker
-                ├── CopilotService.kt      # Foreground service lifecycle
+                ├── MainActivity.kt        # Start/stop dashboard, route picker & volume calibration
+                ├── CopilotService.kt      # Foreground service lifecycle & pace telemetry
                 ├── LocationTracker.kt     # Event-driven GPS & Haversine proximity
-                ├── AudioDuckEngine.kt     # Audio focus & Text-to-Speech manager
-                ├── NotificationEngine.kt  # Android Auto heads-up cards
+                ├── AudioDuckEngine.kt     # Audio focus, stream routing & TTS manager
+                ├── NotificationEngine.kt  # Android Auto MessagingStyle heads-up cards
+                ├── NotificationReceiver.kt# Broadcast receiver for AA voice reply & dismiss
                 └── model/
-                    ├── Itinerary.kt
-                    └── Waypoint.kt
+                    └── ItineraryModels.kt # Itinerary data classes & pace resolution
 ```
 
 ---

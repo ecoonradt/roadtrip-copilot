@@ -177,13 +177,14 @@ class NotificationEngine(private val context: Context) {
             .build()
 
         val copilotPerson = Person.Builder()
-            .setName("Roadtrip Co-Pilot")
+            .setName("Co-Pilot: $title")
             .setKey("copilot_assistant")
             .setBot(true)
             .build()
 
         val messagingStyle = NotificationCompat.MessagingStyle(driverPerson)
             .setConversationTitle(title)
+            .setGroupConversation(false)
             .addMessage(
                 NotificationCompat.MessagingStyle.Message(
                     message,

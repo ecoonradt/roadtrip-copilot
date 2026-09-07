@@ -49,14 +49,26 @@ sdk.dir=/home/eric/Android/Sdk
 
 ---
 
-## Phone Preparation (Crucial for Offline Use)
-In remote parts of Arizona and New Mexico, cellular service will drop. Complete this one-time step on your phone:
+## Phone & Android Auto Preparation
 
-### Download Offline English TTS Voice Pack
+### 1. Enable Android Auto "Unknown Sources" (Required for Sideloaded APK)
+Android Auto blocks notifications from apps not installed via the Play Store by default. Unlock developer settings on your phone:
+1. Open phone **Settings $\to$ Connected devices $\to$ Connection preferences $\to$ Android Auto**.
+2. Scroll to the bottom and tap **Version** 10 times until prompted to allow developer settings.
+3. Tap the **three-dot menu ($\vdots$)** in the upper-right corner $\to$ **Developer settings**.
+4. Check **Unknown sources**.
+
+### 2. Configure Android Auto Notifications
+In phone **Settings $\to$ Android Auto**:
+* Toggle **Show message notifications** $\to$ **ON**.
+* Toggle **Show first line of conversations** $\to$ **ON** (allows waypoint details to render in the card).
+* Toggle **Show conversation chime** $\to$ **ON**.
+
+### 3. Download Offline English TTS Voice Pack (Crucial for Remote Areas)
+In remote canyons and mountain passes of Arizona and New Mexico, cellular data will drop:
 1. Open phone **Settings $\to$ Accessibility** (or **System**) $\to$ **Text-to-speech output**.
 2. Tap the **gear icon** next to **Preferred engine** (Speech Services by Google).
-3. Tap **Install voice data $\to$ English (United States)**.
-4. Download a voice pack so your phone can speak without internet.
+3. Tap **Install voice data $\to$ English (United States)** and download a local offline voice pack.
 
 ---
 
@@ -67,23 +79,35 @@ In remote parts of Arizona and New Mexico, cellular service will drop. Complete 
 ./gradlew assembleDebug
 ```
 
-### Install Directly to Your Phone
+### Install Directly to Connected Phone
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Stream Live Logs
 ```bash
-adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationEngine:V
+adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationEngine:V NotificationReceiver:V
 ```
 
 ---
 
+## Key Features & In-App Controls
+* **Route Selector:** Dynamically parses Day 1–4 roadtrip routes plus local test drive routes (`Albany -> Nassau` and `Nassau -> Albany`).
+* **Audio Channel Routing:** Toggle between the car's **Media Channel** (stereo volume knob control) and **Navigation Channel** (car navigation voice channel).
+* **Pause vs. Duck:** Choose between standard audio ducking or completely pausing music during waypoint announcements.
+* **Continuous Volume Calibration:** Loops a 12-second speech sample to adjust and balance vehicle volume levels prior to driving.
+* **Pace Telemetry:** Real-time calculation of schedule pace (ahead/behind target arrival time) in the persistent notification and dashboard.
+
+---
+
 ## Architecture & Code Structure
-* **`app/src/main/assets/itinerary.json`**: Complete waypoint schedule, GPS coordinates, trigger radiuses, and speech announcements.
-* **`app/src/main/assets/test_itinerary.json`**: 19-mile local test drive route (Empire State Plaza to Nassau, NY).
-* **`CopilotService.kt`**: Unkillable `ForegroundService` with `location` foreground service type.
+* **`app/src/main/assets/itinerary.json`**: Complete 4-day waypoint schedule (PHX $\to$ ABQ), GPS coordinates, trigger radiuses, and announcements.
+* **`app/src/main/assets/test_itinerary.json`**: 19-mile local outbound test route (Albany to Nassau, NY).
+* **`app/src/main/assets/test_itinerary_return.json`**: 19-mile local return test route (Nassau to Albany, NY).
+* **`CopilotService.kt`**: Foreground service tracking GNSS location, milestone pacing, and notification state.
 * **`LocationTracker.kt`**: Event-driven GNSS listener and Haversine distance calculator.
-* **`AudioDuckEngine.kt`**: Transient audio focus management (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) and offline Text-to-Speech.
-* **`NotificationEngine.kt`**: High-priority notifications with `NotificationCompat.CarExtender` for Android Auto.
-* **`MainActivity.kt`**: Simple single-tap dashboard to select route and toggle the Co-Pilot service.
+* **`AudioDuckEngine.kt`**: Audio focus management, stream switching, and offline Text-to-Speech synthesis.
+* **`NotificationEngine.kt`**: Android Auto `MessagingStyle` heads-up notification cards with `CarExtender`.
+* **`NotificationReceiver.kt`**: Broadcast receiver handling Android Auto voice replies and dismiss actions.
+* **`MainActivity.kt`**: Single-tap dashboard to select route, calibrate volume, and start/stop the service.
+* **`model/ItineraryModels.kt`**: Data structures and schedule pace resolution.

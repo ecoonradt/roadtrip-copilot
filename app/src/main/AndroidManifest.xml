@@ -32,7 +32,12 @@
 
         <receiver
             android:name=".NotificationReceiver"
-            android:exported="false" />
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.roadtrip.copilot.ACTION_REPLY" />
+                <action android:name="com.roadtrip.copilot.ACTION_MARK_AS_READ" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".CopilotService"
