@@ -27,6 +27,8 @@ data class Day(
     val date: String,
     val timezone: String? = null,
     val title: String? = null,
+    val origin: String? = null,
+    val destination: String? = null,
     val checkpoints: List<Checkpoint> = emptyList()
 )
 

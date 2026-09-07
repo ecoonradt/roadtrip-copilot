@@ -29,6 +29,9 @@ class CopilotService : Service() {
         const val TAG = "CopilotService"
         const val ACTION_START = "com.roadtrip.copilot.ACTION_START"
         const val ACTION_STOP = "com.roadtrip.copilot.ACTION_STOP"
+        const val ACTION_TEST_ALERT = "com.roadtrip.copilot.ACTION_TEST_ALERT"
+        const val ACTION_TEST_AUDIO = "com.roadtrip.copilot.ACTION_TEST_AUDIO"
+        const val ACTION_CALIBRATE_AUDIO = "com.roadtrip.copilot.ACTION_CALIBRATE_AUDIO"
         const val EXTRA_ROUTE_FILE = "extra_route_file"
         const val EXTRA_DAY_NUMBER = "extra_day_number"
 
@@ -68,6 +71,7 @@ class CopilotService : Service() {
 
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
         audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", false)
+        audioDuckEngine.useMediaStreamChannel = prefs.getBoolean("pref_use_media_stream", true)
 
         locationTracker = LocationTracker(this) { evalResult ->
             handleEvaluationResult(evalResult)
@@ -78,12 +82,31 @@ class CopilotService : Service() {
         audioDuckEngine.pauseMusicInsteadOfDuck = pause
     }
 
+    fun setUseMediaStreamChannel(useMedia: Boolean) {
+        audioDuckEngine.useMediaStreamChannel = useMedia
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         Log.i(TAG, "onStartCommand action: $action")
 
         if (action == ACTION_STOP) {
             stopCopilot()
+            return START_NOT_STICKY
+        }
+
+        if (action == ACTION_TEST_ALERT) {
+            testAlert()
+            return START_NOT_STICKY
+        }
+
+        if (action == ACTION_TEST_AUDIO) {
+            testAudio()
+            return START_NOT_STICKY
+        }
+
+        if (action == ACTION_CALIBRATE_AUDIO) {
+            calibrateAudio()
             return START_NOT_STICKY
         }
 
@@ -168,15 +191,22 @@ class CopilotService : Service() {
     }
 
     fun testAudio() {
-        emitLog("Testing car audio ducking...")
-        audioDuckEngine.speakWithDucking("Roadtrip co-pilot audio test. Navigation guidance channel connected and ducking is operational.")
+        val channelName = if (audioDuckEngine.useMediaStreamChannel) "media stream (music channel)" else "navigation guidance channel"
+        emitLog("Testing car audio via $channelName...")
+        audioDuckEngine.speakWithDucking("Roadtrip co-pilot audio test. Connected via $channelName and ducking is operational.")
+    }
+
+    fun calibrateAudio() {
+        val channelName = if (audioDuckEngine.useMediaStreamChannel) "media stream" else "navigation guidance stream"
+        emitLog("Starting audio calibration speech loop on $channelName...")
+        audioDuckEngine.startContinuousCalibrationSpeech()
     }
 
     fun testAlert() {
-        emitLog("Posting test heads-up card and speaking...")
+        emitLog("Posting Android Auto heads-up card and speaking...")
         notificationEngine.postHeadsUpAlert(
-            "Test Checkpoint • 14 min ahead",
-            "Approaching Scenic Vista pull-off. Audio pause and heads-up banner test."
+            "Scenic Vista • 14 min ahead",
+            "Approaching Oak Creek Vista pull-off. Heads-up alert and audio test."
         )
         audioDuckEngine.speakWithDucking("Approaching Scenic Vista. You are currently fourteen minutes ahead of schedule.")
     }

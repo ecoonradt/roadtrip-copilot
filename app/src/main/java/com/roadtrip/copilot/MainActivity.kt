@@ -13,22 +13,35 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.gson.Gson
 import com.roadtrip.copilot.databinding.ActivityMainBinding
+import com.roadtrip.copilot.model.Itinerary
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+data class RouteOption(
+    val title: String,
+    val routeFile: String,
+    val dayNumber: Int
+) {
+    override fun toString(): String = title
+}
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private var copilotService: CopilotService? = null
     private var isBound = false
+    private var routeOptions: List<RouteOption> = emptyList()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -36,11 +49,44 @@ class MainActivity : AppCompatActivity() {
             copilotService = binder.getService()
             isBound = true
             copilotService?.setPauseMusicInsteadOfDuck(binding.switchPauseMusic.isChecked)
+            copilotService?.setUseMediaStreamChannel(binding.switchUseMediaChannel.isChecked)
+            handleTestAction(intent)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             copilotService = null
             isBound = false
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleTestAction(intent)
+    }
+
+    private fun handleTestAction(intent: Intent?) {
+        val action = intent?.getStringExtra("test_action") ?: return
+        intent.removeExtra("test_action")
+        when (action) {
+            "test_alert" -> {
+                if (copilotService != null) {
+                    copilotService?.testAlert()
+                } else {
+                    val sIntent = Intent(this, CopilotService::class.java).apply {
+                        setAction(CopilotService.ACTION_START)
+                        putExtra(CopilotService.EXTRA_ROUTE_FILE, "test_itinerary.json")
+                        putExtra(CopilotService.EXTRA_DAY_NUMBER, 1)
+                    }
+                    ContextCompat.startForegroundService(this, sIntent)
+                }
+            }
+            "test_audio" -> {
+                copilotService?.testAudio()
+            }
+            "calibrate_audio" -> {
+                copilotService?.calibrateAudio()
+            }
         }
     }
 
@@ -74,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         setupRouteSpinner()
         setupListeners()
         observeServiceState()
+        handleTestAction(intent)
     }
 
     override fun onStart() {
@@ -91,17 +138,69 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRouteSpinner() {
-        val routes = listOf(
-            "Nassau to Albany (Return Test Run)",
-            "Albany to Nassau (NY 19-mi Test Run)",
-            "Phoenix to Albuquerque (Day 1: PHX -> Flagstaff)",
-            "Phoenix to Albuquerque (Day 2: Flagstaff -> Chama)",
-            "Phoenix to Albuquerque (Day 3: Chama -> Taos)",
-            "Phoenix to Albuquerque (Day 4: Taos -> Santa Fe -> ABQ)"
-        )
-
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, routes)
+        routeOptions = loadRouteOptions()
+        val adapter = ArrayAdapter(this, R.layout.spinner_item, routeOptions)
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         binding.spinnerRoute.adapter = adapter
+
+        val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
+        val lastSelected = prefs.getInt("pref_selected_route_idx", 0)
+        if (lastSelected in routeOptions.indices) {
+            binding.spinnerRoute.setSelection(lastSelected)
+        }
+
+        binding.spinnerRoute.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                prefs.edit().putInt("pref_selected_route_idx", position).apply()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun loadRouteOptions(): List<RouteOption> {
+        val options = mutableListOf<RouteOption>()
+        val gson = Gson()
+
+        // 1. Return Test Run
+        try {
+            assets.open("test_itinerary_return.json").use { stream ->
+                val it = gson.fromJson(InputStreamReader(stream), Itinerary::class.java)
+                val title = if (!it.tripName.isNullOrBlank()) it.tripName else "Return Run: Nassau to Albany"
+                options.add(RouteOption(title, "test_itinerary_return.json", 1))
+            }
+        } catch (e: Exception) {
+            options.add(RouteOption("Return Run: Nassau to Albany", "test_itinerary_return.json", 1))
+        }
+
+        // 2. Test Run
+        try {
+            assets.open("test_itinerary.json").use { stream ->
+                val it = gson.fromJson(InputStreamReader(stream), Itinerary::class.java)
+                val title = if (!it.tripName.isNullOrBlank()) it.tripName else "Test Run: Albany to Nassau"
+                options.add(RouteOption(title, "test_itinerary.json", 1))
+            }
+        } catch (e: Exception) {
+            options.add(RouteOption("Test Run: Albany to Nassau", "test_itinerary.json", 1))
+        }
+
+        // 3. Phoenix to Albuquerque Days
+        try {
+            assets.open("itinerary.json").use { stream ->
+                val it = gson.fromJson(InputStreamReader(stream), Itinerary::class.java)
+                it.days?.forEach { day ->
+                    val title = if (!day.title.isNullOrBlank()) {
+                        "Day ${day.day}: ${day.title}"
+                    } else {
+                        "Day ${day.day}"
+                    }
+                    options.add(RouteOption(title, "itinerary.json", day.day))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to load itinerary.json", e)
+        }
+
+        return options
     }
 
     private fun setupListeners() {
@@ -117,11 +216,14 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.testAudio()
             } else {
-                // If service not started, start temporarily to speak test
+                val selectedIdx = binding.spinnerRoute.selectedItemPosition
+                val selectedRoute = routeOptions.getOrNull(selectedIdx)
+                val routeFile = selectedRoute?.routeFile ?: "test_itinerary.json"
+                val dayNum = selectedRoute?.dayNumber ?: 1
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
-                    putExtra(CopilotService.EXTRA_ROUTE_FILE, "test_itinerary.json")
-                    putExtra(CopilotService.EXTRA_DAY_NUMBER, 1)
+                    putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
+                    putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNum)
                 }
                 ContextCompat.startForegroundService(this, intent)
                 Toast.makeText(this, "Starting service for audio test...", Toast.LENGTH_SHORT).show()
@@ -132,17 +234,41 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.testAlert()
             } else {
+                val selectedIdx = binding.spinnerRoute.selectedItemPosition
+                val selectedRoute = routeOptions.getOrNull(selectedIdx)
+                val routeFile = selectedRoute?.routeFile ?: "test_itinerary.json"
+                val dayNum = selectedRoute?.dayNumber ?: 1
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
-                    putExtra(CopilotService.EXTRA_ROUTE_FILE, "test_itinerary.json")
-                    putExtra(CopilotService.EXTRA_DAY_NUMBER, 1)
+                    putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
+                    putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNum)
                 }
                 ContextCompat.startForegroundService(this, intent)
                 Toast.makeText(this, "Starting service for alert test...", Toast.LENGTH_SHORT).show()
             }
         }
 
+        binding.btnCalibrateAudio.setOnClickListener {
+            if (copilotService != null) {
+                copilotService?.calibrateAudio()
+            } else {
+                val intent = Intent(this, CopilotService::class.java).apply {
+                    action = CopilotService.ACTION_CALIBRATE_AUDIO
+                }
+                ContextCompat.startForegroundService(this, intent)
+                Toast.makeText(this, "Starting calibration speech...", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
+
+        binding.switchUseMediaChannel.isChecked = prefs.getBoolean("pref_use_media_stream", true)
+        binding.switchUseMediaChannel.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("pref_use_media_stream", isChecked).apply()
+            copilotService?.setUseMediaStreamChannel(isChecked)
+            appendLog("Audio channel: ${if (isChecked) "Media Stream (Matches car stereo volume knob)" else "Navigation Guidance Channel"}")
+        }
+
         binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
         binding.switchPauseMusic.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean("pref_pause_music", isChecked).apply()
@@ -174,40 +300,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun startCopilotService() {
         val selectedIdx = binding.spinnerRoute.selectedItemPosition
-        val routeFile: String
-        val dayNumber: Int
-
-        when (selectedIdx) {
-            0 -> {
-                routeFile = "test_itinerary_return.json"
-                dayNumber = 1
-            }
-            1 -> {
-                routeFile = "test_itinerary.json"
-                dayNumber = 1
-            }
-            2 -> {
-                routeFile = "itinerary.json"
-                dayNumber = 1
-            }
-            3 -> {
-                routeFile = "itinerary.json"
-                dayNumber = 2
-            }
-            4 -> {
-                routeFile = "itinerary.json"
-                dayNumber = 3
-            }
-            else -> {
-                routeFile = "itinerary.json"
-                dayNumber = 4
-            }
-        }
+        val selectedRoute = routeOptions.getOrNull(selectedIdx) ?: return
 
         val intent = Intent(this, CopilotService::class.java).apply {
             action = CopilotService.ACTION_START
-            putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
-            putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNumber)
+            putExtra(CopilotService.EXTRA_ROUTE_FILE, selectedRoute.routeFile)
+            putExtra(CopilotService.EXTRA_DAY_NUMBER, selectedRoute.dayNumber)
         }
 
         ContextCompat.startForegroundService(this, intent)

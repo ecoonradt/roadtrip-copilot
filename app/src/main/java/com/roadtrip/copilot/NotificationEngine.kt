@@ -10,12 +10,14 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.CarExtender
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
+import androidx.core.app.RemoteInput
 
 class NotificationEngine(private val context: Context) {
 
     companion object {
         const val CHANNEL_STATUS_ID = "copilot_status_channel"
-        const val CHANNEL_ALERT_ID = "copilot_alert_channel_v2"
+        const val CHANNEL_ALERT_ID = "copilot_alert_channel_v3"
         const val FOREGROUND_NOTIFICATION_ID = 1001
         private const val ALERT_NOTIFICATION_ID_BASE = 2000
     }
@@ -115,11 +117,74 @@ class NotificationEngine(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val dismissAction = NotificationCompat.Action.Builder(
+        // 1. Android Auto Reply Action (with RemoteInput for voice response)
+        val remoteInput = RemoteInput.Builder(NotificationReceiver.KEY_TEXT_REPLY)
+            .setLabel("Acknowledge")
+            .build()
+
+        val replyIntent = Intent(context, NotificationReceiver::class.java).apply {
+            action = NotificationReceiver.ACTION_REPLY
+            putExtra(NotificationReceiver.EXTRA_NOTIFICATION_ID, alertId)
+        }
+        val replyPendingIntent = PendingIntent.getBroadcast(
+            context,
+            alertId * 10 + 1,
+            replyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+        val replyAction = NotificationCompat.Action.Builder(
             R.drawable.ic_copilot,
             "Acknowledge",
-            pendingIntent
-        ).build()
+            replyPendingIntent
+        )
+            .addRemoteInput(remoteInput)
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+            .setShowsUserInterface(false)
+            .build()
+
+        // 2. Android Auto Dismiss / Mark-as-read Action
+        val markReadIntent = Intent(context, NotificationReceiver::class.java).apply {
+            action = NotificationReceiver.ACTION_MARK_AS_READ
+            putExtra(NotificationReceiver.EXTRA_NOTIFICATION_ID, alertId)
+        }
+        val markReadPendingIntent = PendingIntent.getBroadcast(
+            context,
+            alertId * 10 + 2,
+            markReadIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val markReadAction = NotificationCompat.Action.Builder(
+            R.drawable.ic_copilot,
+            "Dismiss",
+            markReadPendingIntent
+        )
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .setShowsUserInterface(false)
+            .build()
+
+        // 3. MessagingStyle structure required for Android Auto projection
+        val driverPerson = Person.Builder()
+            .setName("Driver")
+            .setKey("driver_user")
+            .build()
+
+        val copilotPerson = Person.Builder()
+            .setName("Roadtrip Co-Pilot")
+            .setKey("copilot_assistant")
+            .setBot(true)
+            .build()
+
+        val messagingStyle = NotificationCompat.MessagingStyle(driverPerson)
+            .setConversationTitle(title)
+            .addMessage(
+                NotificationCompat.MessagingStyle.Message(
+                    message,
+                    System.currentTimeMillis(),
+                    copilotPerson
+                )
+            )
 
         val carExtender = CarExtender()
             .setColor(context.getColor(R.color.accent))
@@ -127,17 +192,18 @@ class NotificationEngine(private val context: Context) {
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERT_ID)
             .setContentTitle(title)
             .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setStyle(messagingStyle)
             .setSmallIcon(R.drawable.ic_copilot)
             .setContentIntent(pendingIntent)
-            .addAction(dismissAction)
+            .addAction(replyAction)
+            .addAction(markReadAction)
             .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setVibrate(longArrayOf(0, 350, 200, 350))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setTimeoutAfter(12000) // Tucks away after 12 seconds into the drawer
+            .setTimeoutAfter(15000) // Tucks away after 15 seconds into the AA drawer
             .extend(carExtender)
             .build()
 

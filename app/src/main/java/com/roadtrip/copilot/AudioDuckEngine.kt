@@ -71,10 +71,12 @@ class AudioDuckEngine(
     }
 
     var pauseMusicInsteadOfDuck: Boolean = false
+    var useMediaStreamChannel: Boolean = true
 
     /**
      * Ducks active media (like Google Maps) or pauses it, speaks the provided text through
-     * the navigation guidance audio channel, and immediately restores music volume on completion.
+     * the selected audio channel (Media Stream by default, or Navigation Guidance),
+     * and immediately restores music volume on completion.
      */
     fun speakWithDucking(text: CharSequence) {
         if (!isTtsReady || text.isBlank()) {
@@ -90,13 +92,20 @@ class AudioDuckEngine(
 
         val utteranceId = UUID.randomUUID().toString()
         val params = Bundle().apply {
-            // Note: Omitting KEY_PARAM_STREAM ensures AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
-            // is not overridden by a legacy stream type.
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+            if (useMediaStreamChannel) {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+            }
+        }
+
+        val speechUsage = if (useMediaStreamChannel) {
+            AudioAttributes.USAGE_MEDIA
+        } else {
+            AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
         }
 
         val speechAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+            .setUsage(speechUsage)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
@@ -104,9 +113,23 @@ class AudioDuckEngine(
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
 
+    /**
+     * Speaks a 12-second continuous phrase allowing the driver to adjust the car volume knob in real time.
+     */
+    fun startContinuousCalibrationSpeech() {
+        val calibrationText = "Roadtrip co-pilot audio calibration active. Adjust your car volume knob or steering wheel controls now to set your preferred listening volume. Once set, notifications will match this level."
+        speakWithDucking(calibrationText)
+    }
+
     private fun requestDuckingFocus(): Boolean {
+        val focusUsage = if (useMediaStreamChannel) {
+            AudioAttributes.USAGE_MEDIA
+        } else {
+            AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+        }
+
         val audioAttributes = AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+            .setUsage(focusUsage)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
