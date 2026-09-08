@@ -129,3 +129,4 @@ You can test the in-car Android Auto UI on your computer using Google's Desktop 
 * **`NotificationReceiver.kt`**: Broadcast receiver handling Android Auto voice replies and dismiss actions.
 * **`MainActivity.kt`**: Phone dashboard to select route, calibrate volume, and start/stop the service.
 * **`model/ItineraryModels.kt`**: Data structures, target epoch parsing, and schedule pace formatting.
+* **`docs/route_builder_research_and_architecture.md`**: Comprehensive architectural proposal and research on building an intelligent Route Builder (deterministic physics + AI copywriting, timeline cascade engine, and phone ingestion).

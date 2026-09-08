@@ -66,6 +66,7 @@ roadtrip-copilot/
 ├── itinerary.json             # Core 4-day itinerary (PHX -> ABQ)
 ├── test_itinerary.json        # Upstate NY 19-mile outbound test route
 ├── test_itinerary_return.json # Upstate NY return test route (Nassau -> Albany)
+├── docs/                      # Architectural specs & research (Route Builder)
 ├── legacy/                    # Archived prototypes (copilot_engine.py)
 ├── scripts/                   # Environment setup scripts
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
