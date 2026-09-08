@@ -43,6 +43,133 @@ class CopilotService : Service() {
 
         private val _eventLogFlow = MutableSharedFlow<String>(replay = 5)
         val eventLogFlow = _eventLogFlow.asSharedFlow()
+
+        private val _activeRouteTitle = MutableStateFlow("Day 1: Phoenix to Sedona & Flagstaff")
+        val activeRouteTitle = _activeRouteTitle.asStateFlow()
+
+        private val _activeRouteFile = MutableStateFlow("itinerary.json")
+        val activeRouteFile = _activeRouteFile.asStateFlow()
+
+        private val _activeDayNumber = MutableStateFlow(1)
+        val activeDayNumber = _activeDayNumber.asStateFlow()
+
+        private val _activeCheckpoints = MutableStateFlow<List<com.roadtrip.copilot.model.Checkpoint>>(emptyList())
+        val activeCheckpoints = _activeCheckpoints.asStateFlow()
+
+        const val PREFS_NAME = "copilot_prefs"
+        const val PREF_ROUTE_FILE = "pref_route_file"
+        const val PREF_DAY_NUMBER = "pref_day_number"
+
+        private var instance: CopilotService? = null
+        fun getInstance(): CopilotService? = instance
+
+        private val companionScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+        fun loadInitialRoute(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val routeFile = prefs.getString(PREF_ROUTE_FILE, "itinerary.json") ?: "itinerary.json"
+            val dayNum = prefs.getInt(PREF_DAY_NUMBER, 1)
+            setSelectedRoute(context, routeFile, dayNum, autoRestartIfRunning = false)
+        }
+
+        fun setSelectedRoute(
+            context: Context,
+            routeFile: String,
+            dayNumber: Int,
+            autoRestartIfRunning: Boolean = false
+        ) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString(PREF_ROUTE_FILE, routeFile)
+                .putInt(PREF_DAY_NUMBER, dayNumber)
+                .apply()
+
+            _activeRouteFile.value = routeFile
+            _activeDayNumber.value = dayNumber
+
+            companionScope.launch {
+                try {
+                    val itinerary = context.assets.open(routeFile).use { stream ->
+                        InputStreamReader(stream).use { reader ->
+                            Gson().fromJson(reader, Itinerary::class.java)
+                        }
+                    }
+                    val startTime = System.currentTimeMillis()
+                    val checkpoints = itinerary.resolveCheckpointsForDay(dayNumber, startTime)
+                    val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
+                    val title = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
+
+                    withContext(Dispatchers.Main) {
+                        _activeRouteTitle.value = title
+                        _activeCheckpoints.value = checkpoints
+
+                        val service = instance
+                        if (_isRunning.value && service != null && autoRestartIfRunning) {
+                            service.reloadCheckpoints(checkpoints, startTime)
+                        } else if (!_isRunning.value) {
+                            val firstCp = checkpoints.firstOrNull()
+                            _telemetryFlow.value = EvaluationResult(
+                                currentLat = 0.0,
+                                currentLng = 0.0,
+                                speedMph = 0.0,
+                                alerts = emptyList(),
+                                nextCheckpoint = firstCp,
+                                distanceToNextMiles = null,
+                                scheduleDelta = com.roadtrip.copilot.model.ScheduleDelta(0, "Awaiting Departure", true)
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error loading route $routeFile: ${e.message}", e)
+                }
+            }
+        }
+
+        fun startRoute(context: Context, routeFile: String? = null, dayNumber: Int? = null) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val file = routeFile ?: prefs.getString(PREF_ROUTE_FILE, "itinerary.json") ?: "itinerary.json"
+            val day = dayNumber ?: prefs.getInt(PREF_DAY_NUMBER, 1)
+
+            prefs.edit()
+                .putString(PREF_ROUTE_FILE, file)
+                .putInt(PREF_DAY_NUMBER, day)
+                .apply()
+
+            val intent = Intent(context, CopilotService::class.java).apply {
+                action = ACTION_START
+                putExtra(EXTRA_ROUTE_FILE, file)
+                putExtra(EXTRA_DAY_NUMBER, day)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun stopRoute(context: Context) {
+            val intent = Intent(context, CopilotService::class.java).apply {
+                action = ACTION_STOP
+            }
+            context.startService(intent)
+        }
+
+        fun testAlert(context: Context) {
+            val intent = Intent(context, CopilotService::class.java).apply {
+                action = ACTION_TEST_ALERT
+            }
+            context.startService(intent)
+        }
+
+        fun testAudio(context: Context) {
+            val intent = Intent(context, CopilotService::class.java).apply {
+                action = ACTION_TEST_AUDIO
+            }
+            context.startService(intent)
+        }
+
+        fun calibrateAudio(context: Context) {
+            val intent = Intent(context, CopilotService::class.java).apply {
+                action = ACTION_CALIBRATE_AUDIO
+            }
+            context.startService(intent)
+        }
     }
 
     private val binder = LocalBinder()
@@ -60,6 +187,7 @@ class CopilotService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Log.i(TAG, "Creating CopilotService...")
 
         notificationEngine = NotificationEngine(this)
@@ -157,6 +285,12 @@ class CopilotService : Service() {
                 locationTracker.setCheckpoints(checkpoints, startTime)
                 locationTracker.startTracking()
 
+                _activeRouteFile.value = routeFile
+                _activeDayNumber.value = dayNumber
+                val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
+                _activeRouteTitle.value = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
+                _activeCheckpoints.value = checkpoints
+
                 emitLog("Loaded ${checkpoints.size} waypoints for ${itinerary.tripName} (Day $dayNumber).")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load itinerary $routeFile: ${e.message}", e)
@@ -216,9 +350,33 @@ class CopilotService : Service() {
         audioDuckEngine.speakWithDucking("Approaching Scenic Vista. Roadtrip co-pilot alert and audio ducking operational.")
     }
 
+    fun reloadCheckpoints(checkpoints: List<com.roadtrip.copilot.model.Checkpoint>, startTime: Long) {
+        locationTracker.setCheckpoints(checkpoints, startTime)
+        val firstCp = checkpoints.firstOrNull()
+        val updatedNotification = notificationEngine.buildForegroundNotification(
+            nextCheckpoint = firstCp?.name ?: "All Waypoints Passed",
+            distanceMiles = null,
+            targetTime = firstCp?.formattedTargetTime,
+            paceStatus = "Standby"
+        )
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+        notificationManager.notify(NotificationEngine.FOREGROUND_NOTIFICATION_ID, updatedNotification)
+        emitLog("Reloaded ${checkpoints.size} waypoints for active route.")
+    }
+
     private fun stopCopilot() {
         locationTracker.stopTracking()
         _isRunning.value = false
+        val firstCp = _activeCheckpoints.value.firstOrNull()
+        _telemetryFlow.value = EvaluationResult(
+            currentLat = 0.0,
+            currentLng = 0.0,
+            speedMph = 0.0,
+            alerts = emptyList(),
+            nextCheckpoint = firstCp,
+            distanceToNextMiles = null,
+            scheduleDelta = com.roadtrip.copilot.model.ScheduleDelta(0, "Awaiting Departure", true)
+        )
         emitLog("Co-Pilot service stopped.")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -232,10 +390,21 @@ class CopilotService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         locationTracker.stopTracking()
         audioDuckEngine.shutdown()
         serviceScope.cancel()
         _isRunning.value = false
+        val firstCp = _activeCheckpoints.value.firstOrNull()
+        _telemetryFlow.value = EvaluationResult(
+            currentLat = 0.0,
+            currentLng = 0.0,
+            speedMph = 0.0,
+            alerts = emptyList(),
+            nextCheckpoint = firstCp,
+            distanceToNextMiles = null,
+            scheduleDelta = com.roadtrip.copilot.model.ScheduleDelta(0, "Awaiting Departure", true)
+        )
         Log.i(TAG, "CopilotService destroyed.")
     }
 }

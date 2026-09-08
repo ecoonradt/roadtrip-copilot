@@ -144,6 +144,9 @@ data class ScheduleDelta(
     }
 
     fun formatForSpeech(): String {
+        if (statusText == "Awaiting Departure" || statusText == "Trip Date Passed") {
+            return ""
+        }
         val absMinutes = kotlin.math.abs(deltaMinutes)
         if (absMinutes <= 1) {
             return " You are on schedule."

@@ -40,16 +40,36 @@ class LocationTracker(
         val start = initialStartTimeMillis ?: System.currentTimeMillis()
         startTimeMillis = start
 
-        // Initial pace: for fixed itinerary before any checkpoint is visited,
-        // evaluate against the first milestone if available.
-        val firstCp = checkpoints.firstOrNull()
-        lastVisitedPace = if (firstCp?.targetEpochMillis != null && !firstCp.targetTime.isNullOrBlank()) {
-            calculateScheduleDelta(firstCp, start) ?: ScheduleDelta(0, "On schedule", true)
-        } else {
-            ScheduleDelta(0, "On schedule", true)
-        }
+        // Initial pace is always Awaiting Departure before departure point is reached
+        lastVisitedPace = ScheduleDelta(0, "Awaiting Departure", true)
 
         Log.i(TAG, "Loaded ${checkpoints.size} checkpoints into LocationTracker. Initial pace: ${lastVisitedPace.statusText}")
+
+        // Immediately evaluate against last known position so UI doesn't retain previous route data
+        val lastKnown = try {
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        } catch (e: SecurityException) {
+            null
+        }
+
+        if (lastKnown != null) {
+            val speedMph = if (lastKnown.hasSpeed()) lastKnown.speed * 2.23694 else 0.0
+            evaluate(lastKnown.latitude, lastKnown.longitude, speedMph)
+        } else {
+            val firstCp = checkpoints.firstOrNull()
+            onEvaluationResult(
+                EvaluationResult(
+                    currentLat = 0.0,
+                    currentLng = 0.0,
+                    speedMph = 0.0,
+                    alerts = emptyList(),
+                    nextCheckpoint = firstCp,
+                    distanceToNextMiles = null,
+                    scheduleDelta = lastVisitedPace
+                )
+            )
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -96,67 +116,85 @@ class LocationTracker(
     }
 
     fun evaluate(currentLat: Double, currentLng: Double, speedMph: Double, evalTimeMillis: Long = System.currentTimeMillis()) {
-        val newAlerts = mutableListOf<TriggeredAlert>()
-        var closestCheckpoint: Checkpoint? = null
-        var closestDist = Double.MAX_VALUE
-
-        for (cp in activeCheckpoints) {
-            val dist = haversineMiles(currentLat, currentLng, cp.lat, cp.lng)
-
-            // Check if within geofence trigger radius
-            if (dist <= cp.triggerRadiusMiles && cp.id !in visitedCheckpoints) {
-                visitedCheckpoints.add(cp.id)
-                val notif = cp.notification
-                val delta = calculateScheduleDelta(cp, evalTimeMillis)
-                if (delta != null) {
-                    lastVisitedPace = delta
-                }
-
-                val paceSpeech = delta?.formatForSpeech() ?: ""
-
-                val titleText = if (delta != null && delta.statusText.isNotBlank()) {
-                    "${notif?.title ?: cp.name} • ${delta.statusText}"
-                } else {
-                    notif?.title ?: cp.name
-                }
-
-                val msgText = if (delta != null && delta.statusText.isNotBlank()) {
-                    "${notif?.message ?: "Approaching ${cp.name}"}\nPace: ${delta.statusText}"
-                } else {
-                    notif?.message ?: "Approaching ${cp.name}"
-                }
-
-                val speechText = (notif?.speech ?: "Approaching ${cp.name}") + paceSpeech
-
-                val alert = TriggeredAlert(
-                    id = cp.id,
-                    name = cp.name,
-                    distanceMiles = dist,
-                    title = titleText,
-                    message = msgText,
-                    speech = speechText
+        if (currentLat == 0.0 && currentLng == 0.0) {
+            val firstUnvisited = activeCheckpoints.firstOrNull { it.id !in visitedCheckpoints }
+            onEvaluationResult(
+                EvaluationResult(
+                    currentLat = 0.0,
+                    currentLng = 0.0,
+                    speedMph = 0.0,
+                    alerts = emptyList(),
+                    nextCheckpoint = firstUnvisited,
+                    distanceToNextMiles = null,
+                    scheduleDelta = lastVisitedPace
                 )
-                newAlerts.add(alert)
-                Log.i(TAG, "Geofence triggered for: ${cp.name} (dist: %.2f mi, pace: $paceSpeech)".format(dist))
-            }
+            )
+            return
+        }
 
-            // Track upcoming waypoint (not yet passed)
-            if (cp.id !in visitedCheckpoints && dist < closestDist) {
-                closestDist = dist
-                closestCheckpoint = cp
+        val newAlerts = mutableListOf<TriggeredAlert>()
+
+        // 1. Process geofences sequentially along the itinerary
+        for (i in activeCheckpoints.indices) {
+            val cp = activeCheckpoints[i]
+            if (cp.id !in visitedCheckpoints) {
+                val dist = haversineMiles(currentLat, currentLng, cp.lat, cp.lng)
+
+                // Only trigger if entering checkpoint trigger radius
+                if (dist <= cp.triggerRadiusMiles) {
+                    // Mark this checkpoint and all previous checkpoints in the route as visited
+                    for (prevIdx in 0..i) {
+                        visitedCheckpoints.add(activeCheckpoints[prevIdx].id)
+                    }
+
+                    val notif = cp.notification
+                    val delta = calculateScheduleDelta(cp, evalTimeMillis)
+                    if (delta != null) {
+                        lastVisitedPace = delta
+                    }
+
+                    val paceSpeech = delta?.formatForSpeech() ?: ""
+
+                    val titleText = if (delta != null && delta.statusText.isNotBlank()) {
+                        "${notif?.title ?: cp.name} • ${delta.statusText}"
+                    } else {
+                        notif?.title ?: cp.name
+                    }
+
+                    val msgText = if (delta != null && delta.statusText.isNotBlank()) {
+                        "${notif?.message ?: "Approaching ${cp.name}"}\nPace: ${delta.statusText}"
+                    } else {
+                        notif?.message ?: "Approaching ${cp.name}"
+                    }
+
+                    val speechText = (notif?.speech ?: "Approaching ${cp.name}") + paceSpeech
+
+                    val alert = TriggeredAlert(
+                        id = cp.id,
+                        name = cp.name,
+                        distanceMiles = dist,
+                        title = titleText,
+                        message = msgText,
+                        speech = speechText
+                    )
+                    newAlerts.add(alert)
+                    Log.i(TAG, "Geofence triggered for: ${cp.name} (dist: %.2f mi, pace: $paceSpeech)".format(dist))
+                }
             }
         }
 
-        // The ongoing schedule delta reflects the confirmed pace from the last visited milestone
-        // (or route start), avoiding the false impression of being ahead/behind based on
-        // remaining transit time to an unreached waypoint.
+        // 2. Determine next upcoming milestone: strictly the FIRST unvisited milestone in order.
+        // Never jump ahead to a distant milestone just because Euclidean distance happens to be slightly closer!
+        val nextCheckpoint = activeCheckpoints.firstOrNull { it.id !in visitedCheckpoints }
+        val distToNext = nextCheckpoint?.let { haversineMiles(currentLat, currentLng, it.lat, it.lng) }
+
         val result = EvaluationResult(
             currentLat = currentLat,
             currentLng = currentLng,
             speedMph = speedMph,
             alerts = newAlerts,
-            nextCheckpoint = closestCheckpoint,
-            distanceToNextMiles = if (closestCheckpoint != null) closestDist else null,
+            nextCheckpoint = nextCheckpoint,
+            distanceToNextMiles = distToNext,
             scheduleDelta = lastVisitedPace
         )
 
@@ -170,6 +208,15 @@ class LocationTracker(
         val targetEpoch = checkpoint.targetEpochMillis
         if (targetEpoch != null) {
             val deltaMillis = targetEpoch - currentTimeMillis
+            val deltaMinutes = (deltaMillis / 60000L).toInt()
+
+            // If scheduled more than 24 hours in the future (e.g. testing in September for Oct 9 trip)
+            if (deltaMinutes > 1440) {
+                return ScheduleDelta(deltaMinutes, "Awaiting Departure", true)
+            }
+            if (deltaMinutes < -1440) {
+                return ScheduleDelta(deltaMinutes, "Trip Date Passed", false)
+            }
             return ScheduleDelta.fromDeltaMillis(deltaMillis)
         }
 

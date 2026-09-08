@@ -86,11 +86,18 @@ roadtrip-copilot/
             │       └── automotive_app_desc.xml
             └── java/com/roadtrip/copilot/
                 ├── MainActivity.kt        # Start/stop dashboard, route picker & volume calibration
-                ├── CopilotService.kt      # Foreground service lifecycle & pace telemetry
-                ├── LocationTracker.kt     # Event-driven GPS & Haversine proximity
+                ├── CopilotService.kt      # Foreground service lifecycle, pace telemetry & route persistence
+                ├── LocationTracker.kt     # Event-driven GPS, sequential progression & pace resolution
                 ├── AudioDuckEngine.kt     # Audio focus, stream routing & TTS manager
                 ├── NotificationEngine.kt  # Android Auto MessagingStyle heads-up cards
                 ├── NotificationReceiver.kt# Broadcast receiver for AA voice reply & dismiss
+                ├── car/                   # Android Auto In-Car UI (Android for Cars App Library)
+                │   ├── CopilotCarAppService.kt   # Automotive app service & host validator
+                │   ├── CopilotCarSession.kt      # Automotive session manager
+                │   ├── CopilotDashboardScreen.kt # PaneTemplate car dashboard with live telemetry
+                │   ├── WaypointListScreen.kt     # ListTemplate for chronological milestones
+                │   ├── RouteListScreen.kt        # ListTemplate for selecting routes & legs
+                │   └── SettingsScreen.kt         # ListTemplate for audio ducking toggles & calibration
                 └── model/
                     └── ItineraryModels.kt # Itinerary data classes & pace resolution
 ```

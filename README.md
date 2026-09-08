@@ -92,6 +92,7 @@ adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationE
 ---
 
 ## Key Features & In-App Controls
+* **Android Auto In-Car UI:** Native car display dashboard built with Android for Cars App Library (`androidx.car.app`), featuring a live telemetry dashboard, chronological waypoints view, route switcher, and in-car settings toggles.
 * **Route Selector:** Dynamically parses Day 1–4 roadtrip routes plus local test drive routes (`Albany -> Nassau` and `Nassau -> Albany`).
 * **Audio Channel Routing:** Toggle between the car's **Media Channel** (stereo volume knob control) and **Navigation Channel** (car navigation voice channel).
 * **Pause vs. Duck:** Choose between standard audio ducking or completely pausing music during waypoint announcements.
@@ -100,14 +101,31 @@ adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationE
 
 ---
 
+## Desktop Head Unit (DHU) Emulation
+You can test the in-car Android Auto UI on your computer using Google's Desktop Head Unit emulator:
+1. Ensure your phone is connected over ADB (`adb devices`) with the Android Auto Head Unit Server started (under Android Auto Developer Settings).
+2. Run the helper script:
+   ```bash
+   ./scripts/run_dhu.sh
+   ```
+3. A 1280x720 automotive display will appear showing Android Auto. Open **Roadtrip Co-Pilot** from the car app launcher to interact with the in-car UI.
+
+---
+
 ## Architecture & Code Structure
 * **`app/src/main/assets/itinerary.json`**: Complete 4-day waypoint schedule (PHX $\to$ ABQ), GPS coordinates, trigger radiuses, and announcements.
 * **`app/src/main/assets/test_itinerary.json`**: 19-mile local outbound test route (Albany to Nassau, NY).
 * **`app/src/main/assets/test_itinerary_return.json`**: 19-mile local return test route (Nassau to Albany, NY).
-* **`CopilotService.kt`**: Foreground service tracking GNSS location, milestone pacing, and notification state.
-* **`LocationTracker.kt`**: Event-driven GNSS listener and Haversine distance calculator.
+* **`car/CopilotCarAppService.kt`**: Automotive app service granting host validation.
+* **`car/CopilotCarSession.kt`**: Automotive session manager starting the dashboard screen.
+* **`car/CopilotDashboardScreen.kt`**: Main `PaneTemplate` car dashboard with telemetry, pace, and action buttons.
+* **`car/WaypointListScreen.kt`**: `ListTemplate` displaying chronological itinerary milestones with passed vs upcoming status.
+* **`car/RouteListScreen.kt`**: `ListTemplate` allowing in-car route switching without unwanted auto-start.
+* **`car/SettingsScreen.kt`**: `ListTemplate` offering in-car audio toggles, volume calibration, and test triggers.
+* **`CopilotService.kt`**: Foreground service tracking GNSS location, milestone pacing, notification state, and centralized route selection.
+* **`LocationTracker.kt`**: Event-driven GNSS listener, sequential waypoint progression, and schedule pace guards.
 * **`AudioDuckEngine.kt`**: Audio focus management, stream switching, and offline Text-to-Speech synthesis.
 * **`NotificationEngine.kt`**: Android Auto `MessagingStyle` heads-up notification cards with `CarExtender`.
 * **`NotificationReceiver.kt`**: Broadcast receiver handling Android Auto voice replies and dismiss actions.
-* **`MainActivity.kt`**: Single-tap dashboard to select route, calibrate volume, and start/stop the service.
-* **`model/ItineraryModels.kt`**: Data structures and schedule pace resolution.
+* **`MainActivity.kt`**: Phone dashboard to select route, calibrate volume, and start/stop the service.
+* **`model/ItineraryModels.kt`**: Data structures, target epoch parsing, and schedule pace formatting.
