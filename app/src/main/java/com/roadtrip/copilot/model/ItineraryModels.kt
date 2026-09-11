@@ -20,6 +20,9 @@ data class Checkpoint(
     @SerializedName("offset_minutes_from_start")
     val offsetMinutesFromStart: Int? = null,
     val notification: CheckpointNotification? = null,
+    val type: String? = null,
+    @SerializedName("dwell_minutes")
+    val dwellMinutes: Int? = null,
     var targetEpochMillis: Long? = null,
     var formattedTargetTime: String? = null
 )

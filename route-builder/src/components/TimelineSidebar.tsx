@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Sparkles,
   Loader2,
+  Share2,
 } from 'lucide-react';
 
 import type { Waypoint, RouteResponse } from '../types/routing';
@@ -28,6 +29,7 @@ import {
 import { generateGoogleMapsUrls } from '../engine/googleMapsUrl';
 import type { ScheduledStop } from '../engine/types';
 import { AiAlertModal } from './AiAlertModal';
+import { ExportModal } from './ExportModal';
 import { generateBatchCopilotAlerts } from '../services/api';
 
 
@@ -65,6 +67,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   const [selectedWaypointForAi, setSelectedWaypointForAi] = useState<Waypoint | null>(null);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
 
   // Extract pairwise driving durations and distances from OSRM route if available
@@ -265,6 +268,16 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
             <span>{cascadeResult.timezonesCrossed.join(' • ') || 'America/Phoenix'}</span>
           </div>
         </div>
+
+        {/* 1-Click Export & Phone Sync Button */}
+        <button
+          onClick={() => setIsExportModalOpen(true)}
+          className="w-full mt-2.5 py-2 px-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-md shadow-sky-950/40 transition-all cursor-pointer"
+          title="Open Export, 1-Click ADB Push & Wi-Fi Handoff Modal"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          <span>Export &amp; Sync to Phone</span>
+        </button>
       </div>
 
       {/* Timeline Controls (Base Date, Departure Time / Catch-up Mode) */}
@@ -775,6 +788,18 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
         waypoint={selectedWaypointForAi}
         onClose={() => setSelectedWaypointForAi(null)}
         onApply={handleApplyAiAlert}
+      />
+
+      {/* Export & Phone Handoff Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        waypoints={waypoints}
+        scheduledStops={cascadeResult.stops}
+        tripName="Roadtrip Co-Pilot Itinerary"
+        baseDate={baseDate}
+        departureTime={departureTime}
+        googleMapsRoute={googleMapsRoute}
       />
     </aside>
 

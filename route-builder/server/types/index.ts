@@ -76,4 +76,5 @@ export interface OsrmRawResponse {
 }
 
 export * from './ai.js';
+export * from './device.js';
 

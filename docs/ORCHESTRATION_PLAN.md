@@ -146,7 +146,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
     ```
   - **Stage 2: Code Review Subagent:** Confirms prompt adheres to co-pilot voice rules and error handling falls back gracefully if `agy` is unavailable.
 
-- [ ] **Phase 2D: Export, 1-Click ADB Push & Phone Handoff**
+- [x] **Phase 2D: Export, 1-Click ADB Push & Phone Handoff**
   - **Component Boundary:** `route-builder/src/engine/export.ts`, `route-builder/server/device.ts`
   - **Deliverables:** JSON exporter, `POST /api/device/push`, local Wi-Fi QR code endpoint.
   - **Scope:**
