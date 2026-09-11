@@ -127,7 +127,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
     ```
   - **Stage 2: Code Review Subagent:** Confirms math formulas match Section 4.2 of the architecture doc and URL encoding is standard.
 
-- [ ] **Phase 2C: AI Co-Pilot Enrichment via `agy` CLI & Cloud Fallback**
+- [x] **Phase 2C: AI Co-Pilot Enrichment via `agy` CLI & Cloud Fallback**
   - **Component Boundary:** `route-builder/server/ai.ts`, `route-builder/src/components/AiAlertModal.tsx`
   - **Deliverables:** AI endpoint, preview modal, unit/mock tests.
   - **Scope:**

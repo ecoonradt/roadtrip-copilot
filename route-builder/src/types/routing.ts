@@ -31,7 +31,10 @@ export interface Waypoint {
   trigger_radius_miles: number;
   notification?: WaypointNotification;
   timezone?: string;
+  approachHighway?: string;
+  notes?: string;
 }
+
 
 export interface RouteLeg {
   distanceMeters: number;

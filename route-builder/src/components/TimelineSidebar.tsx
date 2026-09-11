@@ -15,14 +15,21 @@ import {
   AlertCircle,
   Timer,
   ChevronRight,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
+
 import type { Waypoint, RouteResponse } from '../types/routing';
+import type { WaypointContext, CopilotAlert } from '../types/ai';
 import {
   calculateTimelineCascade,
   calculateBackwardSchedule,
 } from '../engine/cascade';
 import { generateGoogleMapsUrls } from '../engine/googleMapsUrl';
 import type { ScheduledStop } from '../engine/types';
+import { AiAlertModal } from './AiAlertModal';
+import { generateBatchCopilotAlerts } from '../services/api';
+
 
 interface TimelineSidebarProps {
   waypoints: Waypoint[];
@@ -53,6 +60,12 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
   // Copy feedback state for each leg URL
   const [copiedLegIndex, setCopiedLegIndex] = useState<number | null>(null);
+
+  // AI Co-Pilot Alert Modal & Batch state
+  const [selectedWaypointForAi, setSelectedWaypointForAi] = useState<Waypoint | null>(null);
+  const [isBatchGenerating, setIsBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+
 
   // Extract pairwise driving durations and distances from OSRM route if available
   const { driveDurationsSeconds, driveDistancesMiles } = useMemo(() => {
@@ -158,6 +171,60 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     if (hours === 0) return `${minutes}m`;
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
   };
+
+  const handleApplyAiAlert = (waypointId: string, alert: CopilotAlert) => {
+    onUpdateWaypoint(waypointId, {
+      notification: {
+        title: alert.title,
+        message: alert.message,
+        speech: alert.speech,
+      },
+      trigger_radius_miles: alert.recommended_trigger_radius_miles,
+    });
+  };
+
+  const handleBatchGenerateAll = async () => {
+    if (waypoints.length === 0 || isBatchGenerating) return;
+
+    setIsBatchGenerating(true);
+    setBatchProgress(`Generating alerts for ${waypoints.length} stops...`);
+
+    try {
+      const contexts: WaypointContext[] = cascadeResult.stops.map((stop) => {
+        const original = waypoints.find((w) => w.id === stop.id);
+        return {
+          id: stop.id,
+          name: stop.name,
+          type: stop.type,
+          targetTime: stop.arrivalTime,
+          formattedTime: stop.arrivalShortTime,
+          approachHighway: original?.approachHighway,
+          notes: original?.notes,
+        };
+      });
+
+      const batchResult = await generateBatchCopilotAlerts(contexts);
+      for (const [wpId, alert] of Object.entries(batchResult.alerts)) {
+        onUpdateWaypoint(wpId, {
+          notification: {
+            title: alert.title,
+            message: alert.message,
+            speech: alert.speech,
+          },
+          trigger_radius_miles: alert.recommended_trigger_radius_miles,
+        });
+      }
+      setBatchProgress(`Generated ${Object.keys(batchResult.alerts).length} alerts!`);
+      setTimeout(() => setBatchProgress(null), 3000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Batch generation failed';
+      setBatchProgress(`Error: ${msg}`);
+      setTimeout(() => setBatchProgress(null), 4000);
+    } finally {
+      setIsBatchGenerating(false);
+    }
+  };
+
 
   return (
     <aside className="w-96 h-full flex flex-col bg-slate-900 border-r border-slate-800 text-slate-100 shrink-0 z-10 shadow-xl select-none">
@@ -415,34 +482,62 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
       </div>
 
       {/* Waypoints Section Header */}
-      <div className="px-4 py-2 flex items-center justify-between border-b border-slate-800 bg-slate-900/60">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            Waypoints & Cascade
-          </span>
-          <span className="text-xs px-1.5 py-0.2 rounded-full bg-slate-800 text-sky-400 font-mono font-bold">
-            {waypoints.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onResetSample}
-            className="p-1 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded transition-colors"
-            title="Reset sample itinerary"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-          {waypoints.length > 0 && (
+      <div className="px-4 py-2 border-b border-slate-800 bg-slate-900/60 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              Waypoints & Cascade
+            </span>
+            <span className="text-xs px-1.5 py-0.2 rounded-full bg-slate-800 text-sky-400 font-mono font-bold">
+              {waypoints.length}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
             <button
-              onClick={onClearAll}
-              className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
-              title="Clear all waypoints"
+              onClick={onResetSample}
+              className="p-1 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded transition-colors"
+              title="Reset sample itinerary"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
-          )}
+            {waypoints.length > 0 && (
+              <button
+                onClick={onClearAll}
+                className="p-1 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
+                title="Clear all waypoints"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Batch Generate Co-Pilot Alerts Button */}
+        {waypoints.length > 0 && (
+          <div className="flex flex-col gap-1 pt-1 border-t border-slate-800/80">
+            <button
+              onClick={handleBatchGenerateAll}
+              disabled={isBatchGenerating}
+              className="w-full px-2.5 py-1.5 bg-gradient-to-r from-sky-600/30 to-indigo-600/30 hover:from-sky-600/50 hover:to-indigo-600/50 border border-sky-500/40 text-sky-200 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
+              title="Batch generate AI Co-Pilot alerts for all waypoints today"
+            >
+              {isBatchGenerating ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              <span>{isBatchGenerating ? 'Generating Day Alerts...' : 'Batch Generate All Day Alerts'}</span>
+            </button>
+
+            {batchProgress && (
+              <span className="text-[10px] text-sky-300 font-mono text-center animate-pulse">
+                {batchProgress}
+              </span>
+            )}
+          </div>
+        )}
       </div>
+
 
       {/* Scheduled Waypoints List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
@@ -599,6 +694,51 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                       Ripples {cascadeResult.stops.length - idx - 1} stops
                     </span>
                   </div>
+
+                  {/* AI Co-Pilot Alert Card Integration */}
+                  <div className="mt-2.5 pt-2 border-t border-slate-700/50 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <button
+                        onClick={() => {
+                          const currentWp = waypoints.find((w) => w.id === stop.id) || {
+                            ...stop,
+                            target_time: stop.arrivalTime,
+                          };
+                          setSelectedWaypointForAi(currentWp);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
+                          stop.notification
+                            ? 'bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60'
+                            : 'bg-slate-700/70 hover:bg-slate-700 text-sky-300 hover:text-white border border-slate-600/60'
+                        }`}
+                        title="Configure AI Co-Pilot Heads-Up Card & Audio Prompt"
+                      >
+                        <Sparkles
+                          className={`w-3.5 h-3.5 ${
+                            stop.notification ? 'text-emerald-400' : 'text-amber-400'
+                          }`}
+                        />
+                        <span>
+                          {stop.notification ? 'AI Alert Configured' : 'Generate Co-Pilot Alert'}
+                        </span>
+                      </button>
+
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Radius: {stop.trigger_radius_miles} mi
+                      </span>
+                    </div>
+
+                    {stop.notification && (
+                      <div className="p-2 bg-slate-950/70 border border-slate-800 rounded-lg text-[11px] text-slate-300">
+                        <div className="font-semibold text-emerald-400 truncate">
+                          Card: &ldquo;{stop.notification.title}&rdquo;
+                        </div>
+                        <div className="text-slate-400 italic truncate mt-0.5">
+                          TTS: &ldquo;{stop.notification.speech}&rdquo;
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Drive to Next Stop Connector */}
@@ -626,8 +766,17 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
           <Clock className="w-3.5 h-3.5 text-sky-400" />
           <span>Deterministic Timeline Engine</span>
         </div>
-        <span className="font-mono text-slate-500 text-[10px]">Phase 2B Verified</span>
+        <span className="font-mono text-slate-500 text-[10px]">Phase 2C Verified</span>
       </div>
+
+      {/* AI Co-Pilot Alert Modal */}
+      <AiAlertModal
+        isOpen={!!selectedWaypointForAi}
+        waypoint={selectedWaypointForAi}
+        onClose={() => setSelectedWaypointForAi(null)}
+        onApply={handleApplyAiAlert}
+      />
     </aside>
+
   );
 };

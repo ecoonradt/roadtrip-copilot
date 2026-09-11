@@ -1,8 +1,9 @@
 import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { routingRoutes, RoutingPluginOptions } from './routes/routing.js';
+import { aiRoutes, AiPluginOptions } from './routes/ai.js';
 
-export interface AppOptions extends RoutingPluginOptions {
+export interface AppOptions extends RoutingPluginOptions, AiPluginOptions {
   logger?: boolean;
 }
 
@@ -28,5 +29,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     routeService: options.routeService,
   });
 
+  // Register AI co-pilot generation routes
+  app.register(aiRoutes, {
+    aiService: options.aiService,
+  });
+
   return app;
 }
+

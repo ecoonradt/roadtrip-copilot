@@ -74,3 +74,6 @@ export interface OsrmRawResponse {
   routes?: OsrmRawRoute[];
   waypoints?: OsrmRawWaypoint[];
 }
+
+export * from './ai.js';
+
