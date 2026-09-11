@@ -74,7 +74,12 @@ flowchart TD
 1. **Road Network Routing & Travel Time:**
    - Using an open routing engine (e.g., Open Source Routing Machine - **OSRM**, **Valhalla**, or **GraphHopper**), deterministic code queries the exact road graph between coordinate pairs.
    - It returns the true road distance (not Euclidean line-of-sight), the turn polyline for map rendering, and realistic drive duration based on highway vs. local road speed profiles.
-2. **The Timeline Cascade (Schedule Ripple Math):**
+2. **Google Maps Navigation Links & Route-Shaping Waypoints:**
+   - *The In-Car Reality:* Android Auto will run Google Maps on the main screen for active turn-by-turn guidance, while Roadtrip Co-Pilot runs in the background.
+   - *The Problem:* Google Maps navigation algorithms default to the fastest time or shortest distance. If you simply navigate from Phoenix to Flagstaff, Google Maps will keep you on I-17 North and bypass Sedona and Oak Creek Canyon completely; or it will aggressively offer reroutes away from scenic backroads (like the High Road to Santa Fe).
+   - *The Solution:* The Route Builder must generate multi-stop **Google Maps Navigation URLs** (`https://www.google.com/maps/dir/?api=1&origin=...&destination=...&waypoints=...&travelmode=driving`) containing strategic "route-shaping" waypoints. When opened on the car's connected phone, this forces Google Maps to navigate the exact scenic itinerary intended by the co-pilot.
+   - *URL Limits & Leg Chunking:* Google Maps URLs support up to 9 intermediate waypoints plus origin and destination (11 total points). For days with extensive stops, the Route Builder automatically partitions the day into logical driving legs (e.g. Day 2 Morning Leg $\to$ Afternoon Leg) and provides 1-click links or QR codes.
+3. **The Timeline Cascade (Schedule Ripple Math):**
    - If Waypoint $k$ is added between $k-1$ and $k+1$ with a dwell duration $D_k$:
      $$\text{Arrival}_k = \text{Departure}_{k-1} + \text{DriveDuration}(W_{k-1}, W_k)$$
      $$\text{Departure}_k = \text{Arrival}_k + D_k$$
@@ -82,7 +87,7 @@ flowchart TD
    - All subsequent waypoints $W_{k+2} \dots W_n$ shift forward by:
      $$\Delta t = (\text{Arrival}_{k+1, \text{new}} - \text{Arrival}_{k+1, \text{old}})$$
    - Deterministic date/time libraries (`java.time` on Android, Python `zoneinfo`, or JS `Temporal`/`date-fns-tz`) execute this with microsecond precision and zero hallucination risk, automatically handling crossing between Arizona (UTC-7 year-round) and New Mexico (UTC-6 during Daylight Saving Time).
-3. **Trigger Radius Sizing Heuristics:**
+4. **Trigger Radius Sizing Heuristics:**
    - The trigger radius dictates how far in advance an alert fires. Deterministic heuristics can automatically set safe defaults based on the road classification:
      - **Interstate / Open Highway (65–75 mph):** $3.0\text{ to }6.0\text{ miles}$ ($\sim 2.5\text{ to }5\text{ minutes}$ advance warning for distant peaks or highway viewings like Shiprock or Bell Rock).
      - **Scenic Byway / Switchback (25–45 mph):** $1.5\text{ to }2.5\text{ miles}$ ($\sim 2\text{ to }3\text{ minutes}$ advance notice before a scenic pull-off).
@@ -111,12 +116,12 @@ Where should the Route Builder live?
 
 | Form Factor | Pros | Cons | Recommendation |
 | :--- | :--- | :--- | :--- |
-| **A. Desktop/Tablet Web Application** (e.g., React / Vite / MapLibre / Tailwind) | • Full desktop screen space for dual-pane map & timeline.<br>• Natural ergonomics for trip planning (tabs open for hotels, Reddit, reviews).<br>• Zero app store or APK distribution barriers.<br>• Easy calling of LLM APIs (Gemini/OpenAI) and open routing APIs.<br>• Direct JSON export or QR code sync to phone. | • Requires hosting or running locally (`localhost`).<br>• Not native to the phone. | **PRIMARY RECOMMENDATION (Tier 1)**<br>Best authoring experience by far. |
+| **A. Full-Stack Web Application** (React Frontend + Lightweight Node/Express or Fastify Backend) | • Full desktop screen space for dual-pane map & timeline.<br>• Native backend integration with **agy CLI** (zero API keys, reuses active Antigravity session).<br>• Backend proxies Nominatim & OSRM (solves CORS & custom User-Agent headers).<br>• 1-click **ADB Push** to connected phone and local Wi-Fi QR code server.<br>• Local filesystem persistence directly in repo (`trips/` folder). | • Requires running locally (e.g. `npm run dev`). | **PRIMARY RECOMMENDATION (Tier 1)**<br>Best authoring experience, zero-config AI, and effortless device sync. |
 | **B. Native Android In-App Route Builder** (Phone UI in Kotlin / Compose) | • All-in-one package inside the existing APK.<br>• Works directly on the device that runs the co-pilot. | • Planning a 4-day trip on a 6-inch phone screen is tedious.<br>• High Android UI development overhead (interactive draggable map timelines).<br>• Cannot be used while driving (Android Auto blocks complex interaction). | **SECONDARY / SCOPED TO ON-ROAD TWEAKS**<br>Only build simple on-phone tweaks (e.g. delay start +30m, skip stop). |
 | **C. CLI / Script Tool** (Python / Node CLI) | • Fastest to prototype.<br>• Easy to script with Google Docs API and LLMs. | • No interactive map.<br>• Hard for non-technical users to visually verify waypoints and geofences. | **INTERNAL DEV UTILITY ONLY** |
 
 ### Architectural Conclusion: The Two-Tier Ecosystem
-1. **The Route Builder Studio (Web Application):** A clean, desktop-first web application where trips are planned, visualized on a full-screen map, enriched with AI-generated audio/notification copy, and exported.
+1. **The Route Builder Studio (Full-Stack Web Application):** A clean, desktop-first web application (React frontend + lightweight Node backend) where trips are planned, visualized on a full-screen map, enriched with AI-generated audio/notification copy via the local `agy` CLI or Google AI Studio, and synced directly to the phone via ADB or local Wi-Fi.
 2. **Dynamic Ingestion in Android App:** Updating the native Android app so it can dynamically import, list, and switch between custom itineraries stored in the phone's internal storage (`filesDir`), completely eliminating the need to recompile the APK for new trips.
 
 ---
@@ -227,20 +232,68 @@ The ripple engine enforces timeline coherence across waypoints within a day:
 
 ### 4.3 Routing & Geocoding Service Layer
 
-To ensure the Route Builder remains lightweight, cost-effective, and independent of proprietary lock-in:
+### 4.3 Full-Stack Architecture & Lightweight Local Backend
 
-1. **Routing Provider (Free / Zero Key):**
-   - **OSRM Public API (`router.project-osrm.org`):** Free driving directions, returns full geometry and durations.
-   - **Fallback / Local Option:** Users can point to an OSRM docker container or use GraphHopper / Mapbox / Google Routes if an API key is provided.
-2. **Geocoding & Place Search:**
-   - **Nominatim / OpenStreetMap:** Free address and POI geocoding.
-   - **Optional Google Places API:** For users who want auto-complete with ratings and phone numbers.
+Rather than a fragile client-only Single Page App (SPA), the Route Builder is architected as a **Full-Stack Web Application** (React frontend + lightweight Node/Express or Fastify backend running in a single `npm run dev` workflow). 
+
+A local backend transforms the developer experience and eliminates browser security barriers:
+
+```mermaid
+flowchart TD
+    subgraph BrowserUI["Browser Frontend (React + Leaflet + Tailwind)"]
+        UI1["Interactive Map & Timeline"]
+        UI2["1-Click 'Generate Co-Pilot Speech'"]
+        UI3["1-Click 'Sync to Phone (ADB / QR)'"]
+    end
+
+    subgraph LocalBackend["Lightweight Local Backend (Node / Express / Vite)"]
+        API1["POST /api/copilot/generate\n(Spawns agy CLI / AI Studio)"]
+        API2["GET /api/routing/route & geocode\n(Proxies OSRM & Nominatim)"]
+        API3["POST /api/device/adb-push\n(Executes adb push to Pixel)"]
+        API4["GET /api/device/download/:file\n(Serves Wi-Fi QR download)"]
+    end
+
+    subgraph LocalServices["System & External Services"]
+        CLI["Antigravity CLI (agy)\n(Uses active AGY session)"]
+        OSRM["OSRM Public Engine"]
+        NOM["Nominatim OSM (with custom User-Agent)"]
+        ADB["ADB Daemon / Connected Phone"]
+    end
+
+    UI1 <--> API2
+    UI2 <--> API1
+    UI3 <--> API3
+    UI3 <--> API4
+
+    API1 <--> CLI
+    API2 <--> OSRM
+    API2 <--> NOM
+    API3 <--> ADB
+```
+
+#### Core Backend Responsibilities:
+1. **Native `agy` CLI Execution (Zero Configuration):**
+   - The frontend calls `POST /api/copilot/generate`. The backend executes `agy -p "..." --output-format json` via child process.
+   - Reuses your active, authenticated Antigravity environment and active Gemini 3.8 model. **Zero API keys to create, paste, or manage.**
+2. **Compliant Geocoding & Routing Proxies:**
+   - **Nominatim Policy Compliance:** OpenStreetMap's geocoder strictly mandates a custom `User-Agent` header (browsers forbid setting `User-Agent` in client-side `fetch()`). The backend proxies `/api/routing/geocode` with compliant identification and rate-limiting.
+   - **OSRM Proxy & Caching:** Proxies road routing requests and caches geometry polylines locally in memory/disk so dragging waypoints doesn't trigger CORS or spam public servers.
+3. **1-Click Device Sync via ADB:**
+   - The backend exposes `POST /api/device/adb-push`. It checks `adb devices` and automatically pushes the generated `.json` directly into the phone's co-pilot directory:
+     ```bash
+     adb push trips/my_trip.json /sdcard/Android/data/com.roadtrip.copilot/files/itineraries/
+     ```
+4. **Local Wi-Fi Server for Instant Phone QR Transfer:**
+   - The backend serves `GET /api/device/download/:filename` over your home Wi-Fi (`http://<local-ip>:3000/...`).
+   - The frontend renders a scannable QR code on screen; pointing your phone's camera at the screen immediately downloads the itinerary into the phone's Download folder for native import.
+5. **Local Repository Persistence:**
+   - Directly saves and reads `.json` files from a `trips/` folder in the repository, and can write directly into `app/src/main/assets/` if desired.
 
 ---
 
 ### 4.4 The AI Co-Pilot Prompting & Copywriting Pipeline
 
-When a waypoint is created or edited, the human can either type their own notification/speech text or click **"Generate Co-Pilot Speech & Alerts"**. 
+When a waypoint is created or edited, the user can type their own notification/speech text or click **"Generate Co-Pilot Speech & Alerts"**. 
 
 #### The Prompting Contract:
 ```
@@ -273,9 +326,53 @@ Respond in strict JSON:
 }
 ```
 
+#### AI Access, Authentication & Engine Tiers:
+
+1. **Antigravity CLI (`agy`) Bridge (Primary Local Engine — Zero Setup):**
+   - *How it works:* The local backend invokes:
+     ```bash
+     agy -p "Write Roadtrip Co-Pilot announcement for..." --output-format json
+     ```
+   - *Key Benefit:* `agy` inherits your active Antigravity session and model tier (Gemini 3.8) directly from your environment.
+   - *User Experience:* **Zero configuration.** No API keys, no Google AI Studio setup, no credit cards. It works out of the box when running the Route Builder locally.
+
+2. **Google AI Studio (`gemini-3.8-flash`) (Secondary / Cloud Engine):**
+   - *How it works:* Direct API calls to `gemini-3.8-flash` using a free developer API key from `aistudio.google.com`.
+   - *When to use:* If running the Route Builder in a standalone browser environment without the local `agy` CLI installed, or as a deployed web service.
+   - *Pricing & Quota:* Free tier provides 10–15 RPM and 1,000–1,500 RPD ($0.00 cost), which easily accommodates full roadtrip planning sessions (< 2% daily quota).
+
+3. **Zero-API-Key Web Fallback ("Copy Prompts for Gemini Advanced"):**
+   - For users who want to use their consumer Google One AI Premium chat tab (`gemini.google.com`):
+   - The Web Studio provides a **"Copy Prompt Batch"** button.
+   - The user pastes the prompt into Gemini Advanced and pastes the JSON response back into the Studio.
+
 ---
 
-### 4.5 Android App Integration: Dynamic Route Ingestion
+### 4.5 Google Maps Navigation Link & Waypoint Injection Generator
+
+While Roadtrip Co-Pilot provides audio ducking, heads-up cards, and pace tracking in the background, **Google Maps on the in-car display does the live turn-by-turn navigation**.
+
+To guarantee that Google Maps navigates the exact scenic road rather than silently rerouting to a faster interstate:
+
+1. **Deterministic Multi-Stop URL Construction:**
+   - The Route Builder constructs standard Google Maps Navigation URLs:
+     ```
+     https://www.google.com/maps/dir/?api=1&origin=33.4357,-112.0152&destination=35.1878,-111.6152&waypoints=34.8010,-111.7645|35.0345,-111.7330&travelmode=driving
+     ```
+2. **Route-Shaping Waypoints:**
+   - Waypoints in the URL serve two purposes:
+     - **Physical Stops:** Locations where the car pulls over (Bell Rock, Vista Overlook, lodging).
+     - **Route Anchors:** Strategic highway points placed specifically to prevent Google Maps from rerouting (e.g. forcing AZ-89A switchbacks instead of I-17 North).
+3. **URL Waypoint Limits & Leg Chunking:**
+   - Google Maps URLs permit up to **9 intermediate waypoints** plus origin and destination (11 points maximum per link).
+   - If a day's drive exceeds 9 intermediate waypoints, the Route Builder automatically partitions the day into logical driving legs:
+     - `Day 2 - Leg 1: Flagstaff to Gallup (Morning)`
+     - `Day 2 - Leg 2: Gallup to Chama via Shiprock (Afternoon)`
+4. **Handoff Mechanisms to Car Phone:**
+   - **QR Code on Screen:** Scan with phone camera to instantly launch Google Maps turn-by-turn.
+   - **Web Share API / Copy Link:** 1-click button to send the navigation link via text, email, or Google Keep.
+
+### 4.6 Android App Integration: Dynamic Route Ingestion
 
 To make custom routes immediately usable in the car, the native Android app requires a straightforward upgrade:
 
@@ -283,6 +380,7 @@ To make custom routes immediately usable in the car, the native Android app requ
 [Web Route Builder]
         │
         ├──> Direct JSON Download ("my_vacation.json")
+        ├──> Google Maps Multi-Stop Navigation Link (Forces Scenic Route)
         └──> Display Local QR Code / Wi-Fi Sync Link
                     │
                     ▼
@@ -291,7 +389,9 @@ To make custom routes immediately usable in the car, the native Android app requ
         ├── Action A: User opens "Roadtrip Co-Pilot" -> Taps "Import Itinerary"
         │            (Native SAF file picker loads .json from Downloads)
         │
-        ├── Action B: ADB command (for developers):
+        ├── Action B: Tap Google Maps Link -> Launches navigation in Android Auto
+        │
+        ├── Action C: ADB command (for developers):
         │            adb push my_vacation.json /sdcard/Android/data/com.roadtrip.copilot/files/itineraries/
         │
         └── CopilotService / MainActivity:
@@ -307,13 +407,14 @@ To make custom routes immediately usable in the car, the native Android app requ
 #### Code Modifications in App:
 1. **`RouteRepository.kt` (New Singleton):**
    - Discovers all `.json` files in `context.getExternalFilesDir("itineraries")` or `context.filesDir`.
-   - Reads bundled assets (`itinerary.json`, `test_itinerary.json`) as fallbacks.
+   - Reads bundled assets (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) as fallbacks.
    - Exposes a unified list of available routes to `MainActivity` and `RouteListScreen`.
 2. **`MainActivity.kt`:**
    - Add an **"Import Route"** button that launches `ActivityResultContracts.OpenDocument()`.
    - Copies the selected JSON into the app's internal storage and refreshes the route spinner.
 3. **`RouteListScreen.kt` (Android Auto):**
    - Replace the hardcoded `availableRoutes` list with dynamic entries loaded from `RouteRepository`.
+   - Allows the driver to browse and select any imported route directly from the car's touchscreen.
 
 ---
 
@@ -322,73 +423,125 @@ To make custom routes immediately usable in the car, the native Android app requ
 To create a true, working route builder without falling into the trap of over-engineering a full commercial SaaS:
 
 ### MVP Scope (The "Sweet Spot"):
-1. **Interactive Map Canvas (Web Studio):**
+1. **Full-Stack Web Studio (Frontend + Lightweight Node Backend):**
+   - Single command `npm run dev` boots both the React frontend and the lightweight Node API server.
    - Render OpenStreetMap tiles using Leaflet or MapLibre GL.
-   - Click anywhere on the map to place a new checkpoint pin, or search via address/place search bar.
-   - Draw the real driving polyline between waypoints using free public OSRM.
+   - Click anywhere on the map to place a new checkpoint pin, or search via address/place search bar (proxied via backend with compliant Nominatim headers).
+   - Draw the real driving polyline between waypoints using backend-proxied OSRM routing.
 2. **Timeline / Waypoint Sidebar:**
    - Chronological list of waypoints for each day.
    - Drag-and-drop to reorder stops.
    - Set **Departure Time** for the day.
    - Per-waypoint inputs: **Name**, **Dwell Time (minutes)**, **Trigger Radius (miles)**.
-   - Automatic cascade calculation: Displays computed arrival time for every stop.
-3. **AI Co-Pilot Assistant:**
+   - Automatic cascade calculation: Displays computed arrival and departure times for every stop.
+3. **Google Maps Multi-Stop Navigation Link Generator:**
+   - Auto-generates the exact Google Maps navigation URL with route-forcing waypoints so Android Auto doesn't reroute onto the highway.
+   - Automatically chunks drives exceeding 9 intermediate waypoints into morning/afternoon legs.
+   - Provides a scannable QR code and 1-click "Send to Phone" button.
+4. **AI Co-Pilot Assistant (Zero-Config `agy` CLI + Cloud Fallback):**
    - Single button on each waypoint: **"Generate Co-Pilot Speech & Alert"**.
-   - Input for user's own LLM API key (e.g., Gemini API or OpenAI API) stored locally in `localStorage`.
+   - Primary: Backend calls `agy -p "..." --output-format json` using your active Antigravity session and Gemini 3.8. **Zero API keys or setup required.**
+   - Cloud fallback: Direct Google AI Studio API key (`gemini-3.8-flash`) support.
+   - Manual fallback: **"Copy Prompts for Gemini Advanced"** button for pasting into web chat.
    - Live preview of the generated Android Auto notification card and speech text.
-4. **Import & Export:**
+5. **Import, Export & 1-Click Device Sync:**
    - **"Load Existing JSON":** Drag-and-drop `itinerary.json` to inspect and edit the existing Phoenix-Albuquerque trip.
    - **"Export Itinerary":** Validates JSON schema and downloads a ready-to-run `.json` file.
-5. **Android App Ingestion:**
+   - **1-Click ADB Push:** Backend checks `adb devices` and pushes the itinerary directly to the connected Pixel phone.
+   - **Local Wi-Fi QR Server:** Backend serves the JSON file over the local network so the phone camera scans the QR code to download instantly.
+6. **Android App Ingestion:**
    - Add the SAF File Picker ("Import Itinerary") to `MainActivity.kt` so the exported file can be loaded directly from the phone's Download folder without opening a terminal or recompiling the app.
+   - Dynamic update to Android Auto's `RouteListScreen` to show imported itineraries on the car display.
 
 ---
 
-## 6. Implementation Roadmap & Phasing
+## 6. Implementation Roadmap & Granular Phasing
+
+To ensure no scope is dropped by agents or developers, the project is structured into two sequential, bite-sized phases.
 
 ```mermaid
 gantt
     title Roadtrip Co-Pilot Route Builder Roadmap
     dateFormat  YYYY-MM-DD
-    section Phase 1: App Decoupling
-    Dynamic RouteRepository in Android App    :p1_1, 2026-09-10, 3d
-    SAF File Import in MainActivity           :p1_2, after p1_1, 2d
-    Dynamic RouteListScreen in Android Auto  :p1_3, after p1_2, 2d
+    section Phase 1: Android App Dynamic Storage & Car UI
+    Phase 1A: RouteRepository & File Storage Engine  :p1_1, 2026-09-11, 2d
+    Phase 1B: Phone UI Import Flow (MainActivity)    :p1_2, after p1_1, 2d
+    Phase 1C: Android Auto Dynamic RouteListScreen   :p1_3, after p1_2, 2d
     section Phase 2: Web Studio MVP
-    Interactive Map & Waypoint Canvas (Leaflet/OSRM) :p2_1, after p1_3, 4d
-    Timeline Cascade Engine (Ripple Math & Timezones):p2_2, after p2_1, 3d
-    AI Co-Pilot Copywriter Integration               :p2_3, after p2_2, 3d
-    Import/Export JSON Validation                   :p2_4, after p2_3, 2d
-    section Phase 3: Advanced Intelligence
-    Conversational Multi-Day Trip Scaffolder         :p3_1, after p2_4, 5d
-    Reverse Schedule / Deadline Optimization         :p3_2, after p3_1, 3d
+    Phase 2A: Full-Stack Shell & Routing Proxy (OSRM):p2_1, after p1_3, 3d
+    Phase 2B: Timeline Cascade & Google Maps Links   :p2_2, after p2_1, 3d
+    Phase 2C: AI Co-Pilot Enrichment via agy CLI     :p2_3, after p2_2, 3d
+    Phase 2D: Export, ADB Push & Wi-Fi Phone Handoff :p2_4, after p2_3, 2d
 ```
 
-### Phase 1: Decouple the Android App (Immediate Prerequisite)
-* **Goal:** Enable the app to run arbitrary user-supplied itineraries.
-* **Deliverables:**
-  - Create `RouteRepository.kt` to scan `files/itineraries/`.
-  - Add "Import Itinerary" button to `activity_main.xml`.
-  - Update `RouteListScreen.kt` to query `RouteRepository.getAvailableRoutes()`.
+### Phase 1: Android App Dynamic Route Loading & Car UI (Prerequisite)
+*Before building the web authoring tool, the Android app must be updated so it can consume arbitrary itineraries without needing a code edit and APK rebuild.*
 
-### Phase 2: Web Studio MVP
-* **Goal:** Deliver the visual, map-based authoring tool with deterministic cascades and AI speech writing.
-* **Tech Stack:** React + Vite + TypeScript, Leaflet / MapLibre, Tailwind CSS, OSRM Public API, Gemini Flash API.
-* **Deliverables:**
-  - Map with route lines and draggable waypoints.
-  - Cascade schedule calculator with timezone detection.
-  - AI Co-Pilot alert generator.
-  - JSON importer/exporter.
+#### Phase 1A: Storage & Repository Engine (`RouteRepository.kt`)
+- Create `RouteRepository` singleton to scan internal storage (`context.filesDir/itineraries/`) and external files.
+- Maintain bundled assets (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) as permanent fallback defaults.
+- Handle JSON deserialization, schema validation against `ItineraryModels.kt`, and graceful handling of corrupted files.
 
-### Phase 3: Advanced Intelligence & On-Road Enhancements (Future Stretch)
-* **Goal:** Full conversational trip generation and smart on-road adjustments.
-* **Deliverables:**
-  - "Plan a 3-day trip through Utah's Mighty 5" conversational scaffolding.
-  - In-app Android quick-adjustments: "Push today's schedule by 30 minutes", "Skip upcoming stop".
+#### Phase 1B: Phone UI Import Flow (`MainActivity.kt`)
+- Add an **"Import Itinerary"** button to the phone dashboard (`activity_main.xml`).
+- Wire to `ActivityResultContracts.OpenDocument()` with MIME type `application/json`.
+- On file selection, copy JSON to app storage, validate syntax, and trigger a live reload of the route spinner.
+
+#### Phase 1C: Android Auto Car In-Car UI (`RouteListScreen.kt` & `CopilotService.kt`)
+- Replace the hardcoded `availableRoutes` list in `RouteListScreen.kt` with dynamic items queried from `RouteRepository`.
+- Ensure switching routes from the car screen smoothly loads checkpoints into `CopilotService` and updates `CopilotDashboardScreen.kt`.
 
 ---
 
-## 7. Summary & Verdict
+### Phase 2: Web Studio MVP (The Route Builder)
+*A standalone, desktop-first full-stack web authoring tool (React frontend + lightweight Node backend) running in a single `npm run dev` command.*
+
+#### Phase 2A: Full-Stack Web Shell & Routing Proxy
+- React + Vite + TypeScript frontend with Tailwind CSS and Leaflet map canvas.
+- Lightweight Node/Express or Fastify backend server.
+- Backend routing proxies:
+  - `/api/routing/geocode`: Compliant Nominatim proxy setting required User-Agent headers.
+  - `/api/routing/route`: OSRM proxy caching driving polylines and durations.
+- Address search bar + click-on-map to add pins.
+
+#### Phase 2B: Timeline Cascade Engine & Google Maps Link Generator
+- Chronological waypoint sidebar with drag-and-drop reordering.
+- Per-waypoint `dwell_minutes` input and day departure time picker.
+- Deterministic cascade calculator: computes accurate arrival and departure times for each stop.
+- Multi-stop Google Maps Navigation URL generator:
+  - Formats multi-stop driving links with route-forcing waypoints.
+  - Automatically partitions days with >9 intermediate waypoints into morning and afternoon legs.
+  - Generates scannable QR codes and copyable links.
+
+#### Phase 2C: AI Co-Pilot Enrichment via `agy` CLI
+- Backend endpoint `POST /api/copilot/generate` shelling out to `agy -p "..." --output-format json`.
+- Inherits active Antigravity credentials and Gemini 3.8 Flash with **zero API key configuration**.
+- Fallback to Google AI Studio API (`gemini-3.8-flash`) key if run outside Antigravity.
+- "Generate Co-Pilot Speech & Alert" button on each waypoint card with live Android Auto card preview.
+- Fallback "Copy Prompts for Gemini Advanced" button for zero-API-key manual copy-pasting.
+
+#### Phase 2D: Export, 1-Click ADB Push & Phone Handoff
+- Validate output against `ItineraryModels.kt` JSON schema.
+- One-click "Export JSON" file download.
+- 1-Click "Push to Connected Phone" via backend `adb push`.
+- Local Wi-Fi QR code server for wireless phone download.
+- Display transfer modal: QR code for the itinerary file and Google Maps navigation links.
+
+---
+
+## 7. Future Horizons & Unscheduled Ideas
+
+*The following concepts represent potential future enhancements that are outside the scope of the MVP and are recorded here for future consideration:*
+
+- **Conversational Multi-Day Trip Scaffolder:** An agentic chat interface alongside the map ("Plan a 3-day loop from Phoenix through Sedona and Grand Canyon with 3–4 hours of driving per day") that drafts initial waypoints and feeds them into the deterministic cascade engine.
+- **Reverse Scheduling / Deadline Optimization:** Working backward from a hard deadline (e.g. flight departure at ABQ airport) to calculate mandatory departure times from earlier stops.
+- **Elevation & Golden Hour Lighting Awareness:** Querying USGS elevation APIs and solar angle calculators to warn the driver about mountain passes or optimize arrival at scenic viewpoints (like Oak Creek switchbacks) during golden hour.
+- **Weather & Mountain Pass Road Closures:** Ingesting National Weather Service (NWS) or state DOT feeds (e.g. NM DOT / ADOT) to alert for snow or seasonal pass closures (e.g. Brazos Pass).
+- **In-App On-Road Quick Tweaks:** Mobile-only convenience buttons in `MainActivity` (e.g. "Delay departure by 30 minutes", "Skip next waypoint").
+
+---
+
+## 8. Summary & Verdict
 
 Building a dedicated Route Builder is a natural and high-value progression for the Roadtrip Co-Pilot project. 
 
