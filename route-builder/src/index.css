@@ -1,0 +1,69 @@
+@import 'leaflet/dist/leaflet.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
+/* Custom Leaflet Dark Mode / Clean Styling */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0b0f19 !important;
+}
+
+/* Custom Waypoint Marker Badge */
+.custom-waypoint-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  border: 2px solid #ffffff;
+  transition: transform 0.15s ease-in-out;
+}
+
+.custom-waypoint-pin:hover {
+  transform: scale(1.15);
+}
+
+.pin-origin {
+  background-color: #10b981; /* Emerald */
+}
+
+.pin-destination {
+  background-color: #ef4444; /* Red */
+}
+
+.pin-scenic_pull_off {
+  background-color: #f59e0b; /* Amber */
+}
+
+.pin-scenic_drive_by {
+  background-color: #3b82f6; /* Blue */
+}
+
+.pin-meal {
+  background-color: #ec4899; /* Pink */
+}
+
+.pin-fuel {
+  background-color: #8b5cf6; /* Purple */
+}
+
+.pin-lodging {
+  background-color: #06b6d4; /* Cyan */
+}

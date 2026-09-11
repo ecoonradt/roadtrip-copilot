@@ -92,7 +92,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
 
 ### Phase 2: Web Studio MVP (The Route Builder)
 
-- [ ] **Phase 2A: Full-Stack Web Shell & Routing Proxy**
+- [x] **Phase 2A: Full-Stack Web Shell & Routing Proxy**
   - **Component Boundary:** `route-builder/` directory (React frontend + Node/Fastify backend)
   - **Deliverables:** Full-stack shell, OpenStreetMap Leaflet map canvas, OSRM/Nominatim proxies.
   - **Scope:**
