@@ -1,94 +1,197 @@
 package com.roadtrip.copilot.car
 
+import androidx.annotation.VisibleForTesting
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
+import androidx.car.app.model.ActionStrip
 import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import androidx.lifecycle.lifecycleScope
 import com.roadtrip.copilot.CopilotService
+import com.roadtrip.copilot.model.RouteOption
+import com.roadtrip.copilot.model.RouteRepository
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
-class RouteListScreen(carContext: CarContext) : Screen(carContext) {
+/**
+ * Android Auto Screen displaying available routes and driving legs for selection.
+ *
+ * Conforms to Car App Library driving distraction guidelines by strictly enforcing
+ * the 6-item list constraint ([MAX_ITEMS_PER_PAGE]) via deterministic pagination.
+ */
+class RouteListScreen(
+    carContext: CarContext,
+    private val repository: RouteRepository = RouteRepository.getInstance(carContext)
+) : Screen(carContext) {
 
-    data class CarRouteOption(
-        val title: String,
-        val subtitle: String,
-        val routeFile: String,
-        val dayNumber: Int
-    )
+    private var currentPage: Int = 0
+    private var hasUserNavigated: Boolean = false
 
-    private val availableRoutes = listOf(
-        CarRouteOption(
-            title = "Test Run: Albany to Nassau (NY)",
-            subtitle = "19-mile outbound test route",
-            routeFile = "test_itinerary.json",
-            dayNumber = 1
-        ),
-        CarRouteOption(
-            title = "Return Run: Nassau to Albany (NY)",
-            subtitle = "19-mile return test route",
-            routeFile = "test_itinerary_return.json",
-            dayNumber = 1
-        ),
-        CarRouteOption(
-            title = "Day 1: Phoenix to Sedona & Flagstaff",
-            subtitle = "Oct 9 • PHX Airport → Oak Creek Canyon → Flagstaff",
-            routeFile = "itinerary.json",
-            dayNumber = 1
-        ),
-        CarRouteOption(
-            title = "Day 2: Flagstaff to Shiprock & Chama",
-            subtitle = "Oct 10 • Navajo Nation → Shiprock → Chama, NM",
-            routeFile = "itinerary.json",
-            dayNumber = 2
-        ),
-        CarRouteOption(
-            title = "Day 3: Chama to Brazos Pass & Taos",
-            subtitle = "Oct 11 • Brazos Cliffs → Rio Grande Gorge → Taos",
-            routeFile = "itinerary.json",
-            dayNumber = 3
-        ),
-        CarRouteOption(
-            title = "Day 4: Taos to High Road to Santa Fe & ABQ",
-            subtitle = "Oct 12 • High Road villages → Santa Fe Plaza → ABQ Airport",
-            routeFile = "itinerary.json",
-            dayNumber = 4
-        )
-    )
+    init {
+        // Initialize page to the active route's page if present
+        syncCurrentPageToActiveRoute()
+
+        lifecycleScope.launch {
+            repository.routes.collectLatest {
+                invalidate()
+            }
+        }
+        lifecycleScope.launch {
+            CopilotService.activeRouteFile.collectLatest {
+                if (!hasUserNavigated) {
+                    syncCurrentPageToActiveRoute()
+                }
+                invalidate()
+            }
+        }
+        lifecycleScope.launch {
+            CopilotService.activeDayNumber.collectLatest {
+                if (!hasUserNavigated) {
+                    syncCurrentPageToActiveRoute()
+                }
+                invalidate()
+            }
+        }
+    }
+
+    private fun syncCurrentPageToActiveRoute() {
+        val currentFile = CopilotService.activeRouteFile.value
+        val currentDay = CopilotService.activeDayNumber.value
+        val routes = repository.getRouteOptions()
+        val activeIndex = routes.indexOfFirst {
+            it.routeFile == currentFile && it.dayNumber == currentDay
+        }
+        if (activeIndex >= 0) {
+            currentPage = activeIndex / MAX_ITEMS_PER_PAGE
+        }
+    }
 
     override fun onGetTemplate(): Template {
+        val routes = repository.getRouteOptions()
         val currentFile = CopilotService.activeRouteFile.value
         val currentDay = CopilotService.activeDayNumber.value
 
-        val listBuilder = ItemList.Builder()
+        val totalPages = if (routes.isEmpty()) 1 else (routes.size + MAX_ITEMS_PER_PAGE - 1) / MAX_ITEMS_PER_PAGE
 
-        for (route in availableRoutes) {
-            val isSelected = route.routeFile == currentFile && route.dayNumber == currentDay
-            val titlePrefix = if (isSelected) "✓ " else ""
-
-            listBuilder.addItem(
-                Row.Builder()
-                    .setTitle("$titlePrefix${route.title}")
-                    .addText(route.subtitle)
-                    .setOnClickListener {
-                        val running = CopilotService.isRunning.value
-                        CopilotService.setSelectedRoute(
-                            carContext,
-                            route.routeFile,
-                            route.dayNumber,
-                            autoRestartIfRunning = running
-                        )
-                        screenManager.pop()
-                    }
-                    .build()
-            )
+        // Clamp currentPage within [0, totalPages - 1]
+        if (currentPage >= totalPages) {
+            currentPage = maxOf(0, totalPages - 1)
+        }
+        if (currentPage < 0) {
+            currentPage = 0
         }
 
-        return ListTemplate.Builder()
+        val listBuilder = ItemList.Builder()
+
+        if (routes.isEmpty()) {
+            listBuilder.addItem(
+                Row.Builder()
+                    .setTitle("No routes available")
+                    .addText("Import a route in phone app")
+                    .build()
+            )
+        } else {
+            val startIndex = currentPage * MAX_ITEMS_PER_PAGE
+            val endIndex = minOf(startIndex + MAX_ITEMS_PER_PAGE, routes.size)
+            val pageRoutes = routes.subList(startIndex, endIndex)
+
+            for (route in pageRoutes) {
+                val isSelected = route.routeFile == currentFile && route.dayNumber == currentDay
+                val titlePrefix = if (isSelected) "✓ " else ""
+
+                val displayTitle = when {
+                    route.title.isNotBlank() -> route.title
+                    route.dayNumber > 0 -> "Day ${route.dayNumber}"
+                    else -> "Custom Route"
+                }
+
+                val displaySubtitle = when {
+                    !route.subtitle.isNullOrBlank() -> route.subtitle
+                    route.dayNumber > 0 -> "Day ${route.dayNumber}"
+                    else -> "Custom Route"
+                }
+
+                listBuilder.addItem(
+                    Row.Builder()
+                        .setTitle("$titlePrefix$displayTitle")
+                        .addText(displaySubtitle)
+                        .setOnClickListener {
+                            val running = CopilotService.isRunning.value
+                            CopilotService.setSelectedRoute(
+                                carContext,
+                                route.routeFile,
+                                route.dayNumber,
+                                autoRestartIfRunning = running
+                            )
+                            screenManager.pop()
+                        }
+                        .build()
+                )
+            }
+        }
+
+        val templateTitle = if (totalPages > 1) {
+            "Select Route (${currentPage + 1}/$totalPages)"
+        } else {
+            "Select Itinerary Route"
+        }
+
+        val templateBuilder = ListTemplate.Builder()
             .setSingleList(listBuilder.build())
-            .setTitle("Select Itinerary Route")
+            .setTitle(templateTitle)
             .setHeaderAction(Action.BACK)
-            .build()
+
+        if (totalPages > 1) {
+            val actionStripBuilder = ActionStrip.Builder()
+            if (currentPage > 0) {
+                actionStripBuilder.addAction(
+                    Action.Builder()
+                        .setTitle("◀ Prev")
+                        .setOnClickListener {
+                            currentPage--
+                            hasUserNavigated = true
+                            invalidate()
+                        }
+                        .build()
+                )
+            }
+            if (currentPage < totalPages - 1) {
+                actionStripBuilder.addAction(
+                    Action.Builder()
+                        .setTitle("Next ▶")
+                        .setOnClickListener {
+                            currentPage++
+                            hasUserNavigated = true
+                            invalidate()
+                        }
+                        .build()
+                )
+            }
+            templateBuilder.setActionStrip(actionStripBuilder.build())
+        }
+
+        return templateBuilder.build()
+    }
+
+    @VisibleForTesting
+    internal fun getCurrentPage(): Int = currentPage
+
+    @VisibleForTesting
+    internal fun setCurrentPage(page: Int) {
+        currentPage = page
+        hasUserNavigated = true
+    }
+
+    @VisibleForTesting
+    internal fun getTotalPages(): Int {
+        val count = repository.getRouteOptions().size
+        return if (count == 0) 1 else (count + MAX_ITEMS_PER_PAGE - 1) / MAX_ITEMS_PER_PAGE
+    }
+
+    companion object {
+        const val MAX_ITEMS_PER_PAGE = 6
     }
 }

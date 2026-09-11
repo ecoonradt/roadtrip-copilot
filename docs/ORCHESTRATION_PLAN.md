@@ -73,7 +73,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
     ```
   - **Stage 2: Code Review Subagent:** Verifies layout adheres to existing dark automotive theme and handles file permission exceptions gracefully.
 
-- [ ] **Phase 1C: Android Auto Car In-Car UI (`RouteListScreen.kt`)**
+- [x] **Phase 1C: Android Auto Car In-Car UI (`RouteListScreen.kt`)**
   - **Component Boundary:** `app/src/main/java/com/roadtrip/copilot/car/`
   - **Deliverables:** Dynamic `RouteListScreen.kt`, Car App Library unit tests.
   - **Scope:**
