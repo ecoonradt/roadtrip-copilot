@@ -29,6 +29,14 @@ export interface RouteWaypoint {
   location: [number, number]; // [lon, lat]
 }
 
+export interface RouteLeg {
+  distanceMeters: number;
+  distanceMiles: number;
+  durationSeconds: number;
+  durationMinutes: number;
+  summary?: string;
+}
+
 export interface RouteResponse {
   geometry: RouteGeometry;
   distanceMeters: number;
@@ -36,6 +44,7 @@ export interface RouteResponse {
   durationSeconds: number;
   durationMinutes: number;
   waypoints?: RouteWaypoint[];
+  legs?: RouteLeg[];
   cached?: boolean;
 }
 

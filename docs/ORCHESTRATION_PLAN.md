@@ -110,7 +110,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
     ```
   - **Stage 2: Code Review Subagent:** Verifies TypeScript strictness, zero `any` types, and proper proxy error handling.
 
-- [ ] **Phase 2B: Timeline Cascade Engine & Google Maps Navigation Links**
+- [x] **Phase 2B: Timeline Cascade Engine & Google Maps Navigation Links**
   - **Component Boundary:** `route-builder/src/engine/` and `route-builder/tests/`
   - **Deliverables:** `cascade.ts`, `googleMapsUrl.ts`, unit tests, timeline sidebar UI.
   - **Scope:**

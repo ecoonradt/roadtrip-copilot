@@ -60,7 +60,9 @@ export function App() {
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
 
-  // Compute OSRM route whenever waypoints change
+  const coordKey = waypoints.map((w) => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join(';');
+
+  // Compute OSRM route whenever coordinate sequence changes
   useEffect(() => {
     if (waypoints.length < 2) {
       setRoute(null);
@@ -97,7 +99,7 @@ export function App() {
     return () => {
       isSubscribed = false;
     };
-  }, [waypoints]);
+  }, [coordKey]);
 
   const handleSelectLocation = useCallback((result: GeocodeResult) => {
     const newWaypoint: Waypoint = {
@@ -129,6 +131,24 @@ export function App() {
     setWaypoints((prev) => prev.filter((w) => w.id !== id));
   }, []);
 
+  const handleUpdateWaypoint = useCallback((id: string, updates: Partial<Waypoint>) => {
+    setWaypoints((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, ...updates } : w))
+    );
+  }, []);
+
+  const handleMoveWaypoint = useCallback((index: number, direction: 'up' | 'down') => {
+    setWaypoints((prev) => {
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
+      return next;
+    });
+  }, []);
+
   const handleResetSample = useCallback(() => {
     setWaypoints(INITIAL_SAMPLE_WAYPOINTS);
   }, []);
@@ -146,6 +166,8 @@ export function App() {
         route={route}
         isLoadingRoute={isLoadingRoute}
         onDeleteWaypoint={handleDeleteWaypoint}
+        onUpdateWaypoint={handleUpdateWaypoint}
+        onMoveWaypoint={handleMoveWaypoint}
         onResetSample={handleResetSample}
         onClearAll={handleClearAll}
       />

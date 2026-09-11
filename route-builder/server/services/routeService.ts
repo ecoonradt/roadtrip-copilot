@@ -99,6 +99,18 @@ export class RouteService {
       location: wp.location,
     }));
 
+    const legs = primaryRoute.legs?.map((leg) => {
+      const distMeters = Math.round(leg.distance);
+      const durSec = Math.round(leg.duration);
+      return {
+        distanceMeters: distMeters,
+        distanceMiles: Number((distMeters / 1609.344).toFixed(2)),
+        durationSeconds: durSec,
+        durationMinutes: Number((durSec / 60).toFixed(1)),
+        summary: leg.summary,
+      };
+    });
+
     const response: RouteResponse = {
       geometry: primaryRoute.geometry,
       distanceMeters,
@@ -106,6 +118,7 @@ export class RouteService {
       durationSeconds,
       durationMinutes,
       waypoints,
+      legs,
       cached: false,
     };
 

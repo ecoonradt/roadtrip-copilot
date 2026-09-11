@@ -30,6 +30,15 @@ export interface Waypoint {
   dwell_minutes: number;
   trigger_radius_miles: number;
   notification?: WaypointNotification;
+  timezone?: string;
+}
+
+export interface RouteLeg {
+  distanceMeters: number;
+  distanceMiles: number;
+  durationSeconds: number;
+  durationMinutes: number;
+  summary?: string;
 }
 
 export interface RouteGeometry {
@@ -44,5 +53,6 @@ export interface RouteResponse {
   durationSeconds: number;
   durationMinutes: number;
   waypoints?: Array<{ name: string; location: [number, number] }>;
+  legs?: RouteLeg[];
   cached?: boolean;
 }
