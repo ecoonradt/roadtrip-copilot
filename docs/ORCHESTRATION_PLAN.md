@@ -39,7 +39,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
 
 ### Phase 1: Android App Dynamic Storage & Car UI
 
-- [ ] **Phase 1A: Storage & Repository Engine (`RouteRepository.kt`)**
+- [x] **Phase 1A: Storage & Repository Engine (`RouteRepository.kt`)**
   - **Component Boundary:** `app/src/main/java/com/roadtrip/copilot/model/` and `app/src/test/`
   - **Deliverables:** `RouteRepository.kt`, `RouteRepositoryTest.kt`
   - **Scope:**
