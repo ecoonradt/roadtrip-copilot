@@ -1,5 +1,10 @@
 # Roadtrip Co-Pilot: Route Builder Architecture & Research Proposal
 
+> [!NOTE]
+> **IMPLEMENTATION STATUS: COMPLETE & IN PRODUCTION**  
+> The architectural design and mathematical specifications in this proposal have been fully implemented in the Route Builder Web Studio (`route-builder/`) and the native Android app (`app/src/main/java/com/roadtrip/copilot/`).  
+> This document remains the authoritative engineering reference for domain logic, timeline cascade formulas, OSRM/Nominatim contracts, and the "Engine + Scribe" architecture.
+
 ## 1. Executive Summary & Problem Context
 
 ### The Current State

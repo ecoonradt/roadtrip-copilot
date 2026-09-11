@@ -53,28 +53,58 @@
 * Much of the route (Oak Creek Canyon, Navajo Nation, Chama, Brazos Pass) has **zero cellular connectivity**.
 * **GPS:** Hardware GNSS satellite radio receives lat/long directly from orbit. No network calls.
 * **Proximity Math:** Local Haversine formula executed on-device.
-* **Data Source:** Waypoints, triggers, and announcement scripts are baked into `app/src/main/assets/itinerary.json`.
+* **Data Source:** Waypoints, triggers, and announcement scripts are baked into `app/src/main/assets/itinerary.json` or imported to `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
 * **TTS Engine:** Uses Android's built-in `TextToSpeech` engine configured with local/offline English voice packs.
+
+### F. Route Authoring, Timeline Cascade & Device Handoff (The Route Builder Web Studio)
+* Located in `route-builder/`, providing a full-stack authoring studio (Vite/React frontend on `:5173`, Fastify/TypeScript backend on `:3001`).
+* **Hybrid "Engine + Scribe" Pattern:**
+  * **Physics & Math Engine:** Backend proxies OSRM road graph directions and Nominatim geocoding (with compliant `User-Agent`). In-memory LRU caching deduplicates requests.
+  * **Deterministic Timeline Cascade:** Recalculates arrival/departure times across waypoints; modifying dwell time on stop $k$ mathematically ripples through stops $k+1 \dots n$. Supports backward scheduling from destination deadlines ("Flight Catch-up").
+  * **Timezone Border Shifts:** Longitude boundary `-109.0452` automatically detects AZ (MST, UTC-7) vs NM (MDT, UTC-6) crossings, applying the $+1$ hour jump in formatted local time while keeping epoch timestamps strictly linear.
+  * **AI Co-Pilot Enrichment:** Primary engine shells out to local `agy -p "..." --output-format json` (Gemini 3.8) with zero API keys required. Truncates titles to $\le 30$ chars, normalizes messages to $\le 2$ lines, and clamps trigger radii to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency to prevent bursts.
+  * **OSRM Routing Protocol Rule:** Coordinate paths sent to the upstream OSRM routing engine must use literal `;` delimiters (e.g. `/${formattedCoords}?overview=...`). **Never URL-encode semicolons as `%3B` in OSRM path segments**, as the router rejects `%3B` with HTTP 400 `InvalidUrl`.
+  * **Google Maps Navigation Links:** Generates multi-stop driving links with route-forcing anchors to preserve scenic byways over interstates. Drives exceeding 9 intermediate stops are automatically partitioned into morning and afternoon legs ($\le 9$ intermediate stops each) with dedicated QR codes.
+  * **Device Handoff:** Supports 1-click ADB push (`/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`), local Wi-Fi QR download staging (`GET /api/device/download/:filename`), and Android SAF file picker import.
 
 ---
 
 ## 3. Directory Layout
 ```
 roadtrip-copilot/
-├── AGENTS.md                  # This file
+├── AGENTS.md                  # This handbook
 ├── README.md                  # Human-facing setup & usage guide
 ├── itinerary.json             # Core 4-day itinerary (PHX -> ABQ)
 ├── test_itinerary.json        # Upstate NY 19-mile outbound test route
 ├── test_itinerary_return.json # Upstate NY return test route (Nassau -> Albany)
-├── docs/                      # Architectural specs & research (Route Builder)
+├── docs/
+│   ├── ORCHESTRATION_PLAN.md  # Master agentic verification checklist (ALL PHASES COMPLETED)
+│   └── route_builder_research_and_architecture.md # Master architectural & mathematical spec
 ├── legacy/                    # Archived prototypes (copilot_engine.py)
-├── scripts/                   # Environment setup scripts
+├── scripts/                   # Environment setup & run scripts (run_dhu.sh)
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
 ├── settings.gradle.kts        # Multi-project gradle settings
 ├── build.gradle.kts           # Root build configuration
+├── route-builder/             # Full-Stack Web Studio (MVP)
+│   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)
+│   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
+│   ├── server/                # Fastify TypeScript backend
+│   │   ├── app.ts             # Fastify app factory with CORS and routes
+│   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
+│   │   ├── routes/            # Fastify plugins (routing.ts, ai.ts, device.ts)
+│   │   ├── services/          # Business logic (routeService, geocodeService, routeCache, aiService, deviceService)
+│   │   └── types/             # Strict TypeScript interfaces (0 any types)
+│   ├── src/                   # React frontend
+│   │   ├── App.tsx            # Main application layout & state coordinator
+│   │   ├── components/        # MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal
+│   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON)
+│   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
+│   │   └── types/             # Frontend data models
+│   └── tests/                 # Vitest test suites (97 tests: backend, engine, ai, schema, device)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/
+        ├── test/              # JUnit & Robolectric unit tests (RouteRepositoryTest, RouteListScreenTest, ItineraryTest)
         └── main/
             ├── AndroidManifest.xml
             ├── assets/
@@ -82,12 +112,13 @@ roadtrip-copilot/
             │   ├── test_itinerary.json
             │   └── test_itinerary_return.json
             ├── res/
-            │   ├── layout/            # Dashboard and custom spinner layouts
+            │   ├── layout/    # Dashboard (activity_main.xml with SAF import button) and custom spinner layouts
+            │   ├── drawable/  # Vector assets (ic_import_file.xml)
             │   └── xml/
             │       └── automotive_app_desc.xml
             └── java/com/roadtrip/copilot/
-                ├── MainActivity.kt        # Start/stop dashboard, route picker & volume calibration
-                ├── CopilotService.kt      # Foreground service lifecycle, pace telemetry & route persistence
+                ├── MainActivity.kt        # Phone dashboard, SAF import contract, route spinner & volume calibration
+                ├── CopilotService.kt      # Foreground service lifecycle, dynamic route loading & pace telemetry
                 ├── LocationTracker.kt     # Event-driven GPS, sequential progression & pace resolution
                 ├── AudioDuckEngine.kt     # Audio focus, stream routing & TTS manager
                 ├── NotificationEngine.kt  # Android Auto MessagingStyle heads-up cards
@@ -97,10 +128,13 @@ roadtrip-copilot/
                 │   ├── CopilotCarSession.kt      # Automotive session manager
                 │   ├── CopilotDashboardScreen.kt # PaneTemplate car dashboard with live telemetry
                 │   ├── WaypointListScreen.kt     # ListTemplate for chronological milestones
-                │   ├── RouteListScreen.kt        # ListTemplate for selecting routes & legs
+                │   ├── RouteListScreen.kt        # Dynamic ListTemplate with 6-item pagination & distraction compliance
                 │   └── SettingsScreen.kt         # ListTemplate for audio ducking toggles & calibration
                 └── model/
-                    └── ItineraryModels.kt # Itinerary data classes & pace resolution
+                    ├── RouteRepository.kt # Singleton scanning storage & asset fallbacks, StateFlow<List<RouteOption>>
+                    ├── RouteOption.kt     # Unified route metadata class
+                    ├── AssetProvider.kt   # Interface abstraction for pure JVM unit testing
+                    └── ItineraryModels.kt # Itinerary data classes (V1 & V2 schemas), pace resolution
 ```
 
 ---
@@ -111,11 +145,17 @@ roadtrip-copilot/
 * **Java:** OpenJDK 17 (`java -version`, `javac -version`).
 * **Android SDK:** Installed at `$HOME/Android/Sdk` (API 34/35 platform and build-tools).
 * **ADB:** Available at `/usr/bin/adb`.
+* **Node.js & npm:** Node v18+ (tested on v24.14.0) and npm v9+ (tested on v11.9.0).
+* **Antigravity CLI (`agy`):** Available at `~/.local/bin/agy` (used for zero-config Gemini 3.8 AI copywriting).
 
-### Common Commands
+### Android Native Commands
 * **Build Debug APK:**
   ```bash
   ./gradlew assembleDebug
+  ```
+* **Run Android Unit & Robolectric Tests:**
+  ```bash
+  ./gradlew testDebugUnitTest
   ```
 * **Install to Connected Phone (Pixel 7 Pro):**
   ```bash
@@ -123,17 +163,45 @@ roadtrip-copilot/
   ```
 * **Stream Live Logs from Phone:**
   ```bash
-  adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationEngine:V
+  adb logcat -s CopilotService:V AudioDuckEngine:V LocationTracker:V NotificationEngine:V RouteRepository:V
   ```
 * **Simulate Location Mock via ADB (for testing without driving):**
   ```bash
   adb emu geo fix -73.75620 42.65260
   ```
 
+### Route Builder Web Studio Commands
+* **Install Dependencies:**
+  ```bash
+  cd route-builder && npm install
+  ```
+* **Start Dev Server (Both Frontend :5173 and Backend :3001):**
+  ```bash
+  cd route-builder && npm run dev
+  ```
+* **Compile TypeScript & Production Build:**
+  ```bash
+  cd route-builder && npm run build
+  ```
+* **Run All 97 Vitest Tests:**
+  ```bash
+  cd route-builder && npm test
+  ```
+* **Run Granular Test Suites:**
+  ```bash
+  cd route-builder && npm run test:backend  # OSRM, Nominatim, LRU cache
+  cd route-builder && npm run test:engine   # Timeline cascade & Google Maps chunking
+  cd route-builder && npm run test:ai       # agy CLI prompt & schema validation
+  cd route-builder && npm run test:schema   # V2 export & device sync
+  ```
+
 ---
 
 ## 5. Rules for Contributing Agents
-1. **Never add cloud API dependencies:** Do not introduce Retrofit, Firebase, Google Maps API keys, or web-based geocoding into the runtime drive loop. Everything must run offline.
-2. **Strict Battery & Threading Discipline:** Use Kotlin Coroutines (`Dispatchers.Default` for math/JSON parsing, `Dispatchers.Main` for UI/notifications). Never poll in blocking while-loops; rely on `LocationListener` push callbacks.
-3. **Preserve Waypoint Data:** The coordinate values, time offsets, and trigger radiuses in `itinerary.json` are carefully vetted for the actual driving route. Do not alter them without explicit instruction.
-4. **Idiomatic Kotlin:** Use concise, null-safe Kotlin with data classes and single-responsibility components.
+1. **Never add cloud API dependencies to the Android in-car drive loop:** Do not introduce Retrofit, Firebase, Google Maps API keys, or web geocoding into `app/`. The Android foreground service must operate 100% offline.
+2. **Strict Battery & Threading Discipline:** In Android, use Kotlin Coroutines (`Dispatchers.IO` for disk/storage/assets, `Dispatchers.Default` for math/JSON parsing, `Dispatchers.Main` for UI/notifications). In Node/Fastify, keep network I/O asynchronous and use LRU caching for routing calls.
+3. **Preserve Backward Compatibility in Itineraries:** The Android app must seamlessly parse both V1 schemas (bundled static assets) and V2 schemas (`dwell_minutes`, `type`, `metadata`). Never remove fields from `ItineraryModels.kt`.
+4. **Strict TypeScript in `route-builder/`:** Enforce `strict: true` with **zero `any` types**. Catch blocks must use `err: unknown` with `err instanceof Error` narrowing.
+5. **Preserve Literal Semicolon in OSRM Coordinate Paths:** The OSRM routing engine strictly requires unencoded `;` delimiters in its URL path segment. Never call `encodeURIComponent` on coordinate strings passed in URL paths.
+6. **Preserve Android Auto Distraction Constraints:** List templates displayed while driving must never exceed 6 items per page. Always use pagination or truncation in `androidx.car.app` screens.
+7. **Idiomatic Code:** Write concise, null-safe Kotlin and modular, typed TypeScript with single-responsibility components.
