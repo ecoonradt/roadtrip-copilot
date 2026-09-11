@@ -83,6 +83,23 @@
                         android:backgroundTint="@color/accent" />
                 </LinearLayout>
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnImportItinerary"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="12dp"
+                    android:strokeColor="@color/accent"
+                    android:text="Import Itinerary (JSON)"
+                    android:textAllCaps="false"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textColor="@color/accent"
+                    app:icon="@drawable/ic_import_file"
+                    app:iconGravity="textStart"
+                    app:iconTint="@color/accent"
+                    app:cornerRadius="8dp" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

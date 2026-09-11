@@ -57,7 +57,7 @@ To prevent agents from getting lost in context bloat or "going off the rails":
     ```
   - **Stage 2: Code Review Subagent:** Must verify test rigor covers scenarios 1–4 and no blocking I/O runs on the main thread.
 
-- [ ] **Phase 1B: Phone UI Import Flow (`MainActivity.kt`)**
+- [x] **Phase 1B: Phone UI Import Flow (`MainActivity.kt`)**
   - **Component Boundary:** `app/src/main/res/layout/activity_main.xml`, `MainActivity.kt`, `CopilotService.kt`
   - **Deliverables:** Import button in UI, SAF `OpenDocument()` intent contract, dynamic spinner refresh.
   - **Scope:**

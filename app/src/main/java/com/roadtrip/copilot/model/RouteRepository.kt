@@ -120,15 +120,24 @@ class RouteRepository(
         try {
             if (option.isAsset) {
                 val stream = assetProvider.open(option.routeFile)
-                if (stream == null) {
-                    logE(TAG, "Bundled asset file not found: ${option.routeFile}")
-                    return@withContext null
+                if (stream != null) {
+                    return@withContext stream.use { s ->
+                        InputStreamReader(s, Charsets.UTF_8).use { reader ->
+                            gson.fromJson(reader, Itinerary::class.java)
+                        }
+                    }
                 }
-                stream.use { s ->
-                    InputStreamReader(s, Charsets.UTF_8).use { reader ->
+                // Fallback: check storage directories
+                val file = storageDirs.firstNotNullOfOrNull { dir ->
+                    File(dir, option.routeFile).takeIf { it.exists() }
+                }
+                if (file != null && file.exists()) {
+                    return@withContext file.reader(Charsets.UTF_8).use { reader ->
                         gson.fromJson(reader, Itinerary::class.java)
                     }
                 }
+                logE(TAG, "Bundled asset file not found: ${option.routeFile}")
+                return@withContext null
             } else {
                 val file = if (!option.absolutePath.isNullOrBlank()) {
                     File(option.absolutePath)
@@ -137,13 +146,22 @@ class RouteRepository(
                         File(dir, option.routeFile).takeIf { it.exists() }
                     }
                 }
-                if (file == null || !file.exists()) {
-                    logE(TAG, "Storage itinerary file not found: ${option.routeFile} (path: ${option.absolutePath})")
-                    return@withContext null
+                if (file != null && file.exists()) {
+                    return@withContext file.reader(Charsets.UTF_8).use { reader ->
+                        gson.fromJson(reader, Itinerary::class.java)
+                    }
                 }
-                file.reader(Charsets.UTF_8).use { reader ->
-                    gson.fromJson(reader, Itinerary::class.java)
+                // Fallback: check asset provider
+                val stream = assetProvider.open(option.routeFile)
+                if (stream != null) {
+                    return@withContext stream.use { s ->
+                        InputStreamReader(s, Charsets.UTF_8).use { reader ->
+                            gson.fromJson(reader, Itinerary::class.java)
+                        }
+                    }
                 }
+                logE(TAG, "Storage itinerary file not found: ${option.routeFile} (path: ${option.absolutePath})")
+                return@withContext null
             }
         } catch (e: Exception) {
             logE(TAG, "Error loading itinerary for ${option.routeFile}: ${e.message}", e)
@@ -159,15 +177,42 @@ class RouteRepository(
         isAsset: Boolean = false,
         absolutePath: String? = null
     ): Itinerary? {
+        val existing = _routes.value.find { it.routeFile == routeFile }
+        val finalIsAsset = existing?.isAsset ?: isAsset
+        val finalAbsolutePath = existing?.absolutePath ?: absolutePath
         return loadItinerary(
             RouteOption(
-                title = routeFile,
+                title = existing?.title ?: routeFile,
                 routeFile = routeFile,
-                dayNumber = 1,
-                isAsset = isAsset,
-                absolutePath = absolutePath
+                dayNumber = existing?.dayNumber ?: 1,
+                isAsset = finalIsAsset,
+                absolutePath = finalAbsolutePath
             )
         )
+    }
+
+    /**
+     * Convenience overload to load an itinerary given route file name and day number.
+     */
+    suspend fun loadItinerary(
+        routeFile: String,
+        dayNumber: Int
+    ): Itinerary? {
+        val existing = _routes.value.find { it.routeFile == routeFile && it.dayNumber == dayNumber }
+            ?: _routes.value.find { it.routeFile == routeFile }
+        return if (existing != null) {
+            loadItinerary(existing)
+        } else {
+            loadItinerary(
+                RouteOption(
+                    title = routeFile,
+                    routeFile = routeFile,
+                    dayNumber = dayNumber,
+                    isAsset = false,
+                    absolutePath = null
+                )
+            )
+        }
     }
 
     /**

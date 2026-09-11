@@ -549,4 +549,50 @@ class RouteRepositoryTest {
         )
         assertEquals("Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks", option.toString())
     }
+
+    /**
+     * Phase 1B Invariant: loadItinerary(routeFile, dayNumber) Overload & Fallback Resolution
+     * Verifies that CopilotService can load both bundled assets and custom storage files
+     * using routeFile and dayNumber without crashing or failing.
+     */
+    @Test
+    fun testPhase1B_LoadItineraryOverloadsAndFallback() = runBlocking {
+        val repository = RouteRepository(
+            storageDir = primaryStorageDir,
+            assetProvider = fileAssetProvider
+        )
+
+        // 1. Load bundled asset multi-day route by filename + dayNumber
+        val assetItinerary = repository.loadItinerary("itinerary.json", dayNumber = 2)
+        assertNotNull("Bundled asset itinerary must load by filename and dayNumber", assetItinerary)
+        assertEquals("Phoenix to Albuquerque Road Trip", assetItinerary?.tripName)
+        val day2Checkpoints = assetItinerary?.getCheckpointsForDay(2)
+        assertTrue("Day 2 checkpoints must not be empty", !day2Checkpoints.isNullOrEmpty())
+
+        // 2. Load custom stored route by filename + dayNumber
+        val customTripJson = """
+            {
+              "trip_name": "Sedona Red Rock Vortex Loop",
+              "checkpoints": [
+                { "id": "vortex_1", "name": "Airport Mesa Vortex", "lat": 34.855, "lng": -111.778, "offset_minutes_from_start": 0 },
+                { "id": "vortex_2", "name": "Cathedral Rock Vortex", "lat": 34.821, "lng": -111.792, "offset_minutes_from_start": 20 }
+              ]
+            }
+        """.trimIndent()
+        val customFile = File(primaryStorageDir, "sedona_custom.json")
+        customFile.writeText(customTripJson)
+
+        repository.refreshRoutes()
+
+        val customLoaded = repository.loadItinerary("sedona_custom.json", dayNumber = 1)
+        assertNotNull("Custom storage itinerary must load by filename and dayNumber", customLoaded)
+        assertEquals("Sedona Red Rock Vortex Loop", customLoaded?.tripName)
+        assertEquals(2, customLoaded?.getCheckpointsForDay(1)?.size)
+
+        // 3. Fallback: calling loadItinerary("itinerary.json") with default isAsset=false
+        // should still successfully find and load the asset via fallback!
+        val fallbackAsset = repository.loadItinerary("itinerary.json")
+        assertNotNull("Calling loadItinerary without isAsset flag must fallback to assetProvider and succeed", fallbackAsset)
+        assertEquals("Phoenix to Albuquerque Road Trip", fallbackAsset?.tripName)
+    }
 }

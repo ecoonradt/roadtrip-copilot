@@ -2,39 +2,37 @@ package com.roadtrip.copilot
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.OpenableColumns
+import android.util.Log
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
-import android.util.Log
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.gson.Gson
 import com.roadtrip.copilot.databinding.ActivityMainBinding
-import com.roadtrip.copilot.model.Itinerary
+import com.roadtrip.copilot.model.RouteOption
+import com.roadtrip.copilot.model.RouteRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import java.io.InputStreamReader
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-data class RouteOption(
-    val title: String,
-    val routeFile: String,
-    val dayNumber: Int
-) {
-    override fun toString(): String = title
-}
 
 class MainActivity : AppCompatActivity() {
 
@@ -42,6 +40,15 @@ class MainActivity : AppCompatActivity() {
     private var copilotService: CopilotService? = null
     private var isBound = false
     private var routeOptions: List<RouteOption> = emptyList()
+    private var routeAdapter: ArrayAdapter<RouteOption>? = null
+
+    private val importLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            importItineraryFromUri(uri)
+        }
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -112,6 +119,82 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun resolveFileName(uri: Uri): String {
+        var name: String? = null
+        if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
+            try {
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1) {
+                            name = cursor.getString(nameIndex)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to resolve display name from uri: $uri", e)
+            }
+        }
+        if (name.isNullOrBlank()) {
+            name = uri.lastPathSegment?.substringAfterLast('/')
+        }
+        val resolvedName = if (!name.isNullOrBlank()) name!! else "custom_itinerary.json"
+        val cleanName = File(resolvedName).name
+        return if (cleanName.endsWith(".json", ignoreCase = true)) cleanName else "$cleanName.json"
+    }
+
+    private fun importItineraryFromUri(uri: Uri) {
+        lifecycleScope.launch {
+            try {
+                val fileName = resolveFileName(uri)
+                val targetDir = File(filesDir, "itineraries")
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+                val targetFile = File(targetDir, fileName)
+
+                val importedOption = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { inputStream ->
+                        targetFile.outputStream().use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    } ?: throw IllegalStateException("Could not read itinerary from selected file")
+
+                    val repo = RouteRepository.getInstance(applicationContext)
+                    val updatedRoutes = repo.refreshRoutes()
+                    updatedRoutes.find { it.routeFile == targetFile.name }
+                }
+
+                if (importedOption != null) {
+                    val isRunning = CopilotService.isRunning.value
+                    CopilotService.setSelectedRoute(
+                        this@MainActivity,
+                        importedOption.routeFile,
+                        importedOption.dayNumber,
+                        autoRestartIfRunning = isRunning
+                    )
+                    Toast.makeText(this@MainActivity, "Imported: ${importedOption.title}", Toast.LENGTH_SHORT).show()
+                    appendLog("Imported custom itinerary: ${importedOption.title} (${importedOption.routeFile})")
+                } else {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "File $fileName imported, but contained no valid waypoints.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    appendLog("Warning: $fileName imported but contains no valid checkpoints or days.")
+                }
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Permission denied importing itinerary", e)
+                Toast.makeText(this@MainActivity, "Permission denied accessing file: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                appendLog("Error: Permission denied reading file.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to import itinerary", e)
+                Toast.makeText(this@MainActivity, "Import failed: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
+                appendLog("Error importing itinerary: ${e.message}")
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -122,6 +205,10 @@ class MainActivity : AppCompatActivity() {
         setupListeners()
         observeServiceState()
         handleTestAction(intent)
+
+        lifecycleScope.launch {
+            RouteRepository.getInstance(this@MainActivity).refreshRoutes()
+        }
     }
 
     override fun onStart() {
@@ -146,9 +233,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRouteSpinner() {
-        routeOptions = loadRouteOptions()
-        val adapter = ArrayAdapter(this, R.layout.spinner_item, routeOptions)
-        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        routeOptions = RouteRepository.getInstance(this).getRouteOptions()
+        val adapter = ArrayAdapter(this, R.layout.spinner_item, ArrayList(routeOptions)).apply {
+            setDropDownViewResource(R.layout.spinner_dropdown_item)
+        }
+        routeAdapter = adapter
         binding.spinnerRoute.adapter = adapter
 
         val currentFile = CopilotService.activeRouteFile.value
@@ -160,7 +249,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.spinnerRoute.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val selected = routeOptions[position]
+                val selected = routeOptions.getOrNull(position) ?: return
                 val running = CopilotService.isRunning.value
                 if (selected.routeFile != CopilotService.activeRouteFile.value || selected.dayNumber != CopilotService.activeDayNumber.value) {
                     CopilotService.setSelectedRoute(this@MainActivity, selected.routeFile, selected.dayNumber, autoRestartIfRunning = running)
@@ -168,52 +257,6 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
-    }
-
-    private fun loadRouteOptions(): List<RouteOption> {
-        val options = mutableListOf<RouteOption>()
-        val gson = Gson()
-
-        // 1. Return Test Run
-        try {
-            assets.open("test_itinerary_return.json").use { stream ->
-                val it = gson.fromJson(InputStreamReader(stream), Itinerary::class.java)
-                val title = if (!it.tripName.isNullOrBlank()) it.tripName else "Return Run: Nassau to Albany"
-                options.add(RouteOption(title, "test_itinerary_return.json", 1))
-            }
-        } catch (e: Exception) {
-            options.add(RouteOption("Return Run: Nassau to Albany", "test_itinerary_return.json", 1))
-        }
-
-        // 2. Test Run
-        try {
-            assets.open("test_itinerary.json").use { stream ->
-                val it = gson.fromJson(InputStreamReader(stream), Itinerary::class.java)
-                val title = if (!it.tripName.isNullOrBlank()) it.tripName else "Test Run: Albany to Nassau"
-                options.add(RouteOption(title, "test_itinerary.json", 1))
-            }
-        } catch (e: Exception) {
-            options.add(RouteOption("Test Run: Albany to Nassau", "test_itinerary.json", 1))
-        }
-
-        // 3. Phoenix to Albuquerque Days
-        try {
-            assets.open("itinerary.json").use { stream ->
-                val it = gson.fromJson(InputStreamReader(stream), Itinerary::class.java)
-                it.days?.forEach { day ->
-                    val title = if (!day.title.isNullOrBlank()) {
-                        "Day ${day.day}: ${day.title}"
-                    } else {
-                        "Day ${day.day}"
-                    }
-                    options.add(RouteOption(title, "itinerary.json", day.day))
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Failed to load itinerary.json", e)
-        }
-
-        return options
     }
 
     private fun setupListeners() {
@@ -288,6 +331,15 @@ class MainActivity : AppCompatActivity() {
             copilotService?.setPauseMusicInsteadOfDuck(isChecked)
             appendLog("Audio mode: ${if (isChecked) "Pause music completely" else "Duck volume (Google Maps style)"}")
         }
+
+        binding.btnImportItinerary.setOnClickListener {
+            try {
+                importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch document picker", e)
+                Toast.makeText(this, "Could not open file picker: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun checkPermissionsAndStart() {
@@ -325,6 +377,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeServiceState() {
+        lifecycleScope.launch {
+            RouteRepository.getInstance(this@MainActivity).routes.collectLatest { options ->
+                routeOptions = options
+                routeAdapter?.apply {
+                    clear()
+                    addAll(options)
+                    notifyDataSetChanged()
+                }
+                val currentFile = CopilotService.activeRouteFile.value
+                val currentDay = CopilotService.activeDayNumber.value
+                val idx = options.indexOfFirst { it.routeFile == currentFile && it.dayNumber == currentDay }
+                if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
+                    binding.spinnerRoute.setSelection(idx)
+                }
+            }
+        }
+
         lifecycleScope.launch {
             CopilotService.isRunning.collectLatest { running ->
                 if (running) {
@@ -390,5 +459,9 @@ class MainActivity : AppCompatActivity() {
         val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
         val currentText = binding.tvEventLog.text.toString()
         binding.tvEventLog.text = "[$time] $msg\n$currentText"
+    }
+
+    companion object {
+        private const val TAG = "MainActivity"
     }
 }

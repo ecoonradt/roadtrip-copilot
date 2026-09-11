@@ -11,6 +11,7 @@ import android.util.Log
 import com.google.gson.Gson
 import com.roadtrip.copilot.model.EvaluationResult
 import com.roadtrip.copilot.model.Itinerary
+import com.roadtrip.copilot.model.RouteRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,6 +67,9 @@ class CopilotService : Service() {
         private val companionScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
         fun loadInitialRoute(context: Context) {
+            companionScope.launch {
+                RouteRepository.getInstance(context).refreshRoutes()
+            }
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val routeFile = prefs.getString(PREF_ROUTE_FILE, "itinerary.json") ?: "itinerary.json"
             val dayNum = prefs.getInt(PREF_DAY_NUMBER, 1)
@@ -89,11 +93,15 @@ class CopilotService : Service() {
 
             companionScope.launch {
                 try {
-                    val itinerary = context.assets.open(routeFile).use { stream ->
-                        InputStreamReader(stream).use { reader ->
-                            Gson().fromJson(reader, Itinerary::class.java)
-                        }
+                    val repo = RouteRepository.getInstance(context)
+                    val itinerary = repo.loadItinerary(routeFile, dayNumber)
+                        ?: repo.loadItinerary(routeFile)
+
+                    if (itinerary == null) {
+                        Log.e(TAG, "Failed to load itinerary for $routeFile (day $dayNumber)")
+                        return@launch
                     }
+
                     val startTime = System.currentTimeMillis()
                     val checkpoints = itinerary.resolveCheckpointsForDay(dayNumber, startTime)
                     val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
@@ -272,13 +280,10 @@ class CopilotService : Service() {
     private fun loadItineraryAndStart(routeFile: String, dayNumber: Int) {
         serviceScope.launch {
             try {
+                val repo = RouteRepository.getInstance(applicationContext)
                 val itinerary = withContext(Dispatchers.IO) {
-                    assets.open(routeFile).use { stream ->
-                        InputStreamReader(stream).use { reader ->
-                            Gson().fromJson(reader, Itinerary::class.java)
-                        }
-                    }
-                }
+                    repo.loadItinerary(routeFile, dayNumber) ?: repo.loadItinerary(routeFile)
+                } ?: throw IllegalStateException("Failed to load itinerary: $routeFile (day $dayNumber)")
 
                 val startTime = System.currentTimeMillis()
                 val checkpoints = itinerary.resolveCheckpointsForDay(dayNumber, startTime)
