@@ -1,9 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { MapCanvas } from './components/MapCanvas';
 import { TimelineSidebar } from './components/TimelineSidebar';
-import { SearchBar } from './components/SearchBar';
+import { AppHeader } from './components/AppHeader';
+import { ExportModal } from './components/ExportModal';
 import { fetchRoute } from './services/api';
 import type { Waypoint, RouteResponse, GeocodeResult } from './types/routing';
+import {
+  calculateTimelineCascade,
+  calculateBackwardSchedule,
+} from './engine/cascade';
+import { generateGoogleMapsUrls } from './engine/googleMapsUrl';
 
 // Initial sample route from Day 1 of the PHX -> ABQ trip
 const INITIAL_SAMPLE_WAYPOINTS: Waypoint[] = [
@@ -60,6 +66,18 @@ export function App() {
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
 
+  // Scheduling state
+  const [baseDate, setBaseDate] = useState<string>('2026-10-09');
+  const [departureTime, setDepartureTime] = useState<string>('14:30:00');
+  const [schedulingMode, setSchedulingMode] = useState<'forward' | 'backward'>('forward');
+  const [targetArrivalTime, setTargetArrivalTime] = useState<string>('18:00:00');
+
+  // Export Modal state
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  // Search input ref for programmatic focus from "+ Add Stop"
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   const coordKey = waypoints.map((w) => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join(';');
 
   // Compute OSRM route whenever coordinate sequence changes
@@ -101,6 +119,86 @@ export function App() {
     };
   }, [coordKey]);
 
+  // Extract pairwise driving durations and distances from OSRM route
+  const { driveDurationsSeconds, driveDistancesMiles } = useMemo(() => {
+    if (!route?.legs || route.legs.length === 0) {
+      return { driveDurationsSeconds: undefined, driveDistancesMiles: undefined };
+    }
+    return {
+      driveDurationsSeconds: route.legs.map((l) => l.durationSeconds),
+      driveDistancesMiles: route.legs.map((l) => l.distanceMiles),
+    };
+  }, [route]);
+
+  // Compute timeline cascade (forward or backward mode)
+  const { cascadeResult, backwardInfo } = useMemo(() => {
+    if (waypoints.length === 0) {
+      return {
+        cascadeResult: calculateTimelineCascade({
+          baseDate,
+          departureTime: '14:30:00',
+          waypoints: [],
+        }),
+        backwardInfo: null,
+      };
+    }
+
+    try {
+      if (schedulingMode === 'backward') {
+        const result = calculateBackwardSchedule({
+          baseDate,
+          targetArrivalTime: targetArrivalTime.length === 5 ? `${targetArrivalTime}:00` : targetArrivalTime,
+          waypoints,
+          driveDurationsSeconds,
+          driveDistancesMiles,
+        });
+        return {
+          cascadeResult: result.cascadeResult,
+          backwardInfo: result,
+        };
+      }
+
+      const formattedDep = departureTime.length === 5 ? `${departureTime}:00` : departureTime;
+      const result = calculateTimelineCascade({
+        baseDate,
+        departureTime: formattedDep,
+        waypoints,
+        driveDurationsSeconds,
+        driveDistancesMiles,
+      });
+
+      return {
+        cascadeResult: result,
+        backwardInfo: null,
+      };
+    } catch {
+      const fallbackResult = calculateTimelineCascade({
+        baseDate,
+        departureTime: '14:30:00',
+        waypoints,
+      });
+      return {
+        cascadeResult: fallbackResult,
+        backwardInfo: null,
+      };
+    }
+  }, [
+    baseDate,
+    departureTime,
+    schedulingMode,
+    targetArrivalTime,
+    waypoints,
+    driveDurationsSeconds,
+    driveDistancesMiles,
+  ]);
+
+  // Generate Google Maps Navigation URLs with automated chunking
+  const googleMapsRoute = useMemo(() => {
+    return generateGoogleMapsUrls(
+      waypoints.map((w) => ({ lat: w.lat, lng: w.lng, name: w.name }))
+    );
+  }, [waypoints]);
+
   const handleSelectLocation = useCallback((result: GeocodeResult) => {
     const newWaypoint: Waypoint = {
       id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -114,17 +212,27 @@ export function App() {
     setWaypoints((prev) => [...prev, newWaypoint]);
   }, []);
 
+  const handleFocusAddStop = useCallback(() => {
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+      searchInputRef.current.select();
+    }
+  }, []);
+
   const handleMapClick = useCallback((lat: number, lng: number) => {
-    const newWaypoint: Waypoint = {
-      id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: `Dropped Pin (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
-      type: 'scenic_pull_off',
-      lat,
-      lng,
-      dwell_minutes: 15,
-      trigger_radius_miles: 2.0,
-    };
-    setWaypoints((prev) => [...prev, newWaypoint]);
+    setWaypoints((prev) => {
+      const stopNum = prev.length + 1;
+      const newWaypoint: Waypoint = {
+        id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: `Stop ${stopNum} (${lat.toFixed(3)}, ${lng.toFixed(3)})`,
+        type: 'scenic_pull_off',
+        lat,
+        lng,
+        dwell_minutes: 15,
+        trigger_radius_miles: 2.0,
+      };
+      return [...prev, newWaypoint];
+    });
   }, []);
 
   const handleDeleteWaypoint = useCallback((id: string) => {
@@ -159,42 +267,74 @@ export function App() {
   }, []);
 
   return (
-    <div className="flex w-screen h-screen overflow-hidden bg-slate-900">
-      {/* Sidebar with Route & Waypoint Management */}
-      <TimelineSidebar
-        waypoints={waypoints}
+    <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950">
+      {/* Top Application Header: Branding, Search, Schedule, Telemetry & Export */}
+      <AppHeader
+        searchRef={searchInputRef}
+        onSelectLocation={handleSelectLocation}
         route={route}
         isLoadingRoute={isLoadingRoute}
-        onDeleteWaypoint={handleDeleteWaypoint}
-        onUpdateWaypoint={handleUpdateWaypoint}
-        onMoveWaypoint={handleMoveWaypoint}
-        onResetSample={handleResetSample}
-        onClearAll={handleClearAll}
+        routeError={routeError}
+        baseDate={baseDate}
+        setBaseDate={setBaseDate}
+        departureTime={departureTime}
+        setDepartureTime={setDepartureTime}
+        schedulingMode={schedulingMode}
+        setSchedulingMode={setSchedulingMode}
+        targetArrivalTime={targetArrivalTime}
+        setTargetArrivalTime={setTargetArrivalTime}
+        backwardInfo={backwardInfo}
+        cascadeResult={cascadeResult}
+        googleMapsRoute={googleMapsRoute}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
       />
 
-      {/* Main Map Canvas Area */}
-      <main className="relative flex-1 h-full overflow-hidden bg-slate-950">
-        {/* Floating Top Header / Search Bar */}
-        <div className="absolute top-4 left-4 z-[1000] flex items-center gap-3">
-          <SearchBar onSelectLocation={handleSelectLocation} />
-        </div>
-
-        {/* Route Calculation Error Banner */}
-        {routeError && (
-          <div className="absolute top-20 left-4 z-[1000] max-w-md p-3 text-xs bg-rose-950/90 text-rose-200 border border-rose-800/80 rounded-xl shadow-xl backdrop-blur-md">
-            <span className="font-bold">Routing Warning: </span>
-            {routeError}
-          </div>
-        )}
-
-        {/* Interactive Leaflet Map */}
-        <MapCanvas
+      {/* Main App Workspace: Left Waypoints Panel + Right Map Canvas */}
+      <div className="flex flex-1 w-full h-[calc(100vh-3.5rem)] overflow-hidden">
+        {/* Resizable Waypoints & Timeline Sidebar */}
+        <TimelineSidebar
           waypoints={waypoints}
-          route={route}
-          onMapClick={handleMapClick}
+          cascadeResult={cascadeResult}
+          isLoadingRoute={isLoadingRoute}
           onDeleteWaypoint={handleDeleteWaypoint}
+          onUpdateWaypoint={handleUpdateWaypoint}
+          onMoveWaypoint={handleMoveWaypoint}
+          onResetSample={handleResetSample}
+          onClearAll={handleClearAll}
+          onFocusAddStop={handleFocusAddStop}
         />
-      </main>
+
+        {/* Interactive Map Area */}
+        <main className="relative flex-1 h-full overflow-hidden bg-slate-950">
+          {/* Subtle Route Warning Banner if Routing Service Failed */}
+          {routeError && (
+            <div className="absolute top-4 left-4 z-[1000] max-w-md p-3 text-xs bg-rose-950/90 text-rose-200 border border-rose-800/80 rounded-xl shadow-xl backdrop-blur-md">
+              <span className="font-bold">Routing Warning: </span>
+              {routeError}
+            </div>
+          )}
+
+          {/* Leaflet Map Canvas */}
+          <MapCanvas
+            waypoints={waypoints}
+            route={route}
+            onMapClick={handleMapClick}
+            onDeleteWaypoint={handleDeleteWaypoint}
+          />
+        </main>
+      </div>
+
+      {/* Export & Phone Handoff Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        waypoints={waypoints}
+        scheduledStops={cascadeResult.stops}
+        tripName="Roadtrip Co-Pilot Itinerary"
+        baseDate={baseDate}
+        departureTime={departureTime}
+        googleMapsRoute={googleMapsRoute}
+      />
     </div>
   );
 }

@@ -67,6 +67,14 @@
   * **Google Maps Navigation Links:** Generates multi-stop driving links with route-forcing anchors to preserve scenic byways over interstates. Drives exceeding 9 intermediate stops are automatically partitioned into morning and afternoon legs ($\le 9$ intermediate stops each) with dedicated QR codes.
   * **Device Handoff:** Supports 1-click ADB push (`/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`), local Wi-Fi QR download staging (`GET /api/device/download/:filename`), and Android SAF file picker import.
 
+### G. Human-Centered UI/UX Principles (Route Builder Studio)
+* **Clarity & Intuitiveness Over Clutter:** The web interface must be immediately intuitive to a human road-tripper. More text is not the answer. Prioritize clean visual hierarchy, generous spacing, and self-explanatory controls over dense telemetry.
+* **Zero Technical / Debug Filler:** Never display internal verification badges, engine math jargon, or architecture status in the user-facing UI (e.g. NEVER show "Deterministic timeline engine", "Phase 2C verified", "Ripples $k$ stops", or raw coordinate dumps in primary card views).
+* **Dedicated Top Bar for Global Controls:** Place trip-level controls (search bar, trip date, departure time / flight catch-up, drive/dwell KPIs, Google Maps links, Export & Sync) in a horizontal top header (`AppHeader.tsx`), reserving 100% of vertical space in the left panel for the itinerary timeline.
+* **Scannable Waypoints via Progressive Disclosure:** Waypoint cards in `TimelineSidebar.tsx` must be compact and easily scannable by default (stop number badge with category color, stop name, arrival/departure time, dwell duration, and alert indicator). Detailed controls (renaming, changing category, fine-tuning dwell duration, setting alert trigger distance, and authoring speech scripts) belong in an inline expandable edit drawer.
+* **Explicit & Discoverable Actions:** Primary actions must be unmistakable: provide an obvious `+ Add Stop` button, clear inline edit buttons, reorder arrows, and delete icons. Never rely on hidden keyboard shortcuts or unexplained map clicks.
+* **Resizable Workspace:** The waypoint sidebar must be draggable/resizable (320px–680px) with `localStorage` persistence and double-click reset to allow comfortable workflow on varying screen resolutions.
+
 ---
 
 ## 3. Directory Layout
@@ -96,7 +104,7 @@ roadtrip-copilot/
 │   │   └── types/             # Strict TypeScript interfaces (0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout & state coordinator
-│   │   ├── components/        # MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal
+│   │   ├── components/        # AppHeader, MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models
@@ -205,3 +213,4 @@ roadtrip-copilot/
 5. **Preserve Literal Semicolon in OSRM Coordinate Paths:** The OSRM routing engine strictly requires unencoded `;` delimiters in its URL path segment. Never call `encodeURIComponent` on coordinate strings passed in URL paths.
 6. **Preserve Android Auto Distraction Constraints:** List templates displayed while driving must never exceed 6 items per page. Always use pagination or truncation in `androidx.car.app` screens.
 7. **Idiomatic Code:** Write concise, null-safe Kotlin and modular, typed TypeScript with single-responsibility components.
+8. **Maintain Clean, Human-Friendly UI:** Never re-introduce technical debug text, verification claims, or cramped static panels into `route-builder/`. All UI updates must adhere to Section 2G Human-Centered UI/UX Principles.
