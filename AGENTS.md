@@ -66,6 +66,7 @@
   * **OSRM Routing Protocol Rule:** Coordinate paths sent to the upstream OSRM routing engine must use literal `;` delimiters (e.g. `/${formattedCoords}?overview=...`). **Never URL-encode semicolons as `%3B` in OSRM path segments**, as the router rejects `%3B` with HTTP 400 `InvalidUrl`.
   * **Google Maps Navigation Links:** Generates multi-stop driving links with route-forcing anchors to preserve scenic byways over interstates. Drives exceeding 9 intermediate stops are automatically partitioned into morning and afternoon legs ($\le 9$ intermediate stops each) with dedicated QR codes.
   * **Device Handoff:** Supports 1-click ADB push (`/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`), local Wi-Fi QR download staging (`GET /api/device/download/:filename`), and Android SAF file picker import.
+  * **Route Loading, Local Import & Multi-Day Navigation:** Discovers workspace itineraries via Fastify `/api/itineraries` (`itinerary.json`, test routes). Supports local JSON file drag-and-drop import via `itineraryParser.ts`. Displays a multi-day leg switcher bar (`DayTabBar.tsx`) to view, edit, and cascade any day in multi-day road trips while keeping in-memory edits intact.
 
 ### G. Human-Centered UI/UX Principles (Route Builder Studio)
 * **Clarity & Intuitiveness Over Clutter:** The web interface must be immediately intuitive to a human road-tripper. More text is not the answer. Prioritize clean visual hierarchy, generous spacing, and self-explanatory controls over dense telemetry.
@@ -99,16 +100,16 @@ roadtrip-copilot/
 │   ├── server/                # Fastify TypeScript backend
 │   │   ├── app.ts             # Fastify app factory with CORS and routes
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
-│   │   ├── routes/            # Fastify plugins (routing.ts, ai.ts, device.ts)
-│   │   ├── services/          # Business logic (routeService, geocodeService, routeCache, aiService, deviceService)
+│   │   ├── routes/            # Fastify plugins (routing.ts, ai.ts, device.ts, itineraries.ts)
+│   │   ├── services/          # Business logic (routeService, geocodeService, routeCache, aiService, deviceService, itineraryStorageService)
 │   │   └── types/             # Strict TypeScript interfaces (0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout & state coordinator
-│   │   ├── components/        # AppHeader, MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal
-│   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON)
+│   │   ├── components/        # AppHeader, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal
+│   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models
-│   └── tests/                 # Vitest test suites (97 tests: backend, engine, ai, schema, device)
+│   └── tests/                 # Vitest test suites (108 tests: backend, engine, ai, schema, device, itineraries)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/

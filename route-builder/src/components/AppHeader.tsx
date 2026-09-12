@@ -11,6 +11,9 @@ import {
   Calendar,
   Globe,
   ChevronDown,
+  FolderOpen,
+  Save,
+  Loader2,
 } from 'lucide-react';
 import { SearchBar } from './SearchBar';
 import type { RouteResponse, GeocodeResult } from '../types/routing';
@@ -38,6 +41,11 @@ interface AppHeaderProps {
   cascadeResult: TimelineCascadeResult;
   googleMapsRoute: GoogleMapsRouteResult;
   onOpenExportModal: () => void;
+  currentTripName?: string;
+  onOpenRouteSelector?: () => void;
+  onSaveTrip?: () => void;
+  isSaving?: boolean;
+  saveSuccess?: boolean;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -58,6 +66,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   cascadeResult,
   googleMapsRoute,
   onOpenExportModal,
+  currentTripName = 'Phoenix to Albuquerque Road Trip',
+  onOpenRouteSelector,
+  onSaveTrip,
+  isSaving = false,
+  saveSuccess = false,
 }) => {
   const [isSchedulePopoverOpen, setIsSchedulePopoverOpen] = useState(false);
   const [isMapsDropdownOpen, setIsMapsDropdownOpen] = useState(false);
@@ -155,6 +168,21 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Route / Trip Selector Trigger */}
+        {onOpenRouteSelector && (
+          <button
+            onClick={onOpenRouteSelector}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-medium transition-colors cursor-pointer shadow-sm ml-1"
+            title="Switch itinerary, import JSON file, or start a new route"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span className="font-semibold text-white truncate max-w-[130px] sm:max-w-[190px]">
+              {currentTripName}
+            </span>
+            <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+          </button>
+        )}
       </div>
 
       {/* Center: Search Bar */}
@@ -381,6 +409,29 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {/* Quick Save to File */}
+        {onSaveTrip && (
+          <button
+            onClick={onSaveTrip}
+            disabled={isSaving}
+            className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer disabled:opacity-50 ${
+              saveSuccess
+                ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700/80'
+            }`}
+            title="Save changes to route file on disk"
+          >
+            {isSaving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+            ) : saveSuccess ? (
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Save className="w-3.5 h-3.5 text-sky-400" />
+            )}
+            <span>{saveSuccess ? 'Saved!' : 'Save'}</span>
+          </button>
         )}
 
         {/* Primary CTA: Export & Sync */}

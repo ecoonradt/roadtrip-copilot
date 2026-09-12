@@ -151,3 +151,65 @@ export async function fetchNetworkInfo(): Promise<{ ip: string; port: number }> 
   }
   return (await res.json()) as { ip: string; port: number };
 }
+
+export interface ItineraryDaySummary {
+  dayNumber: number;
+  date: string;
+  title?: string;
+  checkpointCount: number;
+  origin?: string;
+  destination?: string;
+}
+
+export interface ItineraryMetadataSummary {
+  fileName: string;
+  tripName: string;
+  isMultiDay: boolean;
+  dayCount: number;
+  days: ItineraryDaySummary[];
+  totalCheckpoints: number;
+  dates?: { start: string; end: string };
+  lastModified?: string;
+}
+
+export async function fetchItineraryList(): Promise<{ itineraries: ItineraryMetadataSummary[] }> {
+  const res = await fetch('/api/itineraries');
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Failed to list itineraries' }))) as {
+      error?: string;
+    };
+    throw new Error(errorData.error || `Failed to list itineraries with HTTP ${res.status}`);
+  }
+  return (await res.json()) as { itineraries: ItineraryMetadataSummary[] };
+}
+
+export async function fetchItinerary(fileName: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/itineraries/${encodeURIComponent(fileName)}`);
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Failed to load itinerary' }))) as {
+      error?: string;
+    };
+    throw new Error(errorData.error || `Failed to load itinerary with HTTP ${res.status}`);
+  }
+  return (await res.json()) as Record<string, unknown>;
+}
+
+export async function saveItinerary(
+  fileName: string,
+  content: unknown
+): Promise<{ success: boolean; fileName: string; filePath: string }> {
+  const res = await fetch(`/api/itineraries/${encodeURIComponent(fileName)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Failed to save itinerary' }))) as {
+      error?: string;
+    };
+    throw new Error(errorData.error || `Failed to save itinerary with HTTP ${res.status}`);
+  }
+
+  return (await res.json()) as { success: boolean; fileName: string; filePath: string };
+}
