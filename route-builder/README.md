@@ -17,7 +17,7 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
   * **Cloud Fallback:** `GeminiStudioHarnessAdapter` connects directly to Google AI Studio REST API, defaulting to `gemini-3.8-flash`.
   * **Deterministic Fallback:** `TemplateHarnessAdapter` provides offline template alerts if no AI provider is configured.
   * **Copywriting Constraints:** Enforces titles $\le 30$ characters, notification messages $\le 2$ lines, natural spoken phonetic TTS scripts (15–25 words, spoken within 8–12 seconds), and trigger radii clamped to $0.3$–$6.0$ miles.
-  * **Future Adapters:** Pluggable interface ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See `IDEAS.md`.
+  * **Future Adapters:** Pluggable interface ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See [docs/IDEAS.md](../docs/IDEAS.md).
 * **Multi-Stop Google Maps Navigation Links (`src/engine/googleMapsUrl.ts`):** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are partitioned into continuous driving legs with dedicated QR codes.
 * **Device Sync & Handoff (`server/services/deviceService.ts`, `src/components/ExportModal.tsx`):**
   * **1-Click ADB Push:** Directly pushes the itinerary `.json` to connected phones at `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.

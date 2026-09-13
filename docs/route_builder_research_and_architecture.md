@@ -349,7 +349,7 @@ Respond in strict JSON:
      - Anthropic Claude Adapter
      - OpenAI ChatGPT Adapter
      - Local offline models (Ollama, llama.cpp)
-   - Detailed proposals for these providers are tracked in `IDEAS.md`.
+   - Detailed proposals for these providers are tracked in [IDEAS.md](IDEAS.md).
 
 4. **Deterministic Template Fallback (`TemplateHarnessAdapter`):**
    - If neither `agy` nor an API key is available, context-aware deterministic templates generate alerts without failing.
@@ -537,7 +537,7 @@ gantt
 
 ## 7. Future Horizons & Feature Backlog
 
-*A detailed feature backlog, including multi-provider AI adapters (Anthropic Claude, OpenAI, Ollama), elevation profiles, weather radar overlays, and custom voice narration, is maintained in [IDEAS.md](../IDEAS.md).*
+*A detailed feature backlog, including multi-provider AI adapters (Anthropic Claude, OpenAI, Ollama), elevation profiles, weather radar overlays, and custom voice narration, is maintained in [IDEAS.md](IDEAS.md).*
 
 Key architectural opportunities include:
 - **Multi-Provider AI Harnesses:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama).

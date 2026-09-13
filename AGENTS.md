@@ -66,7 +66,7 @@
     * Cloud Fallback: `GeminiStudioHarnessAdapter` connects to Google AI Studio, defaulting to `gemini-3.8-flash`.
     * Deterministic Fallback: `TemplateHarnessAdapter` generates context-aware templates if no AI engine is active.
     * Enforces constraints: titles $\le 30$ chars, messages $\le 2$ lines, trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
-    * Roadmap: Support for Anthropic Claude, OpenAI, and Ollama/local models is tracked in [IDEAS.md](IDEAS.md).
+    * Roadmap: Support for Anthropic Claude, OpenAI, and Ollama/local models is tracked in [IDEAS.md](docs/IDEAS.md).
   * **OSRM Routing Protocol Rule:** Coordinate paths sent to the upstream OSRM routing engine must use literal `;` delimiters (e.g. `/${formattedCoords}?overview=...`). **Never URL-encode semicolons as `%3B` in OSRM path segments**, as the router rejects `%3B` with HTTP 400 `InvalidUrl`.
   * **Google Maps Navigation Links:** Generates multi-stop driving links with route-forcing anchors to preserve scenic byways over interstates. Drives exceeding 9 intermediate stops are automatically partitioned into consecutive legs ($\le 9$ intermediate stops each) with dedicated QR codes.
   * **Device Handoff:** Supports 1-click ADB push (`/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`), local Wi-Fi QR download staging (`GET /api/device/download/:filename`), and Android SAF file picker import.
@@ -87,14 +87,13 @@
 roadtrip-copilot/
 ├── AGENTS.md                  # This handbook
 ├── README.md                  # Project overview and setup guide
-├── IDEAS.md                   # Feature backlog and ideas log
 ├── itinerary.json             # Bundled sample multi-day itinerary
 ├── test_itinerary.json        # Bundled sample outbound test route
 ├── test_itinerary_return.json # Bundled sample return test route
 ├── docs/
+│   ├── IDEAS.md               # Feature backlog and roadmap proposals
 │   ├── ORCHESTRATION_PLAN.md  # Engineering verification checklist & roadmap
 │   └── route_builder_research_and_architecture.md # Technical specification & domain architecture
-├── legacy/                    # Archived prototypes
 ├── scripts/                   # Environment setup & run scripts (run_dhu.sh, setup_env.sh)
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
 ├── settings.gradle.kts        # Multi-project gradle settings

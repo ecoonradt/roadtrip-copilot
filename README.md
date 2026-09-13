@@ -89,7 +89,7 @@ The Route Builder features an AI copywriting engine to generate glanceable heads
   ```
   *(Defaults to `gemini-3.8-flash`; override via `export GEMINI_MODEL="model-name"`).*
 * **Offline Deterministic Fallback:** If neither `agy` nor an API key is present, context-aware template alerts are generated automatically without failing.
-* **Future Providers:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama) are planned. See [IDEAS.md](IDEAS.md).
+* **Future Providers:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama) are planned. See [IDEAS.md](docs/IDEAS.md).
 
 ---
 
@@ -138,6 +138,6 @@ Test the in-car Android Auto UI on your computer without being in a vehicle usin
 ## Project Documentation & Architecture
 
 * **[AGENTS.md](AGENTS.md):** Complete developer handbook, foreground service lifecycle, audio focus routing, distraction rules, and up-to-date repository directory layout.
-* **[IDEAS.md](IDEAS.md):** Feature backlog and roadmap (multi-provider AI adapters, custom voice profiles, GPX import/export, weather radar).
+* **[docs/IDEAS.md](docs/IDEAS.md):** Feature backlog and roadmap (multi-provider AI adapters, custom voice profiles, GPX import/export, weather radar).
 * **[route-builder/README.md](route-builder/README.md):** Web Studio architecture, API endpoints, environment variables, and testing guide.
 * **[docs/route_builder_research_and_architecture.md](docs/route_builder_research_and_architecture.md):** Technical specification for timeline cascading, routing proxies, and schema contracts.
