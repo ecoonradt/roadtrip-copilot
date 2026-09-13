@@ -10,7 +10,7 @@
 ### The Current State
 The Roadtrip Co-Pilot Android application is purpose-built to solve a distinct problem: providing contextual, heads-up in-car awareness (Android Auto notifications, synchronized audio ducking, and real-time pace telemetry) while running strictly in the background alongside Google Maps, with **zero cellular connectivity required**.
 
-Initially, the app relied on bundled static JSON files (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) embedded in the APK's `assets/` directory. Creating or modifying itineraries required manually formatting coordinates, target timestamps, and alert copy into JSON.
+Initially, the app relied on bundled static JSON files (`sample_itinerary.json`) embedded in the APK's `assets/` directory. Creating or modifying itineraries required manually formatting coordinates, target timestamps, and alert copy into JSON.
 
 ### The Problem
 While the in-car runtime execution is robust, the **authoring and itinerary management pipeline was completely manual and developer-dependent**:
@@ -415,7 +415,7 @@ To make custom routes immediately usable in the car, the native Android app requ
 #### Code Modifications in App:
 1. **`RouteRepository.kt` (New Singleton):**
    - Discovers all `.json` files in `context.getExternalFilesDir("itineraries")` or `context.filesDir`.
-   - Reads bundled assets (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) as fallbacks.
+   - Reads bundled assets (`sample_itinerary.json`) as fallbacks.
    - Exposes a unified list of available routes to `MainActivity` and `RouteListScreen`.
 2. **`MainActivity.kt`:**
    - Add an **"Import Route"** button that launches `ActivityResultContracts.OpenDocument()`.
@@ -486,7 +486,7 @@ gantt
 
 #### Phase 1A: Storage & Repository Engine (`RouteRepository.kt`)
 - Create `RouteRepository` singleton to scan internal storage (`context.filesDir/itineraries/`) and external files.
-- Maintain bundled assets (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) as permanent fallback defaults.
+- Maintain bundled assets (`sample_itinerary.json`) as permanent fallback defaults.
 - Handle JSON deserialization, schema validation against `ItineraryModels.kt`, and graceful handling of corrupted files.
 
 #### Phase 1B: Phone UI Import Flow (`MainActivity.kt`)

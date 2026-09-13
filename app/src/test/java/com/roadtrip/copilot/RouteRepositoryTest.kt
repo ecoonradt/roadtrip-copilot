@@ -38,14 +38,7 @@ class RouteRepositoryTest {
 
     /**
      * Scenario 1: Asset Fallback
-     * When filesDir / itineraries is empty, repository returns all 6 bundled asset route options
-     * in the exact specified order:
-     * 1. "Return Run: Nassau to Albany" (test_itinerary_return.json, day 1)
-     * 2. "Test Run: Albany to Nassau" (test_itinerary.json, day 1)
-     * 3. Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks (itinerary.json, day 1)
-     * 4. Day 2: High Desert, Shiprock & Chama Valley (itinerary.json, day 2)
-     * 5. Day 3: Brazos Pass to Taos High Road (itinerary.json, day 3)
-     * 6. Day 4: Taos Plaza & High Road into Santa Fe (itinerary.json, day 4)
+     * When filesDir / itineraries is empty, repository returns the bundled sample route option.
      */
     @Test
     fun testScenario1_AssetFallbackWhenStorageEmpty() = runBlocking {
@@ -58,72 +51,34 @@ class RouteRepositoryTest {
 
         val routes = repository.refreshRoutes()
 
-        assertEquals("Should return exactly 6 bundled asset route options", 6, routes.size)
+        assertEquals("Should return exactly 1 bundled asset route option", 1, routes.size)
 
-        // 1. Return Run
-        assertEquals("Return Run: Nassau to Albany", routes[0].title)
-        assertEquals("test_itinerary_return.json", routes[0].routeFile)
+        // 1. Sample Route
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", routes[0].title)
+        assertEquals("sample_itinerary.json", routes[0].routeFile)
         assertEquals(1, routes[0].dayNumber)
         assertTrue(routes[0].isAsset)
         assertNull(routes[0].absolutePath)
-
-        // 2. Test Run
-        assertEquals("Test Run: Albany to Nassau", routes[1].title)
-        assertEquals("test_itinerary.json", routes[1].routeFile)
-        assertEquals(1, routes[1].dayNumber)
-        assertTrue(routes[1].isAsset)
-        assertNull(routes[1].absolutePath)
-
-        // 3. Day 1
-        assertEquals("Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks", routes[2].title)
-        assertEquals("itinerary.json", routes[2].routeFile)
-        assertEquals(1, routes[2].dayNumber)
-        assertTrue(routes[2].isAsset)
-        assertNull(routes[2].absolutePath)
-
-        // 4. Day 2
-        assertEquals("Day 2: High Desert, Shiprock & Chama Valley", routes[3].title)
-        assertEquals("itinerary.json", routes[3].routeFile)
-        assertEquals(2, routes[3].dayNumber)
-        assertTrue(routes[3].isAsset)
-
-        // 5. Day 3
-        assertEquals("Day 3: Brazos Pass to Taos High Road", routes[4].title)
-        assertEquals("itinerary.json", routes[4].routeFile)
-        assertEquals(3, routes[4].dayNumber)
-        assertTrue(routes[4].isAsset)
-
-        // 6. Day 4
-        assertEquals("Day 4: Taos Plaza & High Road into Santa Fe", routes[5].title)
-        assertEquals("itinerary.json", routes[5].routeFile)
-        assertEquals(4, routes[5].dayNumber)
-        assertTrue(routes[5].isAsset)
 
         // Verify getRouteOptions() matches
         assertEquals(routes, repository.getRouteOptions())
         assertEquals(routes, repository.routes.value)
 
         // Verify loadItinerary successfully loads asset files
-        val itReturn = repository.loadItinerary(routes[0])
-        assertNotNull(itReturn)
-        assertEquals("Return Run: Nassau to Albany", itReturn?.tripName)
-        assertEquals(5, itReturn?.getCheckpointsForDay(1)?.size)
-
-        val itFull = repository.loadItinerary(routes[2])
-        assertNotNull(itFull)
-        assertEquals("Phoenix to Albuquerque Road Trip", itFull?.tripName)
-        assertEquals(4, itFull?.days?.size)
+        val itSample = repository.loadItinerary(routes[0])
+        assertNotNull(itSample)
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", itSample?.tripName)
+        assertEquals(4, itSample?.getCheckpointsForDay(1)?.size)
 
         // Also test resilience when AssetProvider is unavailable/null:
-        // Must still fallback to all 6 permanent defaults!
+        // Must still fallback to permanent defaults!
         val nullAssetRepo = RouteRepository(
             storageDir = primaryStorageDir,
             assetProvider = AssetProvider { null }
         )
         val fallbackRoutes = nullAssetRepo.refreshRoutes()
-        assertEquals(6, fallbackRoutes.size)
-        assertEquals("Return Run: Nassau to Albany", fallbackRoutes[0].title)
-        assertEquals("Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks", fallbackRoutes[2].title)
+        assertEquals(1, fallbackRoutes.size)
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", fallbackRoutes[0].title)
     }
 
     /**
@@ -137,8 +92,8 @@ class RouteRepositoryTest {
             assetProvider = fileAssetProvider
         )
 
-        // Initially 6 routes
-        assertEquals(6, repository.refreshRoutes().size)
+        // Initially 1 bundled sample route
+        assertEquals(1, repository.refreshRoutes().size)
 
         // Ingest a custom single-route itinerary
         val customJson = """
@@ -171,7 +126,7 @@ class RouteRepositoryTest {
         customFile.writeText(customJson)
 
         val updatedRoutes = repository.refreshRoutes()
-        assertEquals("Route list should grow from 6 to 7", 7, updatedRoutes.size)
+        assertEquals("Route list should grow from 1 to 2", 2, updatedRoutes.size)
 
         val customOption = updatedRoutes.find { it.routeFile == "moab_trip.json" }
         assertNotNull("Custom route must be found in route options", customOption)
@@ -193,12 +148,12 @@ class RouteRepositoryTest {
         assertEquals(1700000000000L + (15 * 60_000L), resolvedCheckpoints[1].targetEpochMillis)
 
         // StateFlow emission check
-        assertEquals(7, repository.routes.value.size)
+        assertEquals(2, repository.routes.value.size)
 
         // Delete custom file and verify refresh drops it
         customFile.delete()
         val afterDeleteRoutes = repository.refreshRoutes()
-        assertEquals(6, afterDeleteRoutes.size)
+        assertEquals(1, afterDeleteRoutes.size)
         assertNull(afterDeleteRoutes.find { it.routeFile == "moab_trip.json" })
     }
 
@@ -263,8 +218,8 @@ class RouteRepositoryTest {
             loggedEvents.any { it.contains("WARN") && it.contains("empty.json") }
         )
 
-        // The 3 bad files must be skipped, valid_custom.json ingested + 6 bundled = 7 routes
-        assertEquals(7, routes.size)
+        // The 3 bad files must be skipped, valid_custom.json ingested + 1 bundled = 2 routes
+        assertEquals(2, routes.size)
         assertNull(routes.find { it.routeFile == "corrupted_syntax.json" })
         assertNull(routes.find { it.routeFile == "empty.json" })
         assertNull(routes.find { it.routeFile == "random.json" })
@@ -369,8 +324,8 @@ class RouteRepositoryTest {
 
         val routes = repository.refreshRoutes()
 
-        // 3 multi-day options + 1 single route option + 6 bundled asset options = 10 options
-        assertEquals(10, routes.size)
+        // 3 multi-day options + 1 single route option + 1 bundled asset option = 5 options
+        assertEquals(5, routes.size)
 
         // Verify multi-day options
         val multiDayOptions = routes.filter { it.routeFile == "multi_day.json" }
@@ -543,11 +498,11 @@ class RouteRepositoryTest {
     @Test
     fun testRouteOptionToStringReturnsTitle() {
         val option = RouteOption(
-            title = "Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks",
-            routeFile = "itinerary.json",
+            title = "Scenic Southwest: Phoenix to Flagstaff",
+            routeFile = "sample_itinerary.json",
             dayNumber = 1
         )
-        assertEquals("Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks", option.toString())
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", option.toString())
     }
 
     /**
@@ -562,12 +517,12 @@ class RouteRepositoryTest {
             assetProvider = fileAssetProvider
         )
 
-        // 1. Load bundled asset multi-day route by filename + dayNumber
-        val assetItinerary = repository.loadItinerary("itinerary.json", dayNumber = 2)
+        // 1. Load bundled asset route by filename + dayNumber
+        val assetItinerary = repository.loadItinerary("sample_itinerary.json", dayNumber = 1)
         assertNotNull("Bundled asset itinerary must load by filename and dayNumber", assetItinerary)
-        assertEquals("Phoenix to Albuquerque Road Trip", assetItinerary?.tripName)
-        val day2Checkpoints = assetItinerary?.getCheckpointsForDay(2)
-        assertTrue("Day 2 checkpoints must not be empty", !day2Checkpoints.isNullOrEmpty())
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", assetItinerary?.tripName)
+        val day1Checkpoints = assetItinerary?.getCheckpointsForDay(1)
+        assertTrue("Day 1 checkpoints must not be empty", !day1Checkpoints.isNullOrEmpty())
 
         // 2. Load custom stored route by filename + dayNumber
         val customTripJson = """
@@ -589,10 +544,10 @@ class RouteRepositoryTest {
         assertEquals("Sedona Red Rock Vortex Loop", customLoaded?.tripName)
         assertEquals(2, customLoaded?.getCheckpointsForDay(1)?.size)
 
-        // 3. Fallback: calling loadItinerary("itinerary.json") with default isAsset=false
+        // 3. Fallback: calling loadItinerary("sample_itinerary.json") with default isAsset=false
         // should still successfully find and load the asset via fallback!
-        val fallbackAsset = repository.loadItinerary("itinerary.json")
+        val fallbackAsset = repository.loadItinerary("sample_itinerary.json")
         assertNotNull("Calling loadItinerary without isAsset flag must fallback to assetProvider and succeed", fallbackAsset)
-        assertEquals("Phoenix to Albuquerque Road Trip", fallbackAsset?.tripName)
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", fallbackAsset?.tripName)
     }
 }

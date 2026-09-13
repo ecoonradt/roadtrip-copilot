@@ -45,10 +45,10 @@ class CopilotService : Service() {
         private val _eventLogFlow = MutableSharedFlow<String>(replay = 5)
         val eventLogFlow = _eventLogFlow.asSharedFlow()
 
-        private val _activeRouteTitle = MutableStateFlow("Day 1: Phoenix to Sedona & Flagstaff")
+        private val _activeRouteTitle = MutableStateFlow("Scenic Southwest: Phoenix to Flagstaff")
         val activeRouteTitle = _activeRouteTitle.asStateFlow()
 
-        private val _activeRouteFile = MutableStateFlow("itinerary.json")
+        private val _activeRouteFile = MutableStateFlow("sample_itinerary.json")
         val activeRouteFile = _activeRouteFile.asStateFlow()
 
         private val _activeDayNumber = MutableStateFlow(1)
@@ -71,7 +71,7 @@ class CopilotService : Service() {
                 RouteRepository.getInstance(context).refreshRoutes()
             }
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val routeFile = prefs.getString(PREF_ROUTE_FILE, "itinerary.json") ?: "itinerary.json"
+            val routeFile = prefs.getString(PREF_ROUTE_FILE, "sample_itinerary.json") ?: "sample_itinerary.json"
             val dayNum = prefs.getInt(PREF_DAY_NUMBER, 1)
             setSelectedRoute(context, routeFile, dayNum, autoRestartIfRunning = false)
         }
@@ -135,7 +135,7 @@ class CopilotService : Service() {
 
         fun startRoute(context: Context, routeFile: String? = null, dayNumber: Int? = null) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val file = routeFile ?: prefs.getString(PREF_ROUTE_FILE, "itinerary.json") ?: "itinerary.json"
+            val file = routeFile ?: prefs.getString(PREF_ROUTE_FILE, "sample_itinerary.json") ?: "sample_itinerary.json"
             val day = dayNumber ?: prefs.getInt(PREF_DAY_NUMBER, 1)
 
             prefs.edit()
@@ -246,7 +246,7 @@ class CopilotService : Service() {
             return START_NOT_STICKY
         }
 
-        val routeFile = intent?.getStringExtra(EXTRA_ROUTE_FILE) ?: "itinerary.json"
+        val routeFile = intent?.getStringExtra(EXTRA_ROUTE_FILE) ?: "sample_itinerary.json"
         val dayNumber = intent?.getIntExtra(EXTRA_DAY_NUMBER, 1) ?: 1
 
         startForegroundServiceWithNotification()

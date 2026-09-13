@@ -55,7 +55,7 @@ class RouteListScreenTest {
         // Reset CopilotService static state before each test
         CopilotService.setSelectedRoute(
             context = context,
-            routeFile = "test_itinerary.json",
+            routeFile = "sample_itinerary.json",
             dayNumber = 1,
             autoRestartIfRunning = false
         )
@@ -193,13 +193,13 @@ class RouteListScreenTest {
         val sampleRoutes = listOf(
             RouteOption(
                 title = "Day 1: Phoenix to Sedona",
-                routeFile = "itinerary.json",
+                routeFile = "sample_itinerary.json",
                 dayNumber = 1,
                 subtitle = "Scenic Red Rocks"
             ),
             RouteOption(
                 title = "Day 2: Flagstaff to Chama",
-                routeFile = "itinerary.json",
+                routeFile = "sample_itinerary.json",
                 dayNumber = 2,
                 subtitle = "High Desert"
             )
@@ -209,11 +209,11 @@ class RouteListScreenTest {
         // Set initial selection to Day 1
         CopilotService.setSelectedRoute(
             context = context,
-            routeFile = "itinerary.json",
+            routeFile = "sample_itinerary.json",
             dayNumber = 1,
             autoRestartIfRunning = false
         )
-        assertEquals("itinerary.json", CopilotService.activeRouteFile.value)
+        assertEquals("sample_itinerary.json", CopilotService.activeRouteFile.value)
         assertEquals(1, CopilotService.activeDayNumber.value)
 
         val rootScreen = object : androidx.car.app.Screen(testCarContext) {
@@ -243,7 +243,7 @@ class RouteListScreenTest {
         clickDelegate?.sendClick(dummyCallback)
 
         // Verify CopilotService was updated
-        assertEquals("CopilotService activeRouteFile must match clicked route", "itinerary.json", CopilotService.activeRouteFile.value)
+        assertEquals("CopilotService activeRouteFile must match clicked route", "sample_itinerary.json", CopilotService.activeRouteFile.value)
         assertEquals("CopilotService activeDayNumber must match clicked route", 2, CopilotService.activeDayNumber.value)
 
         // Verify screen was popped
@@ -388,8 +388,7 @@ class RouteListScreenTest {
 
         val template = screen.onGetTemplate() as ListTemplate
         val items = template.singleList?.items ?: emptyList()
-        // Bundled assets has 6 items
-        assertEquals(6, items.size)
+        assertEquals(RouteRepository.DEFAULT_ASSET_OPTIONS.size, items.size)
     }
 
     /**

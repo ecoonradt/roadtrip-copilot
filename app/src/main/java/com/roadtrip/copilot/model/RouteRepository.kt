@@ -394,50 +394,15 @@ class RouteRepository(
         }
 
         /**
-         * The 6 bundled permanent fallback default route options.
+         * The bundled permanent fallback default route options.
          */
         val DEFAULT_ASSET_OPTIONS: List<RouteOption> = listOf(
             RouteOption(
-                title = "Return Run: Nassau to Albany",
-                routeFile = "test_itinerary_return.json",
+                title = "Scenic Southwest: Phoenix to Flagstaff",
+                routeFile = "sample_itinerary.json",
                 dayNumber = 1,
                 isAsset = true,
-                subtitle = "19-mile return test route"
-            ),
-            RouteOption(
-                title = "Test Run: Albany to Nassau",
-                routeFile = "test_itinerary.json",
-                dayNumber = 1,
-                isAsset = true,
-                subtitle = "19-mile outbound test route"
-            ),
-            RouteOption(
-                title = "Day 1: Red Rock Entry & Oak Creek Canyon Switchbacks",
-                routeFile = "itinerary.json",
-                dayNumber = 1,
-                isAsset = true,
-                subtitle = "Oct 9 • PHX Airport → Flagstaff"
-            ),
-            RouteOption(
-                title = "Day 2: High Desert, Shiprock & Chama Valley",
-                routeFile = "itinerary.json",
-                dayNumber = 2,
-                isAsset = true,
-                subtitle = "Oct 10 • Navajo Nation → Shiprock → Chama, NM"
-            ),
-            RouteOption(
-                title = "Day 3: Brazos Pass to Taos High Road",
-                routeFile = "itinerary.json",
-                dayNumber = 3,
-                isAsset = true,
-                subtitle = "Oct 11 • Brazos Cliffs → Rio Grande Gorge → Taos"
-            ),
-            RouteOption(
-                title = "Day 4: Taos Plaza & High Road into Santa Fe",
-                routeFile = "itinerary.json",
-                dayNumber = 4,
-                isAsset = true,
-                subtitle = "Oct 12 • High Road villages → Santa Fe Plaza → ABQ Airport"
+                subtitle = "Sample Route • Phoenix → Sedona → Flagstaff"
             )
         )
     }

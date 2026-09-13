@@ -1,0 +1,5 @@
+# Ignore all custom user itinerary JSON files
+*.json
+
+# Allow tracked public sample itinerary
+!sample_itinerary.json

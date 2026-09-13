@@ -19,12 +19,12 @@ import {
   type ParsedDay,
 } from './engine/itineraryParser';
 
-// Fallback initial route from Day 1 of the PHX -> ABQ trip if offline or initial load
+// Fallback initial route from sample itinerary if offline or initial load
 const INITIAL_FALLBACK_TRIP: ParsedTrip = {
-  fileName: 'itinerary.json',
-  tripName: 'Phoenix to Albuquerque Road Trip',
+  fileName: 'sample_itinerary.json',
+  tripName: 'Scenic Southwest: Phoenix to Flagstaff',
   isMultiDay: true,
-  dates: { start: '2026-10-09', end: '2026-10-12' },
+  dates: { start: '2026-10-09', end: '2026-10-09' },
   days: [
     {
       dayNumber: 1,
@@ -66,18 +66,18 @@ const INITIAL_FALLBACK_TRIP: ParsedTrip = {
           },
         },
         {
-          id: 'wp_flagstaff_hotel',
-          name: 'Little America Hotel Flagstaff',
-          type: 'lodging',
-          lat: 35.1878,
-          lng: -111.6152,
+          id: 'wp_flagstaff_destination',
+          name: 'Flagstaff Historic Downtown & Visitor Center',
+          type: 'destination',
+          lat: 35.1982,
+          lng: -111.6465,
           target_time: '18:15:00',
           dwell_minutes: 0,
-          trigger_radius_miles: 0.5,
+          trigger_radius_miles: 1.0,
           notification: {
-            title: 'Arrival: Little America Flagstaff',
-            message: 'Check-in and evening rest in Flagstaff ponderosa pines.',
-            speech: 'We have reached our destination for the night: Little America Hotel in Flagstaff.',
+            title: 'Arrival in Flagstaff',
+            message: 'Arrived in historic Flagstaff. Explore downtown Route 66 and local dining.',
+            speech: 'Arriving in Flagstaff. Welcome to historic Route 66 and the downtown district.',
           },
         },
       ],
@@ -108,14 +108,14 @@ export function App() {
   // Search input ref for programmatic focus from "+ Add Stop"
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-load workspace itinerary.json on initial mount
+  // Auto-load workspace sample_itinerary.json on initial mount
   useEffect(() => {
     let isSubscribed = true;
     const loadDefaultTrip = async () => {
       try {
-        const raw = await fetchItinerary('itinerary.json');
+        const raw = await fetchItinerary('sample_itinerary.json');
         if (isSubscribed && raw) {
-          const parsed = parseItineraryJson(raw, 'itinerary.json');
+          const parsed = parseItineraryJson(raw, 'sample_itinerary.json');
           setTrip(parsed);
           setActiveDayIndex(0);
         }

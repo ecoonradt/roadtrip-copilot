@@ -30,51 +30,23 @@ class ItineraryTest {
     }
 
     @Test
-    fun testParseFullItinerary() {
-        val file = File("src/main/assets/itinerary.json")
-        assertTrue("itinerary.json must exist in assets", file.exists())
+    fun testParseSampleItinerary() {
+        val file = File("src/main/assets/sample_itinerary.json")
+        assertTrue("sample_itinerary.json must exist in assets", file.exists())
 
         val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
-        assertEquals("Phoenix to Albuquerque Road Trip", itinerary.tripName)
+        assertEquals("Scenic Southwest: Phoenix to Flagstaff", itinerary.tripName)
         assertNotNull(itinerary.days)
-        assertEquals(4, itinerary.days!!.size)
+        assertEquals(1, itinerary.days!!.size)
 
-        for (day in 1..4) {
-            val checkpoints = itinerary.getCheckpointsForDay(day)
-            assertTrue("Day $day should have checkpoints", checkpoints.isNotEmpty())
-            for (cp in checkpoints) {
-                assertTrue("Trigger radius must be positive", cp.triggerRadiusMiles > 0)
-                assertNotNull("Checkpoint name should not be null", cp.name)
-            }
+        val checkpoints = itinerary.getCheckpointsForDay(1)
+        assertEquals(4, checkpoints.size)
+        assertEquals("phx_rental_pickup", checkpoints[0].id)
+        assertEquals("flagstaff_arrival", checkpoints[3].id)
+        for (cp in checkpoints) {
+            assertTrue("Trigger radius must be positive", cp.triggerRadiusMiles > 0)
+            assertNotNull("Checkpoint name should not be null", cp.name)
         }
-    }
-
-    @Test
-    fun testParseTestItinerary() {
-        val file = File("src/main/assets/test_itinerary.json")
-        assertTrue("test_itinerary.json must exist in assets", file.exists())
-
-        val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
-        assertEquals("Test Run: Albany to Nassau", itinerary.tripName)
-
-        val checkpoints = itinerary.getCheckpointsForDay(1)
-        assertEquals(5, checkpoints.size)
-        assertEquals("depart_Albany", checkpoints[0].id)
-        assertEquals("Schenectady_arrival", checkpoints[4].id)
-    }
-
-    @Test
-    fun testParseReturnItinerary() {
-        val file = File("src/main/assets/test_itinerary_return.json")
-        assertTrue("test_itinerary_return.json must exist in assets", file.exists())
-
-        val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
-        assertEquals("Return Run: Nassau to Albany", itinerary.tripName)
-
-        val checkpoints = itinerary.getCheckpointsForDay(1)
-        assertEquals(5, checkpoints.size)
-        assertEquals("depart_nassau", checkpoints[0].id)
-        assertEquals("Albany_arrival", checkpoints[4].id)
     }
 
     @Test
@@ -94,8 +66,8 @@ class ItineraryTest {
 
     @Test
     fun testFixedItineraryResolutionAndPace() {
-        val file = File("src/main/assets/itinerary.json")
-        assertTrue("itinerary.json must exist in assets", file.exists())
+        val file = File("src/main/assets/sample_itinerary.json")
+        assertTrue("sample_itinerary.json must exist in assets", file.exists())
 
         val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
         val dummyStart = System.currentTimeMillis()
@@ -121,15 +93,34 @@ class ItineraryTest {
 
     @Test
     fun testAdHocItineraryResolutionAndArrival() {
-        val file = File("src/main/assets/test_itinerary_return.json")
-        assertTrue("test_itinerary_return.json must exist in assets", file.exists())
+        val adHocJson = """
+        {
+          "trip_name": "Ad-Hoc Test Route",
+          "date": "2026-09-06",
+          "timezone": "America/New_York",
+          "checkpoints": [
+            {
+              "id": "depart_test",
+              "name": "Departure Point",
+              "offset_minutes_from_start": 0,
+              "trigger_radius_miles": 0.5
+            },
+            {
+              "id": "arrival_test",
+              "name": "Arrival Point",
+              "offset_minutes_from_start": 31,
+              "trigger_radius_miles": 0.5
+            }
+          ]
+        }
+        """.trimIndent()
 
-        val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
+        val itinerary = Gson().fromJson(adHocJson, Itinerary::class.java)
         val tripStartTime = 1700000000000L // arbitrary fixed test epoch
         val checkpoints = itinerary.resolveCheckpointsForDay(1, tripStartTime)
 
         // 1. Departure Checkpoint at T=0
-        val departCp = checkpoints.first { it.id == "depart_nassau" }
+        val departCp = checkpoints.first { it.id == "depart_test" }
         assertEquals(tripStartTime, departCp.targetEpochMillis)
 
         // At driveway when trip begins (now == tripStartTime)
@@ -139,7 +130,7 @@ class ItineraryTest {
         assertEquals(" You are on schedule.", drivewayDelta.formatForSpeech())
 
         // 2. Arrival Checkpoint (offset 31 minutes)
-        val arrivalCp = checkpoints.first { it.id == "Albany_arrival" }
+        val arrivalCp = checkpoints.first { it.id == "arrival_test" }
         val expectedArrivalTarget = tripStartTime + (31 * 60_000L)
         assertEquals(expectedArrivalTarget, arrivalCp.targetEpochMillis)
 

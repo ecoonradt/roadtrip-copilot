@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val sIntent = Intent(this, CopilotService::class.java).apply {
                         setAction(CopilotService.ACTION_START)
-                        putExtra(CopilotService.EXTRA_ROUTE_FILE, "test_itinerary.json")
+                        putExtra(CopilotService.EXTRA_ROUTE_FILE, "sample_itinerary.json")
                         putExtra(CopilotService.EXTRA_DAY_NUMBER, 1)
                     }
                     ContextCompat.startForegroundService(this, sIntent)
@@ -274,7 +274,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 val selectedIdx = binding.spinnerRoute.selectedItemPosition
                 val selectedRoute = routeOptions.getOrNull(selectedIdx)
-                val routeFile = selectedRoute?.routeFile ?: "test_itinerary.json"
+                val routeFile = selectedRoute?.routeFile ?: "sample_itinerary.json"
                 val dayNum = selectedRoute?.dayNumber ?: 1
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
@@ -292,7 +292,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 val selectedIdx = binding.spinnerRoute.selectedItemPosition
                 val selectedRoute = routeOptions.getOrNull(selectedIdx)
-                val routeFile = selectedRoute?.routeFile ?: "test_itinerary.json"
+                val routeFile = selectedRoute?.routeFile ?: "sample_itinerary.json"
                 val dayNum = selectedRoute?.dayNumber ?: 1
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START

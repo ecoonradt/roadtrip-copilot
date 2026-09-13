@@ -37,7 +37,7 @@ To maintain code quality and test rigor across contributors and automated agents
   - **Deliverables:** `RouteRepository.kt`, `RouteRepositoryTest.kt`
   - **Scope:**
     - Scans internal storage (`context.filesDir/itineraries/`) for `.json` itineraries.
-    - Preserves bundled assets (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) as permanent fallbacks.
+    - Preserves bundled assets (`sample_itinerary.json`) as permanent fallbacks.
     - Exposes a reactive `StateFlow<List<RouteOption>>` for UI consumers.
   - **Verification Scenarios:**
     1. *Asset Fallback:* When internal storage is empty, returns all bundled asset routes.

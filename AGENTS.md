@@ -87,9 +87,9 @@
 roadtrip-copilot/
 ├── AGENTS.md                  # This handbook
 ├── README.md                  # Project overview and setup guide
-├── itinerary.json             # Bundled sample multi-day itinerary
-├── test_itinerary.json        # Bundled sample outbound test route
-├── test_itinerary_return.json # Bundled sample return test route
+├── itineraries/               # Workspace itineraries directory (git-ignored custom routes)
+│   ├── .gitignore             # Ignores *.json while tracking sample_itinerary.json
+│   └── sample_itinerary.json  # Bundled sample route (Phoenix → Sedona → Flagstaff)
 ├── docs/
 │   ├── IDEAS.md               # Feature backlog and roadmap proposals
 │   ├── ORCHESTRATION_PLAN.md  # Engineering verification checklist & roadmap
@@ -123,9 +123,7 @@ roadtrip-copilot/
         └── main/
             ├── AndroidManifest.xml
             ├── assets/
-            │   ├── itinerary.json
-            │   ├── test_itinerary.json
-            │   └── test_itinerary_return.json
+            │   └── sample_itinerary.json # Bundled fallback route for offline navigation
             ├── res/
             │   ├── layout/    # Dashboard (activity_main.xml with SAF import button) and custom spinner layouts
             │   ├── drawable/  # Vector assets

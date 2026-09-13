@@ -32,10 +32,15 @@ export class ItineraryStorageService {
 
   constructor(options: ItineraryStorageOptions = {}) {
     const defaultRoot = path.resolve(process.cwd(), '..');
+    const defaultItineraries = path.resolve(defaultRoot, 'itineraries');
     const defaultAssets = path.resolve(defaultRoot, 'app/src/main/assets');
 
-    this.storageDirectories = options.storageDirectories || [defaultRoot, defaultAssets];
-    this.primaryWriteDirectory = options.primaryWriteDirectory || defaultRoot;
+    this.storageDirectories = options.storageDirectories || [
+      defaultItineraries,
+      defaultAssets,
+      defaultRoot,
+    ];
+    this.primaryWriteDirectory = options.primaryWriteDirectory || defaultItineraries;
   }
 
   /**

@@ -51,7 +51,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   googleMapsRoute,
 }) => {
   const [activeTab, setActiveTab] = useState<'handoff' | 'gmaps' | 'json'>('handoff');
-  const [fileName, setFileName] = useState('itinerary.json');
+  const [fileName, setFileName] = useState('sample_itinerary.json');
   const [copiedJson, setCopiedJson] = useState(false);
   const [copiedLegIndex, setCopiedLegIndex] = useState<number | null>(null);
 
@@ -296,7 +296,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
               className="bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-sky-500 flex-1 max-w-xs"
-              placeholder="itinerary.json"
+              placeholder="sample_itinerary.json"
             />
             <button
               onClick={handleDownloadFile}
