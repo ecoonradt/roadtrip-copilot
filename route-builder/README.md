@@ -86,54 +86,12 @@ npm run build         # Production compile (client Vite bundle + backend tsc)
 
 ---
 
-## Project Structure
+## Project Architecture
 
-```
-route-builder/
-├── index.html                  # HTML entrypoint
-├── package.json                # Project dependencies and scripts
-├── tsconfig.json               # Frontend TypeScript configuration
-├── tsconfig.server.json        # Backend TypeScript configuration
-├── vite.config.ts              # Vite dev server and /api proxy configuration
-├── tailwind.config.js          # Dark automotive theme color palette
-├── server/
-│   ├── app.ts                  # Fastify application factory
-│   ├── index.ts                # Server bootstrapper (:3001)
-│   ├── routes/
-│   │   ├── routing.ts          # /api/routing (geocode & OSRM route proxies)
-│   │   ├── ai.ts               # /api/copilot/generate (single & batch)
-│   │   ├── device.ts           # /api/device (status, push, download, staging)
-│   │   └── itineraries.ts      # /api/itineraries (workspace discovery)
-│   ├── services/
-│   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
-│   │   ├── routeService.ts     # OSRM road graph query engine (unencoded coords path)
-│   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
-│   │   ├── promptBuilder.ts    # Prompt contract generator
-│   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
-│   │   ├── aiService.ts        # Pluggable AI harness adapters (agy, Gemini API, template fallback)
-│   │   ├── deviceService.ts    # ADB subprocess management and local IP Wi-Fi discovery
-│   │   └── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
-│   └── types/                  # Strict server TypeScript types
-├── src/
-│   ├── App.tsx                 # Main layout & interactive map state coordinator
-│   ├── components/
-│   │   ├── AppHeader.tsx       # Top bar with route title, metrics, search, and global actions
-│   │   ├── DayTabBar.tsx       # Multi-day leg switcher tabs
-│   │   ├── MapCanvas.tsx       # Leaflet map with custom waypoint markers & OSRM polyline
-│   │   ├── SearchBar.tsx       # Debounced address search via Nominatim proxy
-│   │   ├── TimelineSidebar.tsx # Timeline stops, dwell editor, cascade telemetry, Google Maps links
-│   │   ├── RouteSelectorModal.tsx # Workspace route discovery and selection modal
-│   │   ├── AiAlertModal.tsx    # Live Android Auto card preview & browser TTS speech preview
-│   │   └── ExportModal.tsx     # 1-click ADB push, Wi-Fi QR code, Google Maps leg QR codes
-│   ├── engine/
-│   │   ├── cascade.ts          # Timeline cascade & timezone border calculation
-│   │   ├── googleMapsUrl.ts    # Multi-stop URL generator with <=9 stop chunking
-│   │   ├── export.ts           # Itinerary V2 JSON exporter
-│   │   ├── itineraryParser.ts  # Multi-day and single-route JSON ingestion
-│   │   └── types.ts            # Mathematical & engine data contracts
-│   ├── services/
-│   │   ├── api.ts              # Frontend API client
-│   │   └── aiQueue.ts          # Client-side concurrency limiter
-│   └── types/                  # Frontend data models
-└── tests/                      # Comprehensive Vitest test suites (111 tests)
-```
+The Route Builder is architected as a decoupled client-server application:
+* **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, and Google Maps URL chunking.
+* **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, and ADB device synchronization.
+* **Test Suites (`tests/`):** 111 automated Vitest unit and integration tests covering routing proxies, timeline cascade math, AI adapters, and V2 schema exports.
+
+For the detailed file layout, architecture pillars, and development guidelines, see [AGENTS.md](AGENTS.md) and the root [AGENTS.md](../AGENTS.md).
+

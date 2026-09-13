@@ -100,6 +100,8 @@ roadtrip-copilot/
 ├── settings.gradle.kts        # Multi-project gradle settings
 ├── build.gradle.kts           # Root build configuration
 ├── route-builder/             # Full-Stack Web Studio
+│   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
+│   ├── README.md              # User-facing web studio documentation & setup
 │   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
 │   ├── server/                # Fastify TypeScript backend
