@@ -100,7 +100,7 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
         tripName: 'Phoenix to Albuquerque Road Trip',
         startDate: '2026-10-09',
         endDate: '2026-10-12',
-        author: 'Eric',
+        author: 'Roadtripper',
         description: 'Scenic autumn drive',
         days: [
           {
@@ -122,7 +122,7 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
         end: '2026-10-12',
       });
       expect(itinerary.metadata.version).toBe('2.0.0');
-      expect(itinerary.metadata.author).toBe('Eric');
+      expect(itinerary.metadata.author).toBe('Roadtripper');
       expect(itinerary.metadata.description).toBe('Scenic autumn drive');
       expect(itinerary.metadata.created_at).toBeDefined();
 

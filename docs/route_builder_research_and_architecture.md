@@ -10,18 +10,18 @@
 ### The Current State
 The Roadtrip Co-Pilot Android application is purpose-built to solve a distinct problem: providing contextual, heads-up in-car awareness (Android Auto notifications, synchronized audio ducking, and real-time pace telemetry) while running strictly in the background alongside Google Maps, with **zero cellular connectivity required**.
 
-Currently, the app relies on bundled static JSON files (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) embedded directly in the APK's `assets/` directory. The production itinerary (a 4-day trip from Phoenix, AZ to Albuquerque, NM) was the result of extensive human curation in a Google Doc, which was subsequently transformed into the app's JSON schema by an AI agent. 
+Initially, the app relied on bundled static JSON files (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) embedded in the APK's `assets/` directory. Creating or modifying itineraries required manually formatting coordinates, target timestamps, and alert copy into JSON.
 
 ### The Problem
-While the in-car runtime execution is robust, the **authoring and itinerary management pipeline is completely manual and developer-dependent**:
-1. **No Authoring or Editing UI:** Modifying a trip (e.g., adding a stop at Montezuma Castle on Day 1, inserting a lunch break in Gallup, or swapping lodging in Chama) requires either manually editing raw JSON or re-prompting an AI agent and manually pasting JSON into the codebase.
-2. **The "Ripple Effect" Complexity:** Adding, removing, or reordering a waypoint is not a simple database row insertion. It cascades across multiple dimensions:
+While the in-car runtime execution is robust, the **authoring and itinerary management pipeline was completely manual and developer-dependent**:
+1. **No Authoring or Editing UI:** Modifying a trip (e.g., adding a scenic viewpoint, inserting a lunch stop, or swapping lodging) required either manually editing raw JSON or prompting an external model and manually pasting JSON into the codebase.
+2. **The "Ripple Effect" Complexity:** Adding, removing, or reordering a waypoint is not a simple row insertion. It cascades across multiple dimensions:
    - **Driving distances and transit times** between the preceding and succeeding stops change.
    - **Target arrival and departure times** shift forward or backward for all subsequent stops.
-   - **Timezone transitions** (e.g., AZ MST $\to$ NM MDT) must be observed across state borders.
+   - **Timezone transitions** must be observed across state or timezone borders.
    - **Geofence trigger radiuses** must be calibrated based on approach road speeds and sightlines.
    - **Glanceable notification text and spoken TTS scripts** must be written to match the approach direction, scenic context, and driver mental load.
-3. **The Deployment Barrier:** Currently, route choices are hardcoded in `MainActivity.kt` and `RouteListScreen.kt`. Adding a trip requires recompiling the Android APK with Gradle and sideloading it via ADB.
+3. **The Deployment Barrier:** Originally, route choices were hardcoded in the Android app. Adding a trip required recompiling the APK with Gradle and sideloading it via ADB.
 
 ### The Objective of this Research
 This document explores the design, feasibility, scope, and architecture for a **Roadtrip Co-Pilot Route Builder**. It examines whether deterministic code or AI is best suited for the task, evaluates platform form factors (Web vs. Native Android vs. Agent), defines the MVP feature set, and outlines an end-to-end architecture that allows any human to easily plan, adjust, and deploy custom road trip itineraries to their vehicle.
@@ -81,9 +81,9 @@ flowchart TD
    - It returns the true road distance (not Euclidean line-of-sight), the turn polyline for map rendering, and realistic drive duration based on highway vs. local road speed profiles.
 2. **Google Maps Navigation Links & Route-Shaping Waypoints:**
    - *The In-Car Reality:* Android Auto will run Google Maps on the main screen for active turn-by-turn guidance, while Roadtrip Co-Pilot runs in the background.
-   - *The Problem:* Google Maps navigation algorithms default to the fastest time or shortest distance. If you simply navigate from Phoenix to Flagstaff, Google Maps will keep you on I-17 North and bypass Sedona and Oak Creek Canyon completely; or it will aggressively offer reroutes away from scenic backroads (like the High Road to Santa Fe).
+   - *The Problem:* Google Maps navigation algorithms default to the fastest time or shortest distance. If you simply navigate between distant endpoints, Google Maps will keep you on interstates and bypass scenic byways completely, or aggressively offer reroutes away from scenic backroads and mountain passes.
    - *The Solution:* The Route Builder must generate multi-stop **Google Maps Navigation URLs** (`https://www.google.com/maps/dir/?api=1&origin=...&destination=...&waypoints=...&travelmode=driving`) containing strategic "route-shaping" waypoints. When opened on the car's connected phone, this forces Google Maps to navigate the exact scenic itinerary intended by the co-pilot.
-   - *URL Limits & Leg Chunking:* Google Maps URLs support up to 9 intermediate waypoints plus origin and destination (11 total points). For days with extensive stops, the Route Builder automatically partitions the day into logical driving legs (e.g. Day 2 Morning Leg $\to$ Afternoon Leg) and provides 1-click links or QR codes.
+   - *URL Limits & Leg Chunking:* Google Maps URLs support up to 9 intermediate waypoints plus origin and destination (11 total points). For days with extensive stops, the Route Builder automatically partitions the day into logical driving legs (e.g. Morning Leg $\to$ Afternoon Leg) and provides 1-click links or QR codes.
 3. **The Timeline Cascade (Schedule Ripple Math):**
    - If Waypoint $k$ is added between $k-1$ and $k+1$ with a dwell duration $D_k$:
      $$\text{Arrival}_k = \text{Departure}_{k-1} + \text{DriveDuration}(W_{k-1}, W_k)$$
@@ -91,27 +91,27 @@ flowchart TD
      $$\text{Arrival}_{k+1} = \text{Departure}_k + \text{DriveDuration}(W_k, W_{k+1})$$
    - All subsequent waypoints $W_{k+2} \dots W_n$ shift forward by:
      $$\Delta t = (\text{Arrival}_{k+1, \text{new}} - \text{Arrival}_{k+1, \text{old}})$$
-   - Deterministic date/time libraries (`java.time` on Android, Python `zoneinfo`, or JS `Temporal`/`date-fns-tz`) execute this with microsecond precision and zero hallucination risk, automatically handling crossing between Arizona (UTC-7 year-round) and New Mexico (UTC-6 during Daylight Saving Time).
+   - Deterministic date/time libraries execute this precisely, automatically handling cross-state and daylight saving timezone boundary crossings.
 4. **Trigger Radius Sizing Heuristics:**
    - The trigger radius dictates how far in advance an alert fires. Deterministic heuristics can automatically set safe defaults based on the road classification:
-     - **Interstate / Open Highway (65–75 mph):** $3.0\text{ to }6.0\text{ miles}$ ($\sim 2.5\text{ to }5\text{ minutes}$ advance warning for distant peaks or highway viewings like Shiprock or Bell Rock).
+     - **Interstate / Open Highway (65–75 mph):** $3.0\text{ to }6.0\text{ miles}$ ($\sim 2.5\text{ to }5\text{ minutes}$ advance warning for distant peaks or highway viewings).
      - **Scenic Byway / Switchback (25–45 mph):** $1.5\text{ to }2.5\text{ miles}$ ($\sim 2\text{ to }3\text{ minutes}$ advance notice before a scenic pull-off).
      - **Urban Approach / Parking / Lodging Destination:** $0.3\text{ to }0.75\text{ miles}$ (triggers right as the car exits the main roadway into the facility).
 
 ### What AI / LLMs Do Best
 1. **Contextual Co-Pilot Copywriting:**
    - Generating short, glanceable text for the car screen and fluid, natural spoken copy for TTS.
-   - Example from the PHX $\to$ ABQ trip:
-     - *Raw data:* Shiprock Peak, coordinates `(36.6872, -108.6875)`, approach via US-491 N.
-     - *Deterministic output:* "Approaching Shiprock Peak in 6 miles."
+   - Example scenic alert:
+     - *Raw data:* Landmark Peak, approach via State Highway.
+     - *Deterministic output:* "Approaching Landmark Peak in 3 miles."
      - *AI Co-Pilot output:* 
-       - **Title:** `"Shiprock Landmark Ahead"`
-       - **Message:** `"1,583-ft volcanic peak visible for miles. View from highway only (sacred tribal land)."`
-       - **Speech:** `"Upcoming sight on your left: Shiprock Peak, rising fifteen hundred feet from the desert floor. Highway viewing only as this is sacred Navajo land."`
+       - **Title:** `"Landmark Peak Ahead"`
+       - **Message:** `"Scenic volcanic peak visible for miles. View from designated pull-offs."`
+       - **Speech:** `"Upcoming sight on your left: Landmark Peak, rising from the valley floor. Scenic pull-offs coming up in two miles."`
 2. **Pronunciation & TTS Tuning:**
-   - Android's offline `TextToSpeech` engine can stumble over abbreviations. The AI formats text for speech (e.g., writing out `"Highway one seventy-nine"` instead of `"AZ-179"`, or clarifying regional pronunciations like `"Chama"` or `"Jicarilla Apache"`).
+   - Android's offline `TextToSpeech` engine can stumble over abbreviations and regional names. The AI formats text for speech (e.g., writing out `"Highway one seventy-nine"` instead of `"AZ-179"`, or phonetically spelling challenging regional landmarks).
 3. **Conversational Trip Scaffolding & Brain Dump Ingestion:**
-   - Allowing a human to paste an unformatted block of notes ("Leaving Phoenix airport rental car center around 2:30pm, want to drive through Sedona on 89A, stop at Bell Rock, then sleep in Flagstaff at Little America Hotel, dinner at Lumberyard Brewing") and transforming it into an initial candidate sequence of stops.
+   - Allowing a user to paste an unformatted block of trip notes (e.g. "Departing airport around 2:30pm, driving the mountain switchbacks, stopping at the scenic overlook for photos, and sleeping at the alpine lodge") and transforming it into an initial candidate sequence of stops.
 
 ---
 
@@ -138,14 +138,14 @@ The current schema works well for static execution, but benefits from minor back
 
 ```json
 {
-  "trip_name": "Phoenix to Albuquerque Road Trip",
+  "trip_name": "Scenic Mountain Road Trip",
   "dates": {
     "start": "2026-10-09",
     "end": "2026-10-12"
   },
   "metadata": {
     "version": "2.0.0",
-    "author": "Eric",
+    "author": "Roadtripper",
     "created_at": "2026-09-08T12:00:00Z"
   },
   "days": [
@@ -153,14 +153,14 @@ The current schema works well for static execution, but benefits from minor back
       "day": 1,
       "date": "2026-10-09",
       "timezone": "America/Phoenix",
-      "title": "Red Rock Entry & Oak Creek Canyon Switchbacks",
-      "origin": "Phoenix Sky Harbor International Airport (PHX)",
-      "destination": "Flagstaff, AZ",
+      "title": "Mountain Foothills & Canyon Switchbacks",
+      "origin": "Valley Regional Airport",
+      "destination": "Alpine Lodge",
       "departure_time": "14:30:00",
       "checkpoints": [
         {
-          "id": "phx_rental_pickup",
-          "name": "PHX Rental Car Facility",
+          "id": "airport_rental_pickup",
+          "name": "Airport Rental Facility",
           "type": "origin",
           "lat": 33.4357,
           "lng": -112.0152,
@@ -169,8 +169,8 @@ The current schema works well for static execution, but benefits from minor back
           "trigger_radius_miles": 0.5,
           "notification": {
             "title": "Road Trip Begins!",
-            "message": "Departing PHX via I-17 N towards Sedona.",
-            "speech": "Welcome to Arizona. We are departing Phoenix heading north on I-17 toward Sedona."
+            "message": "Departing northbound towards the scenic canyon.",
+            "speech": "Welcome! We are departing heading north toward the mountain pass."
           }
         },
         {
@@ -229,13 +229,11 @@ The ripple engine enforces timeline coherence across waypoints within a day:
    - $\dots$
    - $\text{Arrival}_n = \text{Departure}_{n-1} + \text{Duration}(W_{n-1}, W_n)$
 4. **Timezone Adjustments:** If Waypoint $i$ and Waypoint $i+1$ reside in different IANA timezones (e.g., crossing from `America/Phoenix` to `America/Denver`), the engine detects the boundary via polygon/coordinate lookup and applies the timezone delta (+1 hour during daylight saving time) to the formatted target string while keeping the underlying epoch timestamps chronologically sound.
-5. **Backwards Scheduling Mode ("The Flight Catch-up"):**
-   - On departure days (e.g., Day 4 heading to Albuquerque Sunport), users often have a hard deadline (e.g., *"Must be at ABQ airport by 16:30 for car return and flight check-in"*).
-   - The engine can reverse-calculate: working backward from destination target time minus all drive durations and dwell times to dictate: *"You must depart Taos Plaza no later than 09:45 AM."*
+5. **Backwards Scheduling Mode ("The Catch-up Solver"):**
+   - On departure days heading to an airport or event, users often have a hard deadline (e.g., *"Must be at the airport by 16:30 for flight check-in"*).
+   - The engine can reverse-calculate: working backward from destination target time minus all drive durations and dwell times to dictate: *"You must depart your origin no later than 09:45 AM."*
 
 ---
-
-### 4.3 Routing & Geocoding Service Layer
 
 ### 4.3 Full-Stack Architecture & Lightweight Local Backend
 
@@ -251,10 +249,10 @@ flowchart TD
         UI3["1-Click 'Sync to Phone (ADB / QR)'"]
     end
 
-    subgraph LocalBackend["Lightweight Local Backend (Node / Express / Vite)"]
-        API1["POST /api/copilot/generate\n(Spawns agy CLI / AI Studio)"]
+    subgraph LocalBackend["Lightweight Local Backend (Fastify / TypeScript)"]
+        API1["POST /api/copilot/generate\n(AI Harness Adapter: agy / AI Studio)"]
         API2["GET /api/routing/route & geocode\n(Proxies OSRM & Nominatim)"]
-        API3["POST /api/device/adb-push\n(Executes adb push to Pixel)"]
+        API3["POST /api/device/adb-push\n(Executes adb push to phone)"]
         API4["GET /api/device/download/:file\n(Serves Wi-Fi QR download)"]
     end
 
@@ -331,25 +329,30 @@ Respond in strict JSON:
 }
 ```
 
-#### AI Access, Authentication & Engine Tiers:
+#### AI Access, Authentication & Pluggable Harness Adapters:
 
-1. **Antigravity CLI (`agy`) Bridge (Primary Local Engine — Zero Setup):**
-   - *How it works:* The local backend invokes:
+1. **Antigravity CLI (`agy`) Bridge (`AgyHarnessAdapter` — Primary Local Engine):**
+   - *How it works:* The local backend queries `agy models` to resolve the newest available Flash model (`gemini-3.8-flash-high`) and invokes:
      ```bash
-     agy -p "Write Roadtrip Co-Pilot announcement for..." --output-format json
+     agy -p "Write Roadtrip Co-Pilot announcement for..." --model gemini-3.8-flash-high --output-format json
      ```
-   - *Key Benefit:* `agy` inherits your active Antigravity session and model tier (Gemini 3.8) directly from your environment.
-   - *User Experience:* **Zero configuration.** No API keys, no Google AI Studio setup, no credit cards. It works out of the box when running the Route Builder locally.
+   - *Key Benefit:* `agy` inherits your active Antigravity session and model tier directly from your environment with zero API keys required.
+   - *User Experience:* **Zero configuration.** Works out of the box when running the Route Builder locally.
 
-2. **Google AI Studio (`gemini-3.8-flash`) (Secondary / Cloud Engine):**
-   - *How it works:* Direct API calls to `gemini-3.8-flash` using a free developer API key from `aistudio.google.com`.
+2. **Google AI Studio API (`GeminiStudioHarnessAdapter` — Cloud Engine):**
+   - *How it works:* Direct REST API calls defaulting to `gemini-3.8-flash` using a developer API key from `aistudio.google.com`.
    - *When to use:* If running the Route Builder in a standalone browser environment without the local `agy` CLI installed, or as a deployed web service.
-   - *Pricing & Quota:* Free tier provides 10–15 RPM and 1,000–1,500 RPD ($0.00 cost), which easily accommodates full roadtrip planning sessions (< 2% daily quota).
+   - *Model Selection:* Configurable via `GEMINI_MODEL` (defaults to `gemini-3.8-flash`).
 
-3. **Zero-API-Key Web Fallback ("Copy Prompts for Gemini Advanced"):**
-   - For users who want to use their consumer Google One AI Premium chat tab (`gemini.google.com`):
-   - The Web Studio provides a **"Copy Prompt Batch"** button.
-   - The user pastes the prompt into Gemini Advanced and pastes the JSON response back into the Studio.
+3. **Pluggable Adapter Architecture & Roadmap:**
+   - The backend implements a modular `AiHarnessAdapter` interface (`route-builder/server/services/aiService.ts`), enabling seamless addition of other AI harnesses:
+     - Anthropic Claude Adapter
+     - OpenAI ChatGPT Adapter
+     - Local offline models (Ollama, llama.cpp)
+   - Detailed proposals for these providers are tracked in `IDEAS.md`.
+
+4. **Deterministic Template Fallback (`TemplateHarnessAdapter`):**
+   - If neither `agy` nor an API key is available, context-aware deterministic templates generate alerts without failing.
 
 ---
 
@@ -366,16 +369,16 @@ To guarantee that Google Maps navigates the exact scenic road rather than silent
      ```
 2. **Route-Shaping Waypoints:**
    - Waypoints in the URL serve two purposes:
-     - **Physical Stops:** Locations where the car pulls over (Bell Rock, Vista Overlook, lodging).
-     - **Route Anchors:** Strategic highway points placed specifically to prevent Google Maps from rerouting (e.g. forcing AZ-89A switchbacks instead of I-17 North).
+     - **Physical Stops:** Locations where the car pulls over (Vista Overlook, picnic area, lodging).
+     - **Route Anchors:** Strategic highway points placed specifically to prevent Google Maps from rerouting onto boring highways.
 3. **URL Waypoint Limits & Leg Chunking:**
    - Google Maps URLs permit up to **9 intermediate waypoints** plus origin and destination (11 points maximum per link).
    - If a day's drive exceeds 9 intermediate waypoints, the Route Builder automatically partitions the day into logical driving legs:
-     - `Day 2 - Leg 1: Flagstaff to Gallup (Morning)`
-     - `Day 2 - Leg 2: Gallup to Chama via Shiprock (Afternoon)`
+     - `Day 2 - Leg 1: Morning Mountain Drive (Morning)`
+     - `Day 2 - Leg 2: Afternoon Canyon to Lake Lodge (Afternoon)`
 4. **Handoff Mechanisms to Car Phone:**
    - **QR Code on Screen:** Scan with phone camera to instantly launch Google Maps turn-by-turn.
-   - **Web Share API / Copy Link:** 1-click button to send the navigation link via text, email, or Google Keep.
+   - **Web Share API / Copy Link:** 1-click button to send the navigation link via text, email, or messaging.
 
 ### 4.6 Android App Integration: Dynamic Route Ingestion
 
@@ -443,19 +446,18 @@ To create a true, working route builder without falling into the trap of over-en
    - Auto-generates the exact Google Maps navigation URL with route-forcing waypoints so Android Auto doesn't reroute onto the highway.
    - Automatically chunks drives exceeding 9 intermediate waypoints into morning/afternoon legs.
    - Provides a scannable QR code and 1-click "Send to Phone" button.
-4. **AI Co-Pilot Assistant (Zero-Config `agy` CLI + Cloud Fallback):**
-   - Single button on each waypoint: **"Generate Co-Pilot Speech & Alert"**.
-   - Primary: Backend calls `agy -p "..." --output-format json` using your active Antigravity session and Gemini 3.8. **Zero API keys or setup required.**
+4. **AI Co-Pilot Assistant (Pluggable Adapters: `agy` CLI + Cloud API):**
+   - Single button on each waypoint: **"Generate Co-Pilot Speech & Alert"** (and batch generation for the whole day).
+   - Primary: Backend calls `agy` with dynamically resolved Flash model. **Zero API keys or setup required.**
    - Cloud fallback: Direct Google AI Studio API key (`gemini-3.8-flash`) support.
-   - Manual fallback: **"Copy Prompts for Gemini Advanced"** button for pasting into web chat.
    - Live preview of the generated Android Auto notification card and speech text.
 5. **Import, Export & 1-Click Device Sync:**
-   - **"Load Existing JSON":** Drag-and-drop `itinerary.json` to inspect and edit the existing Phoenix-Albuquerque trip.
+   - **"Load Existing JSON":** Drag-and-drop or select any itinerary JSON file to inspect and edit.
    - **"Export Itinerary":** Validates JSON schema and downloads a ready-to-run `.json` file.
-   - **1-Click ADB Push:** Backend checks `adb devices` and pushes the itinerary directly to the connected Pixel phone.
+   - **1-Click ADB Push:** Backend checks `adb devices` and pushes the itinerary directly to the connected phone.
    - **Local Wi-Fi QR Server:** Backend serves the JSON file over the local network so the phone camera scans the QR code to download instantly.
 6. **Android App Ingestion:**
-   - Add the SAF File Picker ("Import Itinerary") to `MainActivity.kt` so the exported file can be loaded directly from the phone's Download folder without opening a terminal or recompiling the app.
+   - Use the SAF File Picker ("Import Itinerary") in `MainActivity.kt` to load files directly from phone storage.
    - Dynamic update to Android Auto's `RouteListScreen` to show imported itineraries on the car display.
 
 ---
@@ -518,12 +520,11 @@ gantt
   - Automatically partitions days with >9 intermediate waypoints into morning and afternoon legs.
   - Generates scannable QR codes and copyable links.
 
-#### Phase 2C: AI Co-Pilot Enrichment via `agy` CLI
-- Backend endpoint `POST /api/copilot/generate` shelling out to `agy -p "..." --output-format json`.
-- Inherits active Antigravity credentials and Gemini 3.8 Flash with **zero API key configuration**.
-- Fallback to Google AI Studio API (`gemini-3.8-flash`) key if run outside Antigravity.
-- "Generate Co-Pilot Speech & Alert" button on each waypoint card with live Android Auto card preview.
-- Fallback "Copy Prompts for Gemini Advanced" button for zero-API-key manual copy-pasting.
+#### Phase 2C: AI Co-Pilot Enrichment via Pluggable Adapters
+- Backend endpoint `POST /api/copilot/generate` implementing the `AiHarnessAdapter` pattern.
+- Primary: Shells out to `agy`, dynamically resolving the latest Flash model with **zero API key configuration**.
+- Cloud fallback: Direct Google AI Studio API (`gemini-3.8-flash`) if an API key is provided.
+- "Generate Co-Pilot Speech & Alert" button on each waypoint card with live Android Auto card preview and TTS audio test.
 
 #### Phase 2D: Export, 1-Click ADB Push & Phone Handoff
 - Validate output against `ItineraryModels.kt` JSON schema.
@@ -534,15 +535,16 @@ gantt
 
 ---
 
-## 7. Future Horizons & Unscheduled Ideas
+## 7. Future Horizons & Feature Backlog
 
-*The following concepts represent potential future enhancements that are outside the scope of the MVP and are recorded here for future consideration:*
+*A detailed feature backlog, including multi-provider AI adapters (Anthropic Claude, OpenAI, Ollama), elevation profiles, weather radar overlays, and custom voice narration, is maintained in [IDEAS.md](../IDEAS.md).*
 
-- **Conversational Multi-Day Trip Scaffolder:** An agentic chat interface alongside the map ("Plan a 3-day loop from Phoenix through Sedona and Grand Canyon with 3–4 hours of driving per day") that drafts initial waypoints and feeds them into the deterministic cascade engine.
-- **Reverse Scheduling / Deadline Optimization:** Working backward from a hard deadline (e.g. flight departure at ABQ airport) to calculate mandatory departure times from earlier stops.
-- **Elevation & Golden Hour Lighting Awareness:** Querying USGS elevation APIs and solar angle calculators to warn the driver about mountain passes or optimize arrival at scenic viewpoints (like Oak Creek switchbacks) during golden hour.
-- **Weather & Mountain Pass Road Closures:** Ingesting National Weather Service (NWS) or state DOT feeds (e.g. NM DOT / ADOT) to alert for snow or seasonal pass closures (e.g. Brazos Pass).
-- **In-App On-Road Quick Tweaks:** Mobile-only convenience buttons in `MainActivity` (e.g. "Delay departure by 30 minutes", "Skip next waypoint").
+Key architectural opportunities include:
+- **Multi-Provider AI Harnesses:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama).
+- **Conversational Trip Scaffolding:** An agentic chat interface alongside the map ("Plan a 3-day loop along the scenic coastal highway with 3–4 hours of driving per day") that drafts initial waypoints and feeds them into the cascade engine.
+- **Elevation & Mountain Pass Awareness:** Querying elevation APIs and solar angle calculators to warn the driver about steep passes or optimize arrival at scenic overlooks during golden hour.
+- **Live Weather & Road Condition Alerts:** Ingesting National Weather Service (NWS) feeds to alert for snow, wind, or seasonal road closures.
+- **Mobile Route Quick Tweaks:** Mobile convenience controls in `MainActivity` (e.g. "Delay departure by 30 minutes", "Skip next waypoint").
 
 ---
 

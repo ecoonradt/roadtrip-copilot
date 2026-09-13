@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createApp } from '../../server/app.js';
-import { AiService } from '../../server/services/aiService.js';
+import {
+  AiService,
+  resolveLatestAgyFlashModel,
+  resetAgyFlashModelCache,
+  DEFAULT_GEMINI_MODEL,
+  type AiHarnessAdapter,
+} from '../../server/services/aiService.js';
 import { AiQueue } from '../../src/services/aiQueue.js';
 import type { WaypointContext, BatchAlertResult, GenerateAlertResult } from '../../server/types/ai.js';
 
@@ -299,6 +305,46 @@ describe('AI Co-Pilot Enrichment & Resilience (/api/copilot/generate)', () => {
       expect(data.title).toBe('Sedona Bell Rock Vista');
       expect(data.recommended_trigger_radius_miles).toBe(3.0);
       expect(data.alert.speech).toContain('Highway 179');
+    });
+  });
+
+  describe('Extensible Harness Adapter Pattern & Model Resolution', () => {
+    beforeEach(() => {
+      resetAgyFlashModelCache();
+      delete process.env.AGY_MODEL;
+    });
+
+    it('Respects AGY_MODEL environment variable override', async () => {
+      process.env.AGY_MODEL = 'gemini-custom-flash';
+      const resolved = await resolveLatestAgyFlashModel();
+      expect(resolved).toBe('gemini-custom-flash');
+      delete process.env.AGY_MODEL;
+    });
+
+    it('Defaults Google AI Studio model to gemini-3.8-flash', () => {
+      expect(DEFAULT_GEMINI_MODEL).toBe('gemini-3.8-flash');
+    });
+
+    it('Allows registering custom AI harness adapters', async () => {
+      const customAdapter: AiHarnessAdapter = {
+        id: 'custom-harness',
+        name: 'Custom Test Harness',
+        isAvailable: async () => true,
+        generate: async () =>
+          JSON.stringify({
+            title: 'Custom Alert',
+            message: 'Custom Message',
+            speech: 'Custom speech announcement.',
+            recommended_trigger_radius_miles: 2.0,
+          }),
+      };
+
+      const aiService = new AiService();
+      aiService.registerAdapter(customAdapter);
+
+      const registered = aiService.getAdapter('custom-harness');
+      expect(registered).toBeDefined();
+      expect(registered?.name).toBe('Custom Test Harness');
     });
   });
 });

@@ -18,10 +18,20 @@ import {
   parseModelOutput,
 } from './schemaParser.js';
 
-
 const execFileAsync = promisify(execFile);
 
+/**
+ * Pluggable AI Harness Adapter interface for LLM generation engines.
+ */
+export interface AiHarnessAdapter {
+  readonly id: 'agy' | 'cloud' | 'template' | string;
+  readonly name: string;
+  isAvailable(apiKey?: string): Promise<boolean>;
+  generate(prompt: string, apiKey?: string): Promise<string>;
+}
+
 export interface AiServiceOptions {
+  adapters?: AiHarnessAdapter[];
   execAgyFn?: (prompt: string) => Promise<string>;
   fetchCloudFn?: (prompt: string, apiKey: string) => Promise<string>;
   defaultApiKey?: string;
@@ -33,12 +43,63 @@ export interface GenerationOptions {
   preferredEngine?: 'agy' | 'cloud' | 'template' | 'auto';
 }
 
+let cachedAgyFlashModel: string | null = null;
+
 /**
- * Default child_process execution for agy CLI.
+ * Resets the in-memory cached agy Flash model (used in tests).
  */
-async function defaultExecAgy(prompt: string): Promise<string> {
-  const customPath = process.env.PATH ? `${process.env.HOME}/.local/bin:${process.env.PATH}` : '/usr/local/bin:/usr/bin:/bin';
-  const { stdout } = await execFileAsync('agy', ['-p', prompt, '--output-format', 'json'], {
+export function resetAgyFlashModelCache(): void {
+  cachedAgyFlashModel = null;
+}
+
+/**
+ * Dynamically resolves the latest available Flash model from `agy models`.
+ * If process.env.AGY_MODEL is set, that takes precedence.
+ */
+export async function resolveLatestAgyFlashModel(): Promise<string | null> {
+  if (process.env.AGY_MODEL) {
+    return process.env.AGY_MODEL;
+  }
+  if (cachedAgyFlashModel) {
+    return cachedAgyFlashModel;
+  }
+  try {
+    const customPath = process.env.PATH
+      ? `${process.env.HOME}/.local/bin:${process.env.PATH}`
+      : '/usr/local/bin:/usr/bin:/bin';
+    const { stdout } = await execFileAsync('agy', ['models'], {
+      timeout: 5000,
+      env: { ...process.env, PATH: customPath },
+    });
+    const lines = stdout.split('\n');
+    for (const line of lines) {
+      const match = line.trim().match(/^([a-zA-Z0-9._-]+flash[a-zA-Z0-9._-]*)/i);
+      if (match && match[1]) {
+        cachedAgyFlashModel = match[1];
+        return cachedAgyFlashModel;
+      }
+    }
+  } catch {
+    // If agy models fails or times out, fallback to null (runs agy without explicit --model)
+  }
+  return null;
+}
+
+/**
+ * Default child_process execution for agy CLI, passing the dynamically resolved Flash model.
+ */
+export async function defaultExecAgy(prompt: string): Promise<string> {
+  const customPath = process.env.PATH
+    ? `${process.env.HOME}/.local/bin:${process.env.PATH}`
+    : '/usr/local/bin:/usr/bin:/bin';
+
+  const model = await resolveLatestAgyFlashModel();
+  const args = ['-p', prompt, '--output-format', 'json'];
+  if (model) {
+    args.push('--model', model);
+  }
+
+  const { stdout } = await execFileAsync('agy', args, {
     timeout: 30000,
     maxBuffer: 10 * 1024 * 1024,
     env: {
@@ -59,13 +120,15 @@ async function defaultExecAgy(prompt: string): Promise<string> {
   return rawJson;
 }
 
+export const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+
 /**
  * Default fetch call to Google AI Studio Gemini API.
  */
-async function defaultFetchCloud(
+export async function defaultFetchCloud(
   prompt: string,
   apiKey: string,
-  model = 'gemini-2.0-flash'
+  model = DEFAULT_GEMINI_MODEL
 ): Promise<string> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const response = await fetch(endpoint, {
@@ -107,22 +170,94 @@ async function defaultFetchCloud(
   return text;
 }
 
+/**
+ * Antigravity CLI Harness Adapter.
+ */
+export class AgyHarnessAdapter implements AiHarnessAdapter {
+  readonly id = 'agy';
+  readonly name = 'Antigravity CLI (agy)';
+  private execFn: (prompt: string) => Promise<string>;
+
+  constructor(execFn: (prompt: string) => Promise<string> = defaultExecAgy) {
+    this.execFn = execFn;
+  }
+
+  async isAvailable(): Promise<boolean> {
+    try {
+      const model = await resolveLatestAgyFlashModel();
+      return model !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  async generate(prompt: string): Promise<string> {
+    return this.execFn(prompt);
+  }
+}
+
+/**
+ * Google AI Studio Harness Adapter (Gemini API).
+ */
+export class GeminiStudioHarnessAdapter implements AiHarnessAdapter {
+  readonly id = 'cloud';
+  readonly name = 'Google AI Studio (Gemini)';
+  private fetchFn: (prompt: string, apiKey: string) => Promise<string>;
+  public readonly model: string;
+
+  constructor(
+    fetchFn: (prompt: string, apiKey: string) => Promise<string> = defaultFetchCloud,
+    model = DEFAULT_GEMINI_MODEL
+  ) {
+    this.fetchFn = fetchFn;
+    this.model = model;
+  }
+
+  async isAvailable(apiKey?: string): Promise<boolean> {
+    return Boolean(apiKey);
+  }
+
+  async generate(prompt: string, apiKey?: string): Promise<string> {
+    if (!apiKey) {
+      throw new Error('API key is required for Google AI Studio');
+    }
+    return this.fetchFn(prompt, apiKey);
+  }
+}
+
 export class AiService {
-  private execAgyFn: (prompt: string) => Promise<string>;
-  private fetchCloudFn: (prompt: string, apiKey: string) => Promise<string>;
+  private adapters: Map<string, AiHarnessAdapter> = new Map();
   private defaultApiKey?: string;
   public readonly defaultGeminiModel: string;
 
   constructor(options: AiServiceOptions = {}) {
-    this.defaultGeminiModel = options.defaultGeminiModel || 'gemini-2.0-flash';
-    this.execAgyFn = options.execAgyFn || defaultExecAgy;
-    this.fetchCloudFn =
-      options.fetchCloudFn ||
-      ((prompt: string, key: string) =>
-        defaultFetchCloud(prompt, key, this.defaultGeminiModel));
+    this.defaultGeminiModel = options.defaultGeminiModel || DEFAULT_GEMINI_MODEL;
     this.defaultApiKey = options.defaultApiKey || process.env.GEMINI_API_KEY;
+
+    if (options.adapters && options.adapters.length > 0) {
+      for (const adapter of options.adapters) {
+        this.registerAdapter(adapter);
+      }
+    } else {
+      const agyAdapter = new AgyHarnessAdapter(options.execAgyFn || defaultExecAgy);
+      const cloudAdapter = new GeminiStudioHarnessAdapter(
+        options.fetchCloudFn ||
+          ((prompt: string, key: string) =>
+            defaultFetchCloud(prompt, key, this.defaultGeminiModel)),
+        this.defaultGeminiModel
+      );
+      this.registerAdapter(agyAdapter);
+      this.registerAdapter(cloudAdapter);
+    }
   }
 
+  registerAdapter(adapter: AiHarnessAdapter): void {
+    this.adapters.set(adapter.id, adapter);
+  }
+
+  getAdapter(id: string): AiHarnessAdapter | undefined {
+    return this.adapters.get(id);
+  }
 
   /**
    * Generates a single alert for a waypoint.
@@ -147,44 +282,49 @@ export class AiService {
       };
     }
 
-    // 1. Try Primary: agy CLI
+    // 1. Try Primary: agy harness adapter
     if (preferredEngine !== 'cloud') {
-      try {
-        const rawOutput = await this.execAgyFn(prompt);
-        const parsed = parseModelOutput(rawOutput);
-        const alert = parseCopilotAlert(parsed, waypoint);
-        return {
-          alert,
-          title: alert.title,
-          message: alert.message,
-          speech: alert.speech,
-          recommended_trigger_radius_miles: alert.recommended_trigger_radius_miles,
-          engine: 'agy',
-        };
-      } catch (err: unknown) {
-        // Fall through to cloud or template fallback
+      const agy = this.adapters.get('agy');
+      if (agy) {
+        try {
+          const rawOutput = await agy.generate(prompt);
+          const parsed = parseModelOutput(rawOutput);
+          const alert = parseCopilotAlert(parsed, waypoint);
+          return {
+            alert,
+            title: alert.title,
+            message: alert.message,
+            speech: alert.speech,
+            recommended_trigger_radius_miles: alert.recommended_trigger_radius_miles,
+            engine: 'agy',
+          };
+        } catch {
+          // Fall through to cloud or template fallback
+        }
       }
     }
 
     // 2. Try Cloud Fallback if apiKey is available
     if (apiKey) {
-      try {
-        const rawOutput = await this.fetchCloudFn(prompt, apiKey);
-        const parsed = parseModelOutput(rawOutput);
-        const alert = parseCopilotAlert(parsed, waypoint);
-        return {
-          alert,
-          title: alert.title,
-          message: alert.message,
-          speech: alert.speech,
-          recommended_trigger_radius_miles: alert.recommended_trigger_radius_miles,
-          engine: 'cloud',
-        };
-      } catch (err: unknown) {
-        // Fall through to template fallback
+      const cloud = this.adapters.get('cloud');
+      if (cloud) {
+        try {
+          const rawOutput = await cloud.generate(prompt, apiKey);
+          const parsed = parseModelOutput(rawOutput);
+          const alert = parseCopilotAlert(parsed, waypoint);
+          return {
+            alert,
+            title: alert.title,
+            message: alert.message,
+            speech: alert.speech,
+            recommended_trigger_radius_miles: alert.recommended_trigger_radius_miles,
+            engine: 'cloud',
+          };
+        } catch {
+          // Fall through to template fallback
+        }
       }
     }
-
 
     // 3. Deterministic Template Fallback (offline resilience)
     const templateAlert = generateTemplateAlert(waypoint);
@@ -217,38 +357,43 @@ export class AiService {
       return this.generateBatchTemplate(waypoints);
     }
 
-    // 1. Try Primary: agy CLI
+    // 1. Try Primary: agy harness adapter
     if (preferredEngine !== 'cloud') {
-      try {
-        const rawOutput = await this.execAgyFn(prompt);
-        const parsed = parseModelOutput(rawOutput);
-        const alerts = parseBatchCopilotAlerts(parsed, waypoints);
-        const results = waypoints.map((wp) => ({
-          id: wp.id,
-          alert: alerts[wp.id],
-        }));
-        return { alerts, results, engine: 'agy' };
-      } catch (err: unknown) {
-        // Fall through to cloud or template fallback
+      const agy = this.adapters.get('agy');
+      if (agy) {
+        try {
+          const rawOutput = await agy.generate(prompt);
+          const parsed = parseModelOutput(rawOutput);
+          const alerts = parseBatchCopilotAlerts(parsed, waypoints);
+          const results = waypoints.map((wp) => ({
+            id: wp.id,
+            alert: alerts[wp.id],
+          }));
+          return { alerts, results, engine: 'agy' };
+        } catch {
+          // Fall through to cloud or template fallback
+        }
       }
     }
 
     // 2. Try Cloud Fallback if apiKey is available
     if (apiKey) {
-      try {
-        const rawOutput = await this.fetchCloudFn(prompt, apiKey);
-        const parsed = parseModelOutput(rawOutput);
-        const alerts = parseBatchCopilotAlerts(parsed, waypoints);
-        const results = waypoints.map((wp) => ({
-          id: wp.id,
-          alert: alerts[wp.id],
-        }));
-        return { alerts, results, engine: 'cloud' };
-      } catch (err: unknown) {
-        // Fall through to template fallback
+      const cloud = this.adapters.get('cloud');
+      if (cloud) {
+        try {
+          const rawOutput = await cloud.generate(prompt, apiKey);
+          const parsed = parseModelOutput(rawOutput);
+          const alerts = parseBatchCopilotAlerts(parsed, waypoints);
+          const results = waypoints.map((wp) => ({
+            id: wp.id,
+            alert: alerts[wp.id],
+          }));
+          return { alerts, results, engine: 'cloud' };
+        } catch {
+          // Fall through to template fallback
+        }
       }
     }
-
 
     // 3. Deterministic Template Fallback
     return this.generateBatchTemplate(waypoints);
