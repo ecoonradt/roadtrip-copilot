@@ -220,3 +220,4 @@ roadtrip-copilot/
 6. **Preserve Android Auto Distraction Constraints:** List templates displayed while driving must never exceed 6 items per page. Always use pagination or truncation in `androidx.car.app` screens.
 7. **Idiomatic Code:** Write concise, null-safe Kotlin and modular, typed TypeScript with single-responsibility components.
 8. **Maintain Clean, Human-Friendly UI:** Never introduce internal debug text or verification claims into `route-builder/`. All UI updates must adhere to Section 2G Human-Centered UI/UX Principles.
+9. **Maintain Directory Layout in Section 3:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in Section 3 so that developers and agents can quickly navigate the codebase without scanning the entire tree.

@@ -20,9 +20,10 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
   * **Future Adapters:** Pluggable interface ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See `IDEAS.md`.
 * **Multi-Stop Google Maps Navigation Links (`src/engine/googleMapsUrl.ts`):** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are partitioned into continuous driving legs with dedicated QR codes.
 * **Device Sync & Handoff (`server/services/deviceService.ts`, `src/components/ExportModal.tsx`):**
-  * **1-Click ADB Push:** Pushes the itinerary JSON directly to connected phones at `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
-  * **Local Wi-Fi QR Code:** Serves the file locally (`GET /api/device/download/:filename`) with an on-screen QR code for instant camera scanning and download.
-  * **Direct Download:** Standard browser JSON file download for manual import via the Android app's Storage Access Framework file picker.
+  * **1-Click ADB Push:** Directly pushes the itinerary `.json` to connected phones at `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
+  * **Local Wi-Fi QR Code:** Serves the file locally (`GET /api/device/download/:filename`) with an on-screen QR code for instant camera scanning and download over local Wi-Fi.
+  * **Google Maps Leg QR Codes:** Scannable on-screen QR codes to instantly launch Google Maps turn-by-turn navigation on your car display with route-shaping anchors intact.
+  * **In-App File Import (SAF):** Download the `.json` file in your browser and import it via the Android app's Storage Access Framework file picker.
 
 ---
 

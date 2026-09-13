@@ -93,54 +93,20 @@ The Route Builder features an AI copywriting engine to generate glanceable heads
 
 ---
 
-## Route Builder Web Studio (`route-builder/`)
+## Route Builder Web Studio
 
-A desktop-first web application to plan multi-stop road trips, compute driving durations, adjust dwell schedules, generate co-pilot announcements, and sync itineraries directly to your phone.
+The repository includes a desktop-first web application in `route-builder/` for planning multi-stop road trips, computing real road driving times, cascading arrival/departure schedules, generating AI co-pilot announcements, and syncing itineraries directly to your phone.
 
-```
-route-builder/
-├── server/               # Fastify backend (OSRM proxy, Nominatim proxy, AI harness adapters, ADB push)
-├── src/
-│   ├── components/       # Leaflet Map canvas, Timeline sidebar, AI alert modal, Export modal
-│   ├── engine/           # Timeline schedule cascade, Google Maps URL chunking, V2 JSON exporter
-│   └── services/         # API client and concurrency queue (AiQueue)
-└── tests/                # 111 unit/integration tests across backend, engine, AI, and device sync
-```
-
-### 1. Running the Route Builder
+### Quickstart
 ```bash
 cd route-builder
 npm install
 npm run dev
 ```
-This starts both services concurrently:
-* **Frontend Web App:** `http://localhost:5173` (Vite + React + Leaflet + Tailwind CSS)
-* **Local Backend API:** `http://localhost:3001` (Fastify + TypeScript)
+* **Frontend:** `http://localhost:5173` (Vite + React + Leaflet map canvas)
+* **Backend:** `http://localhost:3001` (Fastify routing proxies, AI adapters, and ADB push)
 
-### 2. Core Capabilities
-* **Interactive Map Routing:** Click on the map or search addresses to place waypoints. The backend queries OSRM to snap to roads, draw driving geometry, and calculate drive durations.
-* **Timeline Schedule Cascade:** Set your departure time (or arrival deadline in "Catch-up" mode). Adjusting dwell time at any stop automatically updates all downstream arrival and departure times.
-* **Timezone Awareness:** Automatically recognizes timezone transitions across state boundaries and formats local times correctly while preserving UTC chronological order.
-* **AI Alert Copywriting:** Generate Android Auto heads-up cards ($\le 30$ chars) and natural phonetic TTS audio scripts (15–25 words, spoken within 8–12 seconds). Preview spoken audio directly in your browser using the speech synthesizer.
-* **Google Maps Multi-Stop Navigation Links:** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting away from scenic byways. Routes with more than 9 intermediate stops are automatically partitioned into consecutive driving legs with dedicated QR codes.
-
-### 3. Syncing Itineraries to Your Phone (4 Methods)
-Click **"Export & Sync to Phone"** in the Route Builder toolbar:
-1. **1-Click ADB Push:** Plug your phone in via USB (or wireless ADB) and click **"Push to Phone via ADB"**. The itinerary is saved to `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/<filename>.json`.
-2. **Local Wi-Fi QR Code:** Scan the on-screen QR code with your phone camera to download the JSON itinerary over your local Wi-Fi network.
-3. **In-App File Import (SAF):** On your phone, open Roadtrip Co-Pilot and tap **"Import Itinerary (JSON)"** to select any downloaded `.json` file via the Android Storage Access Framework.
-4. **Google Maps QR Codes:** Scan the dedicated leg QR codes to launch Google Maps turn-by-turn navigation directly on your phone and car screen.
-
-### 4. Running Web Studio Tests & Production Build
-```bash
-cd route-builder
-npm test              # Run all 111 Vitest unit & integration tests
-npm run test:backend  # Test routing proxies, caching, and device endpoints
-npm run test:engine   # Test timeline cascade math, dwell ripples, and URL chunking
-npm run test:ai       # Test AI prompt contracts, schema parsing, and adapters
-npm run test:schema   # Test V2 JSON export compatibility
-npm run build         # Production compile (client Vite bundle + backend tsc)
-```
+For complete documentation on route authoring, timeline scheduling, AI model configuration, test suites, and phone handoff methods, see [route-builder/README.md](route-builder/README.md).
 
 ---
 
@@ -169,24 +135,9 @@ Test the in-car Android Auto UI on your computer without being in a vehicle usin
 
 ---
 
-## Architecture & Code Structure
+## Project Documentation & Architecture
 
-* **`app/src/main/assets/`**: Bundled sample itineraries (`itinerary.json`, `test_itinerary.json`, `test_itinerary_return.json`) used for testing and offline fallback defaults.
-* **`app/src/main/java/com/roadtrip/copilot/model/RouteRepository.kt`**: Repository scanning internal storage (`/files/itineraries/`) and merging with asset fallbacks, exposing reactive `StateFlow<List<RouteOption>>`.
-* **`app/src/main/java/com/roadtrip/copilot/model/RouteOption.kt`**: Route metadata model for UI selection spinners and Car App lists.
-* **`app/src/main/java/com/roadtrip/copilot/model/ItineraryModels.kt`**: Itinerary data classes supporting V1 and V2 schemas (`dwell_minutes`, `type`, `metadata`), target epoch parsing, and schedule pace formatting.
-* **`car/CopilotCarAppService.kt`**: Automotive app service granting host validation.
-* **`car/CopilotCarSession.kt`**: Automotive session manager starting the dashboard screen.
-* **`car/CopilotDashboardScreen.kt`**: Main `PaneTemplate` car dashboard with telemetry, pace, and action buttons.
-* **`car/WaypointListScreen.kt`**: `ListTemplate` displaying chronological itinerary milestones with passed vs. upcoming status.
-* **`car/RouteListScreen.kt`**: Dynamic `ListTemplate` allowing in-car route switching with 6-item pagination and distraction constraint compliance.
-* **`car/SettingsScreen.kt`**: `ListTemplate` offering in-car audio toggles, volume calibration, and test triggers.
-* **`CopilotService.kt`**: Foreground service tracking GNSS location, milestone pacing, notification state, and centralized route selection.
-* **`LocationTracker.kt`**: Event-driven GNSS listener, sequential waypoint progression, and schedule pace guards.
-* **`AudioDuckEngine.kt`**: Audio focus management, stream switching, and offline Text-to-Speech synthesis.
-* **`NotificationEngine.kt`**: Android Auto `MessagingStyle` heads-up notification cards with `CarExtender`.
-* **`NotificationReceiver.kt`**: Broadcast receiver handling Android Auto voice replies and dismiss actions.
-* **`MainActivity.kt`**: Phone dashboard to select routes, import itineraries via SAF, calibrate volume, and start/stop the service.
-* **`route-builder/`**: Full-Stack Web Studio for road trip planning, timeline cascading, AI copywriting, and 1-click device sync.
-* **`IDEAS.md`**: Feature backlog and roadmap proposals (multi-provider AI harnesses, GPX export, weather overlays).
-* **`AGENTS.md`**: Developer and agent handbook containing architectural pillars and guidelines.
+* **[AGENTS.md](AGENTS.md):** Complete developer handbook, foreground service lifecycle, audio focus routing, distraction rules, and up-to-date repository directory layout.
+* **[IDEAS.md](IDEAS.md):** Feature backlog and roadmap (multi-provider AI adapters, custom voice profiles, GPX import/export, weather radar).
+* **[route-builder/README.md](route-builder/README.md):** Web Studio architecture, API endpoints, environment variables, and testing guide.
+* **[docs/route_builder_research_and_architecture.md](docs/route_builder_research_and_architecture.md):** Technical specification for timeline cascading, routing proxies, and schema contracts.
