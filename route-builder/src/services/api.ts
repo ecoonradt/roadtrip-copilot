@@ -5,6 +5,11 @@ import type {
   BatchAlertResult,
   AiEngineType,
 } from '../types/ai';
+import type {
+  ScoutChatRequest,
+  ScoutChatResponse,
+  ScoutScope,
+} from '../types/scout';
 
 export interface GenerateAlertRequestOptions {
   apiKey?: string;
@@ -212,4 +217,37 @@ export async function saveItinerary(
   }
 
   return (await res.json()) as { success: boolean; fileName: string; filePath: string };
+}
+
+export async function chatWithScout(request: ScoutChatRequest): Promise<ScoutChatResponse> {
+  const res = await fetch('/api/ai/scout/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Route Scout request failed' }))) as {
+      error?: string;
+    };
+    throw new Error(errorData.error || `Route Scout request failed with HTTP ${res.status}`);
+  }
+
+  return (await res.json()) as ScoutChatResponse;
+}
+
+export async function fetchScoutQuickPrompts(scope: ScoutScope): Promise<string[]> {
+  const query = new URLSearchParams({
+    type: scope.type,
+    ...(scope.dayNumber !== undefined ? { dayNumber: String(scope.dayNumber) } : {}),
+    ...(scope.waypointId ? { waypointId: scope.waypointId } : {}),
+    ...(scope.waypointName ? { waypointName: scope.waypointName } : {}),
+  });
+
+  const res = await fetch(`/api/ai/scout/quick-prompts?${query.toString()}`);
+  if (!res.ok) {
+    return [];
+  }
+  const data = (await res.json()) as { prompts?: string[] };
+  return data.prompts || [];
 }

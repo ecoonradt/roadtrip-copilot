@@ -47,6 +47,8 @@ interface AppHeaderProps {
   isSaving?: boolean;
   saveSuccess?: boolean;
   isDirty?: boolean;
+  onToggleScout?: () => void;
+  isScoutOpen?: boolean;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -73,6 +75,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   isSaving = false,
   saveSuccess = false,
   isDirty = false,
+  onToggleScout,
+  isScoutOpen = false,
 }) => {
   const [isSchedulePopoverOpen, setIsSchedulePopoverOpen] = useState(false);
   const [isMapsDropdownOpen, setIsMapsDropdownOpen] = useState(false);
@@ -411,6 +415,26 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {/* Route Scout Assistant Toggle */}
+        {onToggleScout && (
+          <button
+            onClick={onToggleScout}
+            className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              isScoutOpen
+                ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-sm shadow-cyan-950/50'
+                : 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700/80 hover:text-cyan-300'
+            }`}
+            title={isScoutOpen ? 'Close Route Scout assistant' : 'Open Route Scout assistant'}
+          >
+            <Compass
+              className={`w-3.5 h-3.5 ${
+                isScoutOpen ? 'text-cyan-400 animate-pulse' : 'text-cyan-400'
+              }`}
+            />
+            <span>Route Scout</span>
+          </button>
         )}
 
         {/* Quick Save to File */}

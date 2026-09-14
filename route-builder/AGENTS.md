@@ -51,7 +51,8 @@ route-builder/
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
 │   │   ├── ai.ts               # /api/copilot/generate (single & batch)
 │   │   ├── device.ts           # /api/device (status, push, download, staging)
-│   │   └── itineraries.ts      # /api/itineraries (workspace discovery)
+│   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
+│   │   └── scout.ts            # /api/ai/scout (conversational assistant & quick prompts)
 │   ├── services/
 │   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
 │   │   ├── routeService.ts     # OSRM road graph query engine (literal semicolon paths)
@@ -60,8 +61,9 @@ route-builder/
 │   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
 │   │   ├── aiService.ts        # Pluggable AI adapters (Agy, Gemini API, template fallback)
 │   │   ├── deviceService.ts    # ADB subprocess management and local IP Wi-Fi discovery
-│   │   └── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
-│   └── types/                  # Strict server TypeScript types
+│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
+│   │   └── scoutService.ts     # Route Scout prompt builder, parser, and fallbacks
+│   └── types/                  # Strict server TypeScript types (routing, ai, scout)
 ├── src/
 │   ├── App.tsx                 # Main layout & interactive map state coordinator
 │   ├── components/
@@ -72,7 +74,8 @@ route-builder/
 │   │   ├── TimelineSidebar.tsx # Timeline stops, dwell editor, cascade telemetry, Google Maps links
 │   │   ├── RouteSelectorModal.tsx # Workspace route discovery and selection modal
 │   │   ├── AiAlertModal.tsx    # Live Android Auto card preview & browser TTS speech preview
-│   │   └── ExportModal.tsx     # 1-click ADB push, Wi-Fi QR code, Google Maps leg QR codes
+│   │   ├── ExportModal.tsx     # 1-click ADB push, Wi-Fi QR code, Google Maps leg QR codes
+│   │   └── RouteScoutDrawer.tsx # Right-side conversational AI assistant & suggestion cards
 │   ├── engine/
 │   │   ├── cascade.ts          # Timeline cascade & timezone border calculation
 │   │   ├── googleMapsUrl.ts    # Multi-stop URL generator with <=9 stop chunking
@@ -82,8 +85,8 @@ route-builder/
 │   ├── services/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
-│   └── types/                  # Frontend data models
-└── tests/                      # Comprehensive Vitest test suites (111 tests)
+│   └── types/                  # Frontend data models (routing, ai, scout)
+└── tests/                      # Comprehensive Vitest test suites (124 tests)
 ```
 
 ---

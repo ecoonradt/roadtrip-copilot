@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { MapCanvas } from './components/MapCanvas';
+import { MapCanvas, type ScoutPreviewPin } from './components/MapCanvas';
 import { TimelineSidebar } from './components/TimelineSidebar';
 import { AppHeader } from './components/AppHeader';
 import { DayTabBar } from './components/DayTabBar';
 import { RouteSelectorModal } from './components/RouteSelectorModal';
 import { ExportModal } from './components/ExportModal';
+import { RouteScoutDrawer } from './components/RouteScoutDrawer';
 import { fetchRoute, fetchItinerary, saveItinerary } from './services/api';
-import type { Waypoint, RouteResponse, GeocodeResult } from './types/routing';
+import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
+import type { ScoutScope, ScoutSuggestion } from './types/scout';
 import {
   calculateTimelineCascade,
   calculateBackwardSchedule,
@@ -114,6 +116,15 @@ export function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isRouteSelectorOpen, setIsRouteSelectorOpen] = useState(false);
 
+  // Route Scout conversational assistant states
+  const [isScoutOpen, setIsScoutOpen] = useState(false);
+  const [scoutScope, setScoutScope] = useState<ScoutScope>({
+    type: 'day',
+    dayNumber: 1,
+    dayTitle: 'Drive Corridor',
+  });
+  const [scoutPreviewPin, setScoutPreviewPin] = useState<ScoutPreviewPin | null>(null);
+
   // Save states
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -192,6 +203,17 @@ export function App() {
   const waypoints = currentDay.waypoints || [];
   const baseDate = currentDay.date;
   const departureTime = currentDay.departureTime || '09:00:00';
+
+  // Sync day number and title into Scout scope if currently on day scope
+  useEffect(() => {
+    if (scoutScope.type === 'day') {
+      setScoutScope((prev) => ({
+        ...prev,
+        dayNumber: currentDay.dayNumber,
+        dayTitle: currentDay.title,
+      }));
+    }
+  }, [currentDay.dayNumber, currentDay.title, scoutScope.type]);
 
   const coordKey = waypoints.map((w) => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join(';');
 
@@ -392,6 +414,86 @@ export function App() {
     setRoute(null);
   }, [updateCurrentDayWaypoints]);
 
+  // Route Scout interaction handlers
+  const handleOpenScoutForDay = useCallback(() => {
+    setScoutScope({
+      type: 'day',
+      dayNumber: currentDay.dayNumber,
+      dayTitle: currentDay.title,
+    });
+    setIsScoutOpen(true);
+  }, [currentDay.dayNumber, currentDay.title]);
+
+  const handleOpenScoutForWaypoint = useCallback((wp: Waypoint) => {
+    setScoutScope({
+      type: 'waypoint',
+      waypointId: wp.id,
+      waypointName: wp.name,
+    });
+    setIsScoutOpen(true);
+  }, []);
+
+  const handleToggleScout = useCallback(() => {
+    setIsScoutOpen((prev) => !prev);
+  }, []);
+
+  const handleAddWaypointFromScout = useCallback(
+    (suggestion: ScoutSuggestion) => {
+      const newWp: Waypoint = {
+        id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: suggestion.name,
+        type: (suggestion.type as WaypointType) || 'scenic_pull_off',
+        lat: suggestion.lat,
+        lng: suggestion.lng,
+        dwell_minutes: suggestion.dwell_minutes ?? 15,
+        trigger_radius_miles: suggestion.trigger_radius_miles ?? 1.5,
+        target_time: '12:00:00',
+        notes: suggestion.reason,
+      };
+
+      const updated = [...waypoints];
+      if (suggestion.insertAfterWaypointId) {
+        const insertIdx = updated.findIndex(
+          (w) => w.id === suggestion.insertAfterWaypointId
+        );
+        if (insertIdx !== -1) {
+          updated.splice(insertIdx + 1, 0, newWp);
+        } else if (
+          updated.length > 1 &&
+          updated[updated.length - 1].type === 'destination'
+        ) {
+          updated.splice(updated.length - 1, 0, newWp);
+        } else {
+          updated.push(newWp);
+        }
+      } else {
+        if (
+          updated.length > 1 &&
+          updated[updated.length - 1].type === 'destination'
+        ) {
+          updated.splice(updated.length - 1, 0, newWp);
+        } else {
+          updated.push(newWp);
+        }
+      }
+
+      updateCurrentDayWaypoints(updated);
+
+      // Clear preview pin if it matches this suggestion
+      setScoutPreviewPin((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.lat - suggestion.lat) < 0.0001 &&
+          Math.abs(prev.lng - suggestion.lng) < 0.0001
+        ) {
+          return null;
+        }
+        return prev;
+      });
+    },
+    [updateCurrentDayWaypoints, waypoints]
+  );
+
   const handleSetBaseDate = useCallback((newDate: string) => {
     setTrip((prev) => {
       const nextDays = [...prev.days];
@@ -561,6 +663,8 @@ export function App() {
         isSaving={isSaving}
         saveSuccess={saveSuccess}
         isDirty={isDirty}
+        onToggleScout={handleToggleScout}
+        isScoutOpen={isScoutOpen}
       />
 
       {/* Multi-Day Leg Switcher Bar (Visible for multi-day itineraries) */}
@@ -572,7 +676,7 @@ export function App() {
         onDeleteDay={handleDeleteDay}
       />
 
-      {/* Main App Workspace: Left Waypoints Panel + Right Map Canvas */}
+      {/* Main App Workspace: Left Waypoints Panel + Middle Map Canvas + Right Route Scout */}
       <div className="flex flex-1 w-full overflow-hidden">
         {/* Resizable Waypoints & Timeline Sidebar */}
         <TimelineSidebar
@@ -585,6 +689,8 @@ export function App() {
           onResetSample={handleResetSample}
           onClearAll={handleClearAll}
           onFocusAddStop={handleFocusAddStop}
+          onOpenScoutForDay={handleOpenScoutForDay}
+          onOpenScoutForWaypoint={handleOpenScoutForWaypoint}
         />
 
         {/* Interactive Map Area */}
@@ -603,8 +709,26 @@ export function App() {
             route={route}
             onMapClick={handleMapClick}
             onDeleteWaypoint={handleDeleteWaypoint}
+            scoutPreviewPin={scoutPreviewPin}
+            onClearScoutPreviewPin={() => setScoutPreviewPin(null)}
           />
         </main>
+
+        {/* Route Scout AI Assistant Drawer */}
+        <RouteScoutDrawer
+          isOpen={isScoutOpen}
+          onClose={() => setIsScoutOpen(false)}
+          trip={trip}
+          activeDayIndex={activeDayIndex}
+          activeDay={currentDay}
+          waypoints={waypoints}
+          scope={scoutScope}
+          onChangeScope={setScoutScope}
+          onAddWaypoint={handleAddWaypointFromScout}
+          onUpdateWaypoint={handleUpdateWaypoint}
+          onPreviewCoordinate={setScoutPreviewPin}
+          activePreviewPin={scoutPreviewPin}
+        />
       </div>
 
       {/* Route Selector & Manager Modal */}

@@ -106,16 +106,16 @@ roadtrip-copilot/
 │   ├── server/                # Fastify TypeScript backend
 │   │   ├── app.ts             # Fastify app factory with CORS and routes
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
-│   │   ├── routes/            # Fastify plugins (routing.ts, ai.ts, device.ts, itineraries.ts)
-│   │   ├── services/          # Business logic (routeService, geocodeService, routeCache, aiService, deviceService, itineraryStorageService)
+│   │   ├── routes/            # Fastify plugins (routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
+│   │   ├── services/          # Business logic (routeService, geocodeService, routeCache, aiService, deviceService, itineraryStorageService, scoutService)
 │   │   └── types/             # Strict TypeScript interfaces (0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout & state coordinator
-│   │   ├── components/        # AppHeader, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal
+│   │   ├── components/        # AppHeader, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal, RouteScoutDrawer
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
-│   │   └── types/             # Frontend data models
-│   └── tests/                 # Vitest test suites (111 tests: backend, engine, ai, schema, device, itineraries)
+│   │   └── types/             # Frontend data models (routing, ai, scout)
+│   └── tests/                 # Vitest test suites (124 tests: backend, engine, ai, schema, device, itineraries, scout)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/
@@ -196,7 +196,7 @@ roadtrip-copilot/
   ```bash
   cd route-builder && npm run build
   ```
-* **Run All 111 Vitest Tests:**
+* **Run All 124 Vitest Tests:**
   ```bash
   cd route-builder && npm test
   ```

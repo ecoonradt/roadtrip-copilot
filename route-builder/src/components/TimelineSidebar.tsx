@@ -13,6 +13,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Compass,
 } from 'lucide-react';
 
 import type { Waypoint, WaypointType } from '../types/routing';
@@ -31,6 +32,8 @@ interface TimelineSidebarProps {
   onResetSample: () => void;
   onClearAll: () => void;
   onFocusAddStop: () => void;
+  onOpenScoutForDay?: () => void;
+  onOpenScoutForWaypoint?: (waypoint: Waypoint) => void;
 }
 
 const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
@@ -60,6 +63,8 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   onResetSample,
   onClearAll,
   onFocusAddStop,
+  onOpenScoutForDay,
+  onOpenScoutForWaypoint,
 }) => {
   // Resizable sidebar width with localStorage persistence
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -249,6 +254,17 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 )}
                 <span className="hidden sm:inline">AI Alerts</span>
+              </button>
+            )}
+
+            {onOpenScoutForDay && (
+              <button
+                onClick={onOpenScoutForDay}
+                className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer"
+                title="Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
+              >
+                <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">Scout Leg</span>
               </button>
             )}
 
@@ -537,21 +553,41 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           <span className="text-[11px] font-semibold text-slate-300">
                             Co-Pilot In-Car Announcement
                           </span>
-                          <button
-                            onClick={() => {
-                              const currentWp = originalWp
-                                ? { ...originalWp, target_time: stop.arrivalTime }
-                                : {
-                                    ...stop,
-                                    target_time: stop.arrivalTime,
-                                  };
-                              setSelectedWaypointForAi(currentWp);
-                            }}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer"
-                          >
-                            <Sparkles className="w-3 h-3 text-amber-300" />
-                            <span>{stop.notification ? 'Edit Alert & Voice' : 'Generate Alert'}</span>
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {onOpenScoutForWaypoint && (
+                              <button
+                                onClick={() => {
+                                  const currentWp = originalWp
+                                    ? { ...originalWp, target_time: stop.arrivalTime }
+                                    : {
+                                        ...stop,
+                                        target_time: stop.arrivalTime,
+                                      };
+                                  onOpenScoutForWaypoint(currentWp);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-all border border-slate-700/80 cursor-pointer"
+                                title="Ask Route Scout about this stop (accessibility, tribal land, photo spots)"
+                              >
+                                <Compass className="w-3 h-3 text-cyan-400" />
+                                <span>Ask Scout</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                const currentWp = originalWp
+                                  ? { ...originalWp, target_time: stop.arrivalTime }
+                                  : {
+                                      ...stop,
+                                      target_time: stop.arrivalTime,
+                                    };
+                                setSelectedWaypointForAi(currentWp);
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer"
+                            >
+                              <Sparkles className="w-3 h-3 text-amber-300" />
+                              <span>{stop.notification ? 'Edit Alert & Voice' : 'Generate Alert'}</span>
+                            </button>
+                          </div>
                         </div>
 
                         {stop.notification ? (

@@ -1,0 +1,325 @@
+import type {
+  ScoutScope,
+  ScoutSuggestion,
+  ScoutChatRequest,
+  ScoutChatResponse,
+} from '../types/scout.js';
+import type { GenerationOptions } from './aiService.js';
+import { AiService } from './aiService.js';
+
+/**
+ * Builds the comprehensive system and context prompt for Route Scout.
+ */
+export function buildScoutPrompt(request: ScoutChatRequest): string {
+  const { scope, messages, tripContext } = request;
+
+  let contextBlock = `TRIP LEVEL CONTEXT:\n- Trip Name: ${tripContext.tripName}\n`;
+  if (tripContext.date) contextBlock += `- Planned Date: ${tripContext.date}\n`;
+  if (tripContext.origin) contextBlock += `- Trip Origin: ${tripContext.origin}\n`;
+  if (tripContext.destination) contextBlock += `- Trip Destination: ${tripContext.destination}\n`;
+  if (tripContext.departureTime) contextBlock += `- Departure Time: ${tripContext.departureTime}\n`;
+  if (tripContext.corridor) contextBlock += `- Corridor / Route Description: ${tripContext.corridor}\n`;
+
+  if (scope.type === 'day') {
+    contextBlock += `\nACTIVE SCOPE: Day ${scope.dayNumber ?? 1}${scope.dayTitle ? ` (${scope.dayTitle})` : ''}\n`;
+    contextBlock += `CURRENT STOPS ON THIS DAY (${tripContext.waypoints.length} total):\n`;
+    if (tripContext.waypoints.length === 0) {
+      contextBlock += `  (No waypoints added yet for this day. Only start and destination are defined.)\n`;
+    } else {
+      tripContext.waypoints.forEach((wp, idx) => {
+        contextBlock += `  ${idx + 1}. [${wp.id}] "${wp.name}" (${wp.type}) @ ${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}`;
+        if (wp.target_time) contextBlock += ` | Target: ${wp.target_time}`;
+        if (wp.dwell_minutes) contextBlock += ` | Dwell: ${wp.dwell_minutes}m`;
+        if (wp.notes) contextBlock += ` | Notes: "${wp.notes}"`;
+        contextBlock += `\n`;
+      });
+    }
+  } else {
+    const focused = tripContext.focusedWaypoint || tripContext.waypoints.find((w) => w.id === scope.waypointId);
+    contextBlock += `\nACTIVE SCOPE: Waypoint Audit & Refinement\n`;
+    if (focused) {
+      contextBlock += `FOCUSED WAYPOINT DETAILS:\n`;
+      contextBlock += `- ID: ${focused.id}\n`;
+      contextBlock += `- Name: ${focused.name}\n`;
+      contextBlock += `- Category Type: ${focused.type}\n`;
+      contextBlock += `- GPS Coordinates: ${focused.lat.toFixed(6)}, ${focused.lng.toFixed(6)}\n`;
+      if (focused.target_time) contextBlock += `- Scheduled Target Time: ${focused.target_time}\n`;
+      if (focused.dwell_minutes !== undefined) contextBlock += `- Planned Dwell Duration: ${focused.dwell_minutes} minutes\n`;
+      if (focused.trigger_radius_miles) contextBlock += `- Heads-Up Alert Radius: ${focused.trigger_radius_miles} miles\n`;
+      if (focused.notes) contextBlock += `- Driver Notes: ${focused.notes}\n`;
+      if (focused.notification) {
+        contextBlock += `- Current Alert Title: "${focused.notification.title}"\n`;
+        contextBlock += `- Current Spoken Audio: "${focused.notification.speech}"\n`;
+      }
+    } else {
+      contextBlock += `Focused Waypoint ID: ${scope.waypointId || 'unknown'}\n`;
+    }
+
+    const otherWps = tripContext.waypoints.filter((w) => w.id !== scope.waypointId);
+    if (otherWps.length > 0) {
+      contextBlock += `\nOTHER STOPS ON THIS LEG FOR CONTEXT:\n`;
+      otherWps.forEach((wp) => {
+        contextBlock += `  - ${wp.name} (${wp.type}) @ ${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}\n`;
+      });
+    }
+  }
+
+  let conversationHistory = '';
+  if (messages.length > 0) {
+    conversationHistory = `\nCONVERSATION HISTORY:\n`;
+    messages.forEach((msg) => {
+      const sender = msg.role === 'user' ? 'User' : 'Route Scout';
+      conversationHistory += `${sender}: ${msg.content}\n\n`;
+    });
+  }
+
+  return `You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
+Your mission is to help the driver audit waypoints, discover scenic overlooks, find vetted meal and fuel stops along highway corridors, and verify route logistics.
+
+GUIDELINES:
+1. Provide practical, driver-oriented advice: parking accessibility (e.g. pull-offs vs steep lots), paved vs dirt roads, scenic value, pacing, daylight/golden hour timing, and local tips.
+2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Present recommendations as candidate suggestions.
+3. Keep responses conversational, concise, and helpful (typically 2-4 focused paragraphs).
+4. When you recommend adding new stops or updating an existing waypoint's coordinates/dwell, append an exact structured JSON block at the very end using the format below.
+5. If no waypoint actions are needed (e.g. general questions or reassurance), do not include the json:suggestions block.
+
+JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendations):
+\`\`\`json:suggestions
+[
+  {
+    "action": "add_waypoint",
+    "name": "Stop Name",
+    "type": "scenic_pull_off",
+    "lat": 35.1234,
+    "lng": -111.5678,
+    "dwell_minutes": 20,
+    "trigger_radius_miles": 2.0,
+    "insertAfterWaypointId": "optional_preceding_waypoint_id",
+    "reason": "Clear explanation of why this stop is recommended."
+  },
+  {
+    "action": "update_waypoint",
+    "targetWaypointId": "target_id",
+    "name": "Updated Name",
+    "type": "scenic_pull_off",
+    "lat": 35.5678,
+    "lng": -111.1234,
+    "dwell_minutes": 15,
+    "trigger_radius_miles": 3.0,
+    "reason": "Explanation of the correction or improvement."
+  }
+]
+\`\`\`
+
+Allowed types: "origin", "destination", "scenic_pull_off", "scenic_drive_by", "meal", "fuel", "lodging".
+
+${contextBlock}
+${conversationHistory}
+Please respond to the latest User request.`;
+}
+
+/**
+ * Parses Route Scout output, extracting markdown conversation and structured suggestion actions.
+ */
+export function parseScoutResponse(rawOutput: string): { reply: string; suggestions: ScoutSuggestion[] } {
+  if (!rawOutput) {
+    return { reply: 'No response received from Route Scout.', suggestions: [] };
+  }
+
+  let reply = rawOutput.trim();
+  const suggestions: ScoutSuggestion[] = [];
+
+  // Match ```json:suggestions ... ``` or ```json ... ``` containing array with action field
+  const blockRegex = /```(?:json:suggestions|json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
+  const match = rawOutput.match(blockRegex);
+
+  if (match && match[1]) {
+    try {
+      const parsedArray = JSON.parse(match[1]);
+      if (Array.isArray(parsedArray)) {
+        parsedArray.forEach((item, index) => {
+          if (
+            typeof item === 'object' &&
+            item !== null &&
+            (item.action === 'add_waypoint' || item.action === 'update_waypoint') &&
+            typeof item.lat === 'number' &&
+            typeof item.lng === 'number' &&
+            !isNaN(item.lat) &&
+            !isNaN(item.lng)
+          ) {
+            suggestions.push({
+              id: `scout_sug_${Date.now()}_${index}`,
+              action: item.action,
+              name: typeof item.name === 'string' ? item.name : 'Suggested Stop',
+              type: typeof item.type === 'string' ? item.type : 'scenic_pull_off',
+              lat: Number(item.lat.toFixed(6)),
+              lng: Number(item.lng.toFixed(6)),
+              dwell_minutes: typeof item.dwell_minutes === 'number' ? item.dwell_minutes : 15,
+              trigger_radius_miles: typeof item.trigger_radius_miles === 'number' ? item.trigger_radius_miles : 2.0,
+              reason: typeof item.reason === 'string' ? item.reason : 'Recommended by Route Scout',
+              insertAfterWaypointId: typeof item.insertAfterWaypointId === 'string' ? item.insertAfterWaypointId : undefined,
+              targetWaypointId: typeof item.targetWaypointId === 'string' ? item.targetWaypointId : undefined,
+            });
+          }
+        });
+      }
+      // Strip the code block from the user-facing text
+      reply = rawOutput.replace(blockRegex, '').trim();
+    } catch {
+      // If parsing fails, preserve raw output
+    }
+  }
+
+  return { reply, suggestions };
+}
+
+/**
+ * Deterministic offline fallback when AI models are unavailable.
+ */
+export function generateTemplateScoutResponse(request: ScoutChatRequest): { reply: string; suggestions: ScoutSuggestion[] } {
+  const { scope, messages, tripContext } = request;
+  const lastMessage = messages[messages.length - 1]?.content.toLowerCase() || '';
+
+  if (scope.type === 'waypoint') {
+    const focused = tripContext.focusedWaypoint || tripContext.waypoints.find((w) => w.id === scope.waypointId);
+    const name = focused?.name || 'this waypoint';
+
+    if (lastMessage.includes('park') || lastMessage.includes('access') || lastMessage.includes('road')) {
+      return {
+        reply: `### Waypoint Accessibility: ${name}\n\nBased on regional road attributes, highway pull-offs typically have designated paved shoulders or roadside gravel aprons. If traveling with a standard passenger car or rental SUV, exercise caution with unpaved road shoulders after rain.\n\nYou can click **Preview on Map** to zoom in and check satellite imagery against the road alignment.`,
+        suggestions: [],
+      };
+    }
+
+    if (lastMessage.includes('coord') || lastMessage.includes('wrong') || lastMessage.includes('fix') || lastMessage.includes('shift')) {
+      return {
+        reply: `### Coordinate Verification: ${name}\n\nWhen verifying a waypoint along a highway corridor, ensure the pin is placed directly on the paved roadway or an authorized pull-off rather than on backcountry dirt tracks. You can drag the marker directly on the map canvas or use the search bar to lock to a street address.`,
+        suggestions: [],
+      };
+    }
+
+    return {
+      reply: `### Route Scout Audit: ${name}\n\n- **Target Arrival:** ${focused?.target_time || 'Dynamic schedule'}\n- **Dwell:** ${focused?.dwell_minutes ?? 15} minutes\n- **Trigger Distance:** ${focused?.trigger_radius_miles ?? 2.0} miles\n\nThis waypoint is positioned on your active driving leg. To adjust alert parameters, use the **Edit Alert & Voice** button in the timeline.`,
+      suggestions: [],
+    };
+  }
+
+  // Day Scope
+  const origin = tripContext.origin || 'Start';
+  const dest = tripContext.destination || 'End';
+
+  if (lastMessage.includes('lunch') || lastMessage.includes('food') || lastMessage.includes('eat') || lastMessage.includes('dine')) {
+    const midwayLat = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lat + tripContext.waypoints[tripContext.waypoints.length - 1].lat) / 2 : 35.5;
+    const midwayLng = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lng + tripContext.waypoints[tripContext.waypoints.length - 1].lng) / 2 : -109.5;
+
+    return {
+      reply: `### Mid-Route Dining Recommendations\n\nAlong the drive from **${origin}** to **${dest}**, timing lunch approximately halfway into your drive keeps driver fatigue low. Consider established highway trading posts or downtown plazas for reliable dining and clean restrooms.`,
+      suggestions: [
+        {
+          id: `scout_fallback_lunch_${Date.now()}`,
+          action: 'add_waypoint',
+          name: 'Recommended Corridor Lunch Stop',
+          type: 'meal',
+          lat: Number(midwayLat.toFixed(4)),
+          lng: Number(midwayLng.toFixed(4)),
+          dwell_minutes: 45,
+          trigger_radius_miles: 2.0,
+          reason: 'Midway meal break recommendation along the planned travel route.',
+        },
+      ],
+    };
+  }
+
+  return {
+    reply: `### Day ${scope.dayNumber ?? 1} Route Scout Overview\n\n- **Leg:** ${origin} → ${dest}\n- **Current stops:** ${tripContext.waypoints.length}\n- **Departure:** ${tripContext.departureTime || '09:00 AM'}\n\nYou can ask Route Scout to investigate specific viewpoints, find fuel and meal stops, or inspect any waypoint's road access.`,
+    suggestions: [],
+  };
+}
+
+/**
+ * Returns contextual quick-tap prompt chips based on active scope.
+ */
+export function getQuickPrompts(scope: ScoutScope): string[] {
+  if (scope.type === 'waypoint') {
+    const name = scope.waypointName || 'this stop';
+    return [
+      `Is the coordinate for ${name} directly on the highway?`,
+      `Check parking and road accessibility for ${name}`,
+      `Suggest a better scenic overlook or photo spot near ${name}`,
+      `Is our planned dwell time appropriate for ${name}?`,
+    ];
+  }
+
+  return [
+    'Where should we stop for lunch along this leg?',
+    'What scenic pull-offs exist on this corridor?',
+    'Check for long fuel deserts or remote stretches',
+    'How is our overall driving pace today?',
+  ];
+}
+
+/**
+ * Route Scout Service Coordinator.
+ */
+export class ScoutService {
+  private aiService: AiService;
+
+  constructor(aiService?: AiService) {
+    this.aiService = aiService || new AiService();
+  }
+
+  /**
+   * Executes a multi-turn chat interaction with Route Scout.
+   */
+  async chat(request: ScoutChatRequest, options: GenerationOptions = {}): Promise<ScoutChatResponse> {
+    const sessionId = request.sessionId || `scout_${Date.now()}`;
+    const preferredEngine = options.preferredEngine || 'auto';
+
+    if (preferredEngine === 'template') {
+      const { reply, suggestions } = generateTemplateScoutResponse(request);
+      return { reply, suggestions, sessionId, engine: 'template' };
+    }
+
+    const prompt = buildScoutPrompt(request);
+
+    // 1. Try Primary: agy adapter
+    if (preferredEngine !== 'cloud') {
+      const agy = this.aiService.getAdapter('agy');
+      if (agy) {
+        try {
+          const rawOutput = await agy.generate(prompt);
+          const { reply, suggestions } = parseScoutResponse(rawOutput);
+          return { reply, suggestions, sessionId, engine: 'agy' };
+        } catch {
+          // Fall through to cloud / template
+        }
+      }
+    }
+
+    // 2. Try Cloud Gemini API
+    const cloud = this.aiService.getAdapter('cloud');
+    if (cloud) {
+      try {
+        const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+        if (apiKey && (await cloud.isAvailable(apiKey))) {
+          const rawOutput = await cloud.generate(prompt, apiKey);
+          const { reply, suggestions } = parseScoutResponse(rawOutput);
+          return { reply, suggestions, sessionId, engine: 'cloud' };
+        }
+      } catch {
+        // Fall through to template
+      }
+    }
+
+    // 3. Fallback: Deterministic Template
+    const { reply, suggestions } = generateTemplateScoutResponse(request);
+    return { reply, suggestions, sessionId, engine: 'template' };
+  }
+
+  /**
+   * Returns contextual quick prompts for a scope.
+   */
+  getQuickPrompts(scope: ScoutScope): string[] {
+    return getQuickPrompts(scope);
+  }
+}
