@@ -468,10 +468,14 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                               )}
                             </div>
 
-                            <span className="text-slate-600">&bull;</span>
-                            <span className="text-[11px] text-slate-400 font-mono">
-                              {stop.dwell_minutes > 0 ? `${stop.dwell_minutes}m dwell` : 'Pass-through'}
-                            </span>
+                            {stop.dwell_minutes > 0 && (
+                              <>
+                                <span className="text-slate-600">&bull;</span>
+                                <span className="text-[11px] text-slate-400 font-mono">
+                                  {stop.dwell_minutes}m dwell
+                                </span>
+                              </>
+                            )}
                           </div>
 
                           {/* Co-Pilot Alert Status Tag (if configured) */}
