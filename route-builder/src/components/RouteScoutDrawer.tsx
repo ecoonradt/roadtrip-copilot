@@ -4,6 +4,7 @@ import {
   Send,
   Plus,
   Check,
+  Copy,
   RotateCcw,
   X,
   ChevronDown,
@@ -53,25 +54,110 @@ function getScopeKey(scope: ScoutScope, activeDayIndex: number): string {
   return `day:${scope.dayNumber ?? activeDayIndex + 1}`;
 }
 
-// Simple text formatter for assistant markdown responses (bold, bullet points, numbers)
+function renderFormattedInline(str: string): React.ReactNode {
+  // Splits by `inline code`, **bold**, *italic*, _italic_
+  const parts = str.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_)/g);
+  return parts.map((part, i) => {
+    if (!part) return null;
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+      return (
+        <code
+          key={i}
+          className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 font-mono text-[11px] text-cyan-200"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+      return (
+        <strong key={i} className="text-white font-semibold">
+          {renderFormattedInline(part.slice(2, -2))}
+        </strong>
+      );
+    }
+    if (
+      ((part.startsWith('*') && part.endsWith('*')) ||
+        (part.startsWith('_') && part.endsWith('_'))) &&
+      part.length >= 2
+    ) {
+      return (
+        <em key={i} className="text-slate-200 italic">
+          {renderFormattedInline(part.slice(1, -1))}
+        </em>
+      );
+    }
+    return part;
+  });
+}
+
+// Markdown formatter for assistant responses (headings, blockquotes, lists, code, bold, italic)
 function FormattedAssistantText({ text }: { text: string }) {
   const lines = text.split('\n');
 
   return (
-    <div className="space-y-1.5 text-xs text-slate-200 leading-relaxed">
+    <div className="space-y-1.5 text-xs text-slate-200 leading-relaxed select-text cursor-text">
       {lines.map((line, idx) => {
         const trimmed = line.trim();
         if (!trimmed) {
           return <div key={idx} className="h-1" />;
         }
 
+        // Horizontal rule
+        if (/^(\*\*\*|---|___)$/.test(trimmed)) {
+          return <hr key={idx} className="border-slate-700/80 my-2" />;
+        }
+
+        // Headings
+        if (trimmed.startsWith('#### ')) {
+          return (
+            <h5 key={idx} className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider mt-2 mb-0.5">
+              {renderFormattedInline(trimmed.slice(5))}
+            </h5>
+          );
+        }
+        if (trimmed.startsWith('### ')) {
+          return (
+            <h4 key={idx} className="text-xs font-bold text-cyan-300 mt-2.5 mb-1 flex items-center gap-1.5">
+              <span className="w-1 h-3 bg-cyan-400 rounded-full shrink-0" />
+              <span>{renderFormattedInline(trimmed.slice(4))}</span>
+            </h4>
+          );
+        }
+        if (trimmed.startsWith('## ')) {
+          return (
+            <h3 key={idx} className="text-xs font-bold text-white mt-3 mb-1">
+              {renderFormattedInline(trimmed.slice(3))}
+            </h3>
+          );
+        }
+        if (trimmed.startsWith('# ')) {
+          return (
+            <h2 key={idx} className="text-sm font-bold text-white mt-3.5 mb-1.5 border-b border-slate-750 pb-1">
+              {renderFormattedInline(trimmed.slice(2))}
+            </h2>
+          );
+        }
+
+        // Blockquote
+        if (trimmed.startsWith('> ')) {
+          return (
+            <blockquote
+              key={idx}
+              className="border-l-2 border-cyan-500/70 pl-2.5 py-0.5 my-1 bg-slate-900/50 rounded-r text-slate-300 italic"
+            >
+              {renderFormattedInline(trimmed.slice(2))}
+            </blockquote>
+          );
+        }
+
         // Bullet point
         if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
           const content = trimmed.slice(2);
           return (
-            <div key={idx} className="flex items-start gap-2 pl-1">
+            <div key={idx} className="flex items-start gap-2 pl-1 my-0.5">
               <span className="text-cyan-400 font-bold shrink-0 mt-0.5">&bull;</span>
-              <span>{renderBold(content)}</span>
+              <span className="flex-1">{renderFormattedInline(content)}</span>
             </div>
           );
         }
@@ -80,33 +166,24 @@ function FormattedAssistantText({ text }: { text: string }) {
         const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
         if (numMatch) {
           return (
-            <div key={idx} className="flex items-start gap-2 pl-1">
+            <div key={idx} className="flex items-start gap-2 pl-1 my-0.5">
               <span className="text-cyan-400 font-mono font-bold shrink-0 mt-0.5">
                 {numMatch[1]}.
               </span>
-              <span>{renderBold(numMatch[2])}</span>
+              <span className="flex-1">{renderFormattedInline(numMatch[2])}</span>
             </div>
           );
         }
 
-        return <p key={idx}>{renderBold(trimmed)}</p>;
+        // Standard paragraph
+        return (
+          <p key={idx} className="my-0.5">
+            {renderFormattedInline(trimmed)}
+          </p>
+        );
       })}
     </div>
   );
-}
-
-function renderBold(str: string): React.ReactNode {
-  const parts = str.split(/(\*\*.*?\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return (
-        <strong key={i} className="text-white font-semibold">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    return part;
-  });
 }
 
 export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
@@ -151,6 +228,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const [addedSuggestionIds, setAddedSuggestionIds] = useState<Set<string>>(new Set());
   const [updatedSuggestionIds, setUpdatedSuggestionIds] = useState<Set<string>>(new Set());
 
+  // Copy-to-clipboard state
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
   // Scope dropdown
   const [isScopeDropdownOpen, setIsScopeDropdownOpen] = useState(false);
   const scopeDropdownRef = useRef<HTMLDivElement>(null);
@@ -159,6 +239,28 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const [quickPrompts, setQuickPrompts] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-expanding textarea height adjustment (clamped between 38px and 120px)
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      const scrollH = inputRef.current.scrollHeight;
+      const newHeight = Math.min(Math.max(scrollH, 38), 120);
+      inputRef.current.style.height = `${newHeight}px`;
+    }
+  }, [inputText]);
+
+  const handleCopyMessage = async (msgId: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessageId(msgId);
+      setTimeout(() => {
+        setCopiedMessageId((prev) => (prev === msgId ? null : prev));
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
 
   const currentScopeKey = useMemo(
     () => getScopeKey(scope, activeDayIndex),
@@ -351,6 +453,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         content: response.reply,
         timestamp: Date.now(),
         suggestions: response.suggestions,
+        engine: response.engine,
       };
 
       setConversations((prev) => ({
@@ -423,12 +526,12 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   return (
     <aside
       style={{ width: `${drawerWidth}px` }}
-      className="relative h-full flex flex-col bg-slate-900 border-l border-slate-800 text-slate-100 shrink-0 z-20 shadow-2xl select-none animate-fade-in"
+      className="relative h-full flex flex-col bg-slate-900 border-l border-slate-800 text-slate-100 shrink-0 z-20 shadow-2xl animate-fade-in"
     >
       {/* Resizing Drag Handle (Left Edge) */}
       <div
         onMouseDown={handleMouseDown}
-        className="absolute top-0 -left-1 w-2.5 h-full cursor-col-resize hover:bg-cyan-500/50 transition-colors z-30 group flex items-center justify-center"
+        className="absolute top-0 -left-1 w-2.5 h-full cursor-col-resize hover:bg-cyan-500/50 transition-colors z-30 group flex items-center justify-center select-none"
         title="Drag to resize Route Scout panel"
       >
         <div className="w-0.5 h-8 bg-slate-600 group-hover:bg-cyan-400 rounded-full transition-colors" />
@@ -621,18 +724,51 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           >
             {msg.role === 'user' ? (
               // User message bubble
-              <div className="max-w-[85%] bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-xs shadow-md">
+              <div className="max-w-[85%] bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-xs shadow-md select-text cursor-text">
                 {msg.content}
               </div>
             ) : (
               // Assistant message bubble
-              <div className="max-w-[95%] space-y-2">
+              <div className="max-w-[95%] space-y-2 select-text cursor-text">
                 <div className="bg-slate-850 border border-slate-750 rounded-2xl rounded-tl-sm p-3 shadow-md">
-                  <div className="flex items-center gap-1.5 mb-1.5 text-cyan-400">
-                    <Compass className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">
-                      Route Scout
-                    </span>
+                  <div className="flex items-center justify-between gap-1 mb-2 select-none">
+                    <div className="flex items-center gap-1.5 text-cyan-400">
+                      <Compass className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">
+                        Route Scout
+                      </span>
+                      {msg.engine && (
+                        <span
+                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
+                            msg.engine === 'agy'
+                              ? 'bg-cyan-950/70 text-cyan-300 border-cyan-800/60'
+                              : msg.engine === 'cloud'
+                              ? 'bg-purple-950/70 text-purple-300 border-purple-800/60'
+                              : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                          }`}
+                        >
+                          {msg.engine === 'agy'
+                            ? 'Gemini Flash'
+                            : msg.engine === 'cloud'
+                            ? 'Gemini Cloud'
+                            : 'Offline Fallback'}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleCopyMessage(msg.id, msg.content)}
+                      className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                      title="Copy response to clipboard"
+                    >
+                      {copiedMessageId === msg.id ? (
+                        <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono font-medium">
+                          <Check className="w-3 h-3" />
+                          <span>Copied</span>
+                        </span>
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
                   </div>
                   <FormattedAssistantText text={msg.content} />
                 </div>
@@ -810,7 +946,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           <div className="relative flex-1">
             <textarea
               ref={inputRef}
-              rows={2}
+              rows={1}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
@@ -826,7 +962,8 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       scope.waypointName || 'this stop'
                     }...`
               }
-              className="w-full resize-none bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+              style={{ minHeight: '38px', maxHeight: '120px' }}
+              className="w-full resize-none overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
             />
           </div>
           <button

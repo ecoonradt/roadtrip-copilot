@@ -290,8 +290,9 @@ export class ScoutService {
           const rawOutput = await agy.generate(prompt);
           const { reply, suggestions } = parseScoutResponse(rawOutput);
           return { reply, suggestions, sessionId, engine: 'agy' };
-        } catch {
-          // Fall through to cloud / template
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[RouteScout] agy adapter generation failed (${msg}), attempting cloud/template fallback...`);
         }
       }
     }
@@ -306,8 +307,9 @@ export class ScoutService {
           const { reply, suggestions } = parseScoutResponse(rawOutput);
           return { reply, suggestions, sessionId, engine: 'cloud' };
         }
-      } catch {
-        // Fall through to template
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[RouteScout] cloud adapter generation failed (${msg}), falling back to template...`);
       }
     }
 

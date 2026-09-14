@@ -56,6 +56,7 @@ export interface ScoutMessage {
   content: string;
   timestamp: number;
   suggestions?: ScoutSuggestion[];
+  engine?: AiEngineType;
 }
 
 export interface ScoutChatRequest {

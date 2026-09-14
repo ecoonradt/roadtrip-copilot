@@ -64,11 +64,9 @@ export async function resolveLatestAgyFlashModel(): Promise<string | null> {
     return cachedAgyFlashModel;
   }
   try {
-    const customPath = process.env.PATH
-      ? `${process.env.HOME}/.local/bin:${process.env.PATH}`
-      : '/usr/local/bin:/usr/bin:/bin';
+    const customPath = `${process.env.HOME || '/home/eric'}/.local/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
     const { stdout } = await execFileAsync('agy', ['models'], {
-      timeout: 5000,
+      timeout: 10000,
       env: { ...process.env, PATH: customPath },
     });
     const lines = stdout.split('\n');
@@ -89,9 +87,7 @@ export async function resolveLatestAgyFlashModel(): Promise<string | null> {
  * Default child_process execution for agy CLI, passing the dynamically resolved Flash model.
  */
 export async function defaultExecAgy(prompt: string): Promise<string> {
-  const customPath = process.env.PATH
-    ? `${process.env.HOME}/.local/bin:${process.env.PATH}`
-    : '/usr/local/bin:/usr/bin:/bin';
+  const customPath = `${process.env.HOME || '/home/eric'}/.local/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
 
   const model = await resolveLatestAgyFlashModel();
   const args = ['-p', prompt, '--output-format', 'json'];
@@ -100,7 +96,7 @@ export async function defaultExecAgy(prompt: string): Promise<string> {
   }
 
   const { stdout } = await execFileAsync('agy', args, {
-    timeout: 30000,
+    timeout: 60000,
     maxBuffer: 10 * 1024 * 1024,
     env: {
       ...process.env,
