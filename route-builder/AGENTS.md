@@ -30,6 +30,17 @@
   * `TemplateHarnessAdapter`: Deterministic offline fallback.
 * Enforces constraints: titles $\le 30$ chars, spoken messages 15–25 words ($\le 2$ lines), trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
 
+### E. Route Scout Conversational Co-Pilot & Adapter Seam
+* **Role & Scoping:** A dedicated conversational road-trip co-pilot (`RouteScoutDrawer.tsx`, `scoutService.ts`, `/api/ai/scout/*`) operating in two distinct scopes:
+  * **Day Scope:** Evaluates overall driving pace, scenic corridors, overlook opportunities, and meal/fuel deserts.
+  * **Waypoint Scope:** Audits road accessibility (paved vs. dirt), parking pull-offs, lighting/golden hour timing, and coordinate precision.
+* **Pluggable Adapter Seam:** The core road-trip domain prompt (`buildScoutDomainPrompt`) is kept strictly pure and harness-agnostic. All harness-specific tool permissions and execution rules live behind the `AiHarnessAdapter` lifecycle hooks:
+  * `decorateScoutPrompt?(domainPrompt)`: In `AgyHarnessAdapter`, explicitly grants Green-tier search tools (`search_web`, `read_url_content`) and fast synchronous checks for real-world coordinate & exit accuracy; limits queries to 1–2 lookups; strictly forbids background tasks, subagents, interactive questions (`ask_question`), browser sessions, and workspace file modifications.
+  * `sanitizeResponse?(rawText)`: In `AgyHarnessAdapter`, strips internal harness preambles (e.g. background task yields) and trailing meta-commentary from driver-facing prose.
+  * Cloud and future adapters (Claude Code, OpenAI, Codex) plug into this seam with their respective tool declarations and prompt decorations.
+* **Interactive Suggestion Cards:** Emits actionable candidate blocks (`json:suggestions`) allowing 1-click **Add Waypoint** or **Update Waypoint** with dynamic map preview pins before driver approval.
+* **SSE Streaming:** Streams tokens over `/api/ai/scout/chat-stream` with collapsible reasoning/tool thought capture.
+
 ---
 
 ## 3. Directory Layout
@@ -86,7 +97,7 @@ route-builder/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
 │   └── types/                  # Frontend data models (routing, ai, scout)
-└── tests/                      # Comprehensive Vitest test suites (124 tests)
+└── tests/                      # Comprehensive Vitest test suites (132 tests)
 ```
 
 ---
@@ -103,7 +114,7 @@ npm test
 # Granular test suites
 npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache
 npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
-npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue
+npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
 npm run test:schema   # Itinerary V2 JSON export and ADB device service
 
 # Production compile (client Vite bundle + backend tsc)
@@ -117,3 +128,4 @@ npm run build
 2. **Strict TypeScript:** Never use `any`. Always supply strict types for new endpoints, hooks, and utilities.
 3. **No URL-Encoding on OSRM Path Semicolons:** Always use literal `;` in coordinate path parameters.
 4. **Preserve Backward Compatibility:** Any changes to exported itinerary JSON must conform to the V2 schema expected by the Android native co-pilot service.
+5. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused without harness-specific tool bans or shell commands. All harness-specific tool permissions, guardrails, and response cleaning must be implemented through the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).

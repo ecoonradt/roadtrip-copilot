@@ -29,6 +29,8 @@ export interface AiHarnessAdapter {
   readonly name: string;
   isAvailable(apiKey?: string): Promise<boolean>;
   generate(prompt: string, apiKey?: string): Promise<string>;
+  decorateScoutPrompt?(domainPrompt: string): string;
+  sanitizeResponse?(rawText: string): string;
 }
 
 export interface AiServiceOptions {
@@ -150,7 +152,7 @@ export async function defaultStreamExecAgy(
     const rl = readline.createInterface({ input: child.stdout });
 
     let inactivityTimer: NodeJS.Timeout | null = null;
-    const INACTIVITY_MS = 35000;
+    const INACTIVITY_MS = 50000;
     const MAX_TOTAL_MS = 120000;
 
     const cleanup = () => {
@@ -165,7 +167,7 @@ export async function defaultStreamExecAgy(
           if (!isDone) {
             cleanup();
             child.kill();
-            reject(new Error('Route Scout stream timed out (no data from AI model for 35s)'));
+            reject(new Error('Route Scout stream timed out (no data from AI model for 50s)'));
           }
         }, INACTIVITY_MS);
       }
@@ -312,6 +314,45 @@ export class AgyHarnessAdapter implements AiHarnessAdapter {
   ): Promise<string> {
     return defaultStreamExecAgy(prompt, onChunk);
   }
+
+  /**
+   * Decorates the domain prompt with Antigravity-specific operational instructions and tool permissions.
+   */
+  decorateScoutPrompt(domainPrompt: string): string {
+    return `CRITICAL OPERATIONAL HARNESS DIRECTIVES:
+1. You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
+2. You MAY invoke \`search_web\` and \`read_url_content\` to verify real-world place names, highway exits, amenities, closures, and accurate GPS coordinates.
+3. Keep lookups fast and focused: perform at most 1–2 quick web lookups if needed before formulating your response.
+4. DO NOT launch background tasks, cron schedules, subagents, browser automation, or interactive question prompts. Never write or modify workspace files.
+5. Respond directly, naturally, and warmly to the driver like a knowledgeable passenger sitting in the vehicle.
+6. NEVER include meta-commentary about system tools, agent harnesses, or background tasks (e.g. NEVER say "Wait for the background task to complete" or "Querying coordinates").
+7. NEVER narrate UI mechanics or JSON blocks in your prose (e.g. do not say "I have framed this as a candidate update below", "I have attached the JSON below", or "See the card below"). Simply explain your recommendation naturally.
+8. Provide accurate, real-world coordinates on the road corridor for all candidate suggestions.
+
+${domainPrompt}`;
+  }
+
+  /**
+   * Cleans internal Antigravity agent harness noise, background task text, and meta-commentary from responses.
+   */
+  static sanitizeAgyResponse(rawText: string): string {
+    if (!rawText) return '';
+    let cleaned = rawText.trim();
+
+    // 1. Strip leading harness noise (e.g. "Wait for the background task to complete.", "Waiting for task...")
+    const leadingHarnessRegex = /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi;
+    cleaned = cleaned.replace(leadingHarnessRegex, '').trim();
+
+    // 2. Strip trailing meta-commentary where the model narrates cards or JSON to the harness
+    const trailingHarnessRegex = /\n+(?:I have (?:framed|attached|included|provided|appended|added) this as a candidate (?:update|stop|suggestion)[^\n]*|I have (?:appended|included|generated|provided) the (?:JSON|structured|candidate)[^\n]*|See the candidate (?:card|update|suggestion) below[^\n]*)\.?\s*$/gi;
+    cleaned = cleaned.replace(trailingHarnessRegex, '').trim();
+
+    return cleaned;
+  }
+
+  sanitizeResponse(rawText: string): string {
+    return AgyHarnessAdapter.sanitizeAgyResponse(rawText);
+  }
 }
 
 /**
@@ -340,6 +381,14 @@ export class GeminiStudioHarnessAdapter implements AiHarnessAdapter {
       throw new Error('API key is required for Google AI Studio');
     }
     return this.fetchFn(prompt, apiKey);
+  }
+
+  decorateScoutPrompt(domainPrompt: string): string {
+    return domainPrompt;
+  }
+
+  sanitizeResponse(rawText: string): string {
+    return rawText.trim();
   }
 }
 

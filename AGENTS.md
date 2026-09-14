@@ -67,6 +67,7 @@
     * Deterministic Fallback: `TemplateHarnessAdapter` generates context-aware templates if no AI engine is active.
     * Enforces constraints: titles $\le 30$ chars, messages $\le 2$ lines, trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
     * Roadmap: Support for Anthropic Claude, OpenAI, and Ollama/local models is tracked in [IDEAS.md](docs/IDEAS.md).
+  * **Route Scout Conversational Co-Pilot & Adapter Seam:** Interactive conversational assistant (`RouteScoutDrawer.tsx`, `scoutService.ts`, `/api/ai/scout/*`) operating across Day Scope and Waypoint Scope. Built on a clean architectural seam separating the pure road-trip domain prompt (`buildScoutDomainPrompt`) from harness-specific operational directives via `AiHarnessAdapter` lifecycle hooks (`decorateScoutPrompt` and `sanitizeResponse`). In `AgyHarnessAdapter`, grants Green-tier search tools (`search_web`, `read_url_content`) and fast synchronous checks for real-world coordinate & exit accuracy, while strictly forbidding background tasks, subagents, and file writes. Generates actionable candidate cards (`json:suggestions`) with 1-click timeline integration and live map preview pins.
   * **OSRM Routing Protocol Rule:** Coordinate paths sent to the upstream OSRM routing engine must use literal `;` delimiters (e.g. `/${formattedCoords}?overview=...`). **Never URL-encode semicolons as `%3B` in OSRM path segments**, as the router rejects `%3B` with HTTP 400 `InvalidUrl`.
   * **Google Maps Navigation Links:** Generates multi-stop driving links with route-forcing anchors to preserve scenic byways over interstates. Drives exceeding 9 intermediate stops are automatically partitioned into consecutive legs ($\le 9$ intermediate stops each) with dedicated QR codes.
   * **Device Handoff:** Supports 1-click ADB push (`/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`), local Wi-Fi QR download staging (`GET /api/device/download/:filename`), and Android SAF file picker import.
@@ -115,7 +116,7 @@ roadtrip-copilot/
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models (routing, ai, scout)
-│   └── tests/                 # Vitest test suites (124 tests: backend, engine, ai, schema, device, itineraries, scout)
+│   └── tests/                 # Vitest test suites (132 tests: backend, engine, ai, schema, device, itineraries, scout)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/
@@ -196,7 +197,7 @@ roadtrip-copilot/
   ```bash
   cd route-builder && npm run build
   ```
-* **Run All 124 Vitest Tests:**
+* **Run All 132 Vitest Tests:**
   ```bash
   cd route-builder && npm test
   ```
@@ -204,7 +205,7 @@ roadtrip-copilot/
   ```bash
   cd route-builder && npm run test:backend  # OSRM, Nominatim, LRU cache
   cd route-builder && npm run test:engine   # Timeline cascade & Google Maps chunking
-  cd route-builder && npm run test:ai       # AI harness adapters & schema validation
+  cd route-builder && npm run test:ai       # AI harness adapters, schema validation, scout
   cd route-builder && npm run test:schema   # V2 export & device sync
   ```
 
@@ -220,3 +221,4 @@ roadtrip-copilot/
 7. **Idiomatic Code:** Write concise, null-safe Kotlin and modular, typed TypeScript with single-responsibility components.
 8. **Maintain Clean, Human-Friendly UI:** Never introduce internal debug text or verification claims into `route-builder/`. All UI updates must adhere to Section 2G Human-Centered UI/UX Principles.
 9. **Maintain Directory Layout in Section 3:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in Section 3 so that developers and agents can quickly navigate the codebase without scanning the entire tree.
+10. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused. Never leak harness-specific tool bans, terminal commands, or background task mechanics into the domain prompt. Implement all harness capabilities, tool allowlists, and response cleaning via the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).

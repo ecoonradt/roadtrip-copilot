@@ -18,6 +18,13 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
   * **Deterministic Fallback:** `TemplateHarnessAdapter` provides offline template alerts if no AI provider is configured.
   * **Copywriting Constraints:** Enforces titles $\le 30$ characters, notification messages $\le 2$ lines, natural spoken phonetic TTS scripts (15–25 words, spoken within 8–12 seconds), and trigger radii clamped to $0.3$–$6.0$ miles.
   * **Future Adapters:** Pluggable interface ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See [docs/IDEAS.md](../docs/IDEAS.md).
+* **Route Scout Conversational Co-Pilot (`src/components/RouteScoutDrawer.tsx`, `server/services/scoutService.ts`):**
+  * **Interactive Road-Trip Advisor:** A sliding right drawer assistant that inspects your route in two context scopes:
+    * **Day Scope:** Evaluates overall daily driving pace, identifies scenic overlooks, and alerts drivers to upcoming meal and fuel deserts along remote corridors.
+    * **Waypoint Scope:** Audits specific stops for parking accessibility, paved vs. gravel access, sunrise/sunset lighting, and precise road-snapped GPS coordinates.
+  * **Actionable Suggestion Cards:** Generates structured candidate updates (`add_waypoint`, `update_waypoint`) that render in the chat as interactive cards with 1-click timeline insertion and on-map coordinate preview.
+  * **Harness Adapter Seam Architecture:** Keeps the domain prompt completely decoupled from underlying harness mechanics. Harness-specific tool permissions (such as granting native web search grounding to `agy` while strictly prohibiting background tasks and subagents) are encapsulated in the adapter layer.
+  * **SSE Streaming with Thought Process:** Real-time token streaming (`/api/ai/scout/chat-stream`) with an expandable thought process accordion capturing intermediate search grounding.
 * **Multi-Stop Google Maps Navigation Links (`src/engine/googleMapsUrl.ts`):** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are partitioned into continuous driving legs with dedicated QR codes.
 * **Device Sync & Handoff (`server/services/deviceService.ts`, `src/components/ExportModal.tsx`):**
   * **1-Click ADB Push:** Directly pushes the itinerary `.json` to connected phones at `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
@@ -73,13 +80,13 @@ The application works with zero configuration by default in an Antigravity envir
 
 ## Testing & Quality Gates
 
-The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 111 Vitest unit and integration tests:
+The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 132 Vitest unit and integration tests:
 
 ```bash
-npm test              # Run all 111 tests across all suites
+npm test              # Run all 132 tests across all suites
 npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache
 npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
-npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue
+npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
 npm run test:schema   # Itinerary V2 JSON export and ADB device service
 npm run build         # Production compile (client Vite bundle + backend tsc)
 ```
@@ -89,9 +96,9 @@ npm run build         # Production compile (client Vite bundle + backend tsc)
 ## Project Architecture
 
 The Route Builder is architected as a decoupled client-server application:
-* **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, and Google Maps URL chunking.
-* **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, and ADB device synchronization.
-* **Test Suites (`tests/`):** 111 automated Vitest unit and integration tests covering routing proxies, timeline cascade math, AI adapters, and V2 schema exports.
+* **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, Route Scout chat drawer, and Google Maps URL chunking.
+* **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout service, and ADB device synchronization.
+* **Test Suites (`tests/`):** 132 automated Vitest unit and integration tests covering routing proxies, timeline cascade math, AI adapters, Route Scout adapter seams, and V2 schema exports.
 
 For the detailed file layout, architecture pillars, and development guidelines, see [AGENTS.md](AGENTS.md) and the root [AGENTS.md](../AGENTS.md).
 

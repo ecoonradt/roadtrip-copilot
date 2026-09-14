@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildScoutDomainPrompt,
   buildScoutPrompt,
   parseScoutResponse,
   generateTemplateScoutResponse,
@@ -7,6 +8,7 @@ import {
   ScoutService,
   sanitizeScoutReply,
 } from '../../server/services/scoutService.js';
+import { AgyHarnessAdapter, GeminiStudioHarnessAdapter } from '../../server/services/aiService.js';
 import { createApp } from '../../server/app.js';
 import type { ScoutChatRequest, ScoutScope, ScoutTripContext } from '../../server/types/scout.js';
 
@@ -56,7 +58,52 @@ describe('Route Scout Service & Prompts', () => {
     ],
   };
 
-  describe('Prompt Construction', () => {
+  describe('Prompt Construction & Adapter Seam', () => {
+    it('builds pure domain prompt free of harness-specific directives', () => {
+      const scope: ScoutScope = {
+        type: 'day',
+        dayNumber: 2,
+        dayTitle: 'Navajo Nation Transit',
+      };
+      const request: ScoutChatRequest = {
+        scope,
+        messages: [{ role: 'user', content: 'Where should we stop for lunch along this 6-hour leg?' }],
+        tripContext: sampleTripContext,
+      };
+
+      const domainPrompt = buildScoutDomainPrompt(request);
+      expect(domainPrompt).toContain('MISSION & ROLE:');
+      expect(domainPrompt).toContain('Flagstaff, AZ');
+      expect(domainPrompt).toContain('Shiprock Peak');
+      // Must not contain harness-specific tool bans or terminal rules
+      expect(domainPrompt).not.toContain('CRITICAL OPERATIONAL HARNESS DIRECTIVES');
+      expect(domainPrompt).not.toContain('search_web');
+      expect(domainPrompt).not.toContain('DO NOT invoke any tools');
+      expect(domainPrompt).not.toContain('background tasks');
+      expect(domainPrompt).not.toContain('without invoking any tools');
+    });
+
+    it('AgyHarnessAdapter decorates domain prompt with green tool permissions and guardrails', () => {
+      const agy = new AgyHarnessAdapter();
+      const domainPrompt = 'Test domain prompt content';
+      const decorated = agy.decorateScoutPrompt(domainPrompt);
+
+      expect(decorated).toContain('CRITICAL OPERATIONAL HARNESS DIRECTIVES:');
+      expect(decorated).toContain('search_web');
+      expect(decorated).toContain('read_url_content');
+      expect(decorated).toContain('DO NOT launch background tasks');
+      expect(decorated).toContain(domainPrompt);
+    });
+
+    it('GeminiStudioHarnessAdapter leaves domain prompt clean without Antigravity noise', () => {
+      const cloud = new GeminiStudioHarnessAdapter();
+      const domainPrompt = 'Test domain prompt content';
+      const decorated = cloud.decorateScoutPrompt(domainPrompt);
+
+      expect(decorated).toBe(domainPrompt);
+      expect(decorated).not.toContain('CRITICAL OPERATIONAL HARNESS DIRECTIVES');
+    });
+
     it('builds comprehensive Day Scope prompt with full itinerary context', () => {
       const scope: ScoutScope = {
         type: 'day',

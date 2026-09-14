@@ -5,13 +5,13 @@ import type {
   ScoutChatResponse,
   ScoutStreamEvent,
 } from '../types/scout.js';
-import type { GenerationOptions, AgyHarnessAdapter } from './aiService.js';
-import { AiService } from './aiService.js';
+import type { GenerationOptions, AiHarnessAdapter } from './aiService.js';
+import { AiService, AgyHarnessAdapter } from './aiService.js';
 
 /**
- * Builds the comprehensive system and context prompt for Route Scout.
+ * Builds the comprehensive domain prompt for Route Scout (pure road-trip domain, harness-agnostic).
  */
-export function buildScoutPrompt(request: ScoutChatRequest): string {
+export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
   const { scope, messages, tripContext } = request;
 
   let contextBlock = `TRIP LEVEL CONTEXT:\n- Trip Name: ${tripContext.tripName}\n`;
@@ -75,22 +75,17 @@ export function buildScoutPrompt(request: ScoutChatRequest): string {
     });
   }
 
-  return `CRITICAL OPERATIONAL INSTRUCTIONS:
-1. You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
-2. DO NOT invoke any tools, search tools, terminal commands, python scripts, subagents, or background tasks. Use ONLY your internal knowledge to formulate your answer immediately.
-3. Speak directly, naturally, and warmly to the driver like a knowledgeable passenger sitting in the vehicle.
-4. NEVER include meta-commentary about system tools, agent harnesses, or background tasks (e.g. NEVER say "Wait for the background task to complete" or "Querying coordinates").
-5. NEVER narrate UI mechanics or JSON blocks in your prose (e.g. do not say "I have framed this as a candidate update below", "I have attached the JSON below", or "See the card below"). Simply explain your recommendation naturally; the application UI will automatically render interactive visual cards from your json block.
-
-MISSION & ROLE:
-Help the driver audit waypoints, discover scenic overlooks, find vetted meal and fuel stops along highway corridors, and verify route logistics.
+  return `MISSION & ROLE:
+You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
+Your mission is to help the driver audit waypoints, discover scenic overlooks, find vetted meal and fuel stops along highway corridors, and verify route logistics.
 
 GUIDELINES:
 1. Provide practical, driver-oriented advice: parking accessibility (e.g. pull-offs vs steep lots), paved vs dirt roads, scenic value, pacing, daylight/golden hour timing, and local tips.
-2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Suggest ideas naturally without meta-commentary like "I have created a candidate card below".
+2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Suggest ideas naturally.
 3. Keep responses conversational, concise, and helpful (typically 2-4 focused paragraphs).
 4. When you recommend adding new stops or updating an existing waypoint's coordinates/dwell, append an exact structured JSON block at the very end using the format below. You are ABLE to emit multiple suggestion cards in the array when genuinely appropriate (for instance, if an audit warrants updating the current stop to a drive-by AND adding a specific recommended viewpoint/pull-off). However, do not force or spam multiple cards when a single targeted recommendation or simple reassurance is sufficient.
 5. If no waypoint actions are needed (e.g. general questions or reassurance), do not include the json:suggestions block.
+6. Provide accurate, real-world coordinates directly on or adjacent to the highway corridor for all candidate suggestions.
 
 JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendations):
 \`\`\`json:suggestions
@@ -124,25 +119,28 @@ Allowed types: "origin", "destination", "scenic_pull_off", "scenic_drive_by", "m
 
 ${contextBlock}
 ${conversationHistory}
-Please respond to the latest User request directly and conversationally without invoking any tools.`;
+Please respond to the latest User request.`;
+}
+
+/**
+ * Builds the default Route Scout prompt.
+ * Decorates the domain prompt with active adapter directives (defaults to agy).
+ */
+export function buildScoutPrompt(request: ScoutChatRequest, adapter?: AiHarnessAdapter): string {
+  const domainPrompt = buildScoutDomainPrompt(request);
+  if (adapter && typeof adapter.decorateScoutPrompt === 'function') {
+    return adapter.decorateScoutPrompt(domainPrompt);
+  }
+  const agy = new AgyHarnessAdapter();
+  return agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
 }
 
 /**
  * Cleans internal agent harness noise, background task text, and meta-commentary from Route Scout responses.
+ * Delegates to AgyHarnessAdapter.sanitizeAgyResponse.
  */
 export function sanitizeScoutReply(text: string): string {
-  if (!text) return '';
-  let cleaned = text.trim();
-
-  // 1. Strip leading harness noise (e.g. "Wait for the background task to complete.", "Waiting for task...")
-  const leadingHarnessRegex = /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi;
-  cleaned = cleaned.replace(leadingHarnessRegex, '').trim();
-
-  // 2. Strip trailing meta-commentary where the model narrates cards or JSON to the harness
-  const trailingHarnessRegex = /\n+(?:I have (?:framed|attached|included|provided|appended|added) this as a candidate (?:update|stop|suggestion)[^\n]*|I have (?:appended|included|generated|provided) the (?:JSON|structured|candidate)[^\n]*|See the candidate (?:card|update|suggestion) below[^\n]*)\.?\s*$/gi;
-  cleaned = cleaned.replace(trailingHarnessRegex, '').trim();
-
-  return cleaned;
+  return AgyHarnessAdapter.sanitizeAgyResponse(text);
 }
 
 /**
@@ -341,7 +339,7 @@ export class ScoutService {
       return { reply, suggestions, sessionId, engine: 'template' };
     }
 
-    const prompt = buildScoutPrompt(request);
+    const domainPrompt = buildScoutDomainPrompt(request);
     let lastError: string | null = null;
 
     // 1. Try Primary: agy adapter
@@ -349,8 +347,10 @@ export class ScoutService {
       const agy = this.aiService.getAdapter('agy');
       if (agy) {
         try {
+          const prompt = agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
           const rawOutput = await agy.generate(prompt);
-          const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+          const sanitized = agy.sanitizeResponse ? agy.sanitizeResponse(rawOutput) : rawOutput;
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized);
           return { reply, suggestions, sessionId, engine: 'agy', thought };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -366,8 +366,10 @@ export class ScoutService {
       try {
         const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
         if (apiKey && (await cloud.isAvailable(apiKey))) {
+          const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
           const rawOutput = await cloud.generate(prompt, apiKey);
-          const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+          const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized);
           return { reply, suggestions, sessionId, engine: 'cloud', thought };
         }
       } catch (err: unknown) {
@@ -406,7 +408,7 @@ export class ScoutService {
       return doneResponse;
     }
 
-    const prompt = buildScoutPrompt(request);
+    const domainPrompt = buildScoutDomainPrompt(request);
     let lastError: string | null = null;
 
     // 1. Try Primary: agy adapter streaming
@@ -414,6 +416,7 @@ export class ScoutService {
       const agy = this.aiService.getAdapter('agy') as (AgyHarnessAdapter | undefined);
       if (agy && typeof agy.generateStream === 'function') {
         try {
+          const prompt = agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
           const rawOutput = await agy.generateStream(prompt, (chunk) => {
             if (chunk.type === 'thought') {
               onEvent({ event: 'thought', data: { text: chunk.text } });
@@ -422,7 +425,8 @@ export class ScoutService {
             }
           });
 
-          const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+          const sanitized = agy.sanitizeResponse ? agy.sanitizeResponse(rawOutput) : rawOutput;
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized);
           if (suggestions.length > 0) {
             onEvent({ event: 'suggestions', data: { suggestions } });
           }
@@ -442,8 +446,10 @@ export class ScoutService {
     const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
     if (cloud && apiKey) {
       try {
+        const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
         const rawOutput = await cloud.generate(prompt, apiKey);
-        const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+        const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
+        const { reply, suggestions, thought } = parseScoutResponse(sanitized);
         onEvent({ event: 'delta', data: { text: reply } });
         if (suggestions.length > 0) {
           onEvent({ event: 'suggestions', data: { suggestions } });

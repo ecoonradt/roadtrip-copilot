@@ -79,23 +79,33 @@ If building from the command line, configure your Android SDK path in `local.pro
 * **macOS:** `brew install node`
 * **Windows:** `winget install OpenJS.NodeJS.LTS`
 
-### 5. AI Co-Pilot Narration (Optional Configuration)
-The Route Builder features an AI copywriting engine to generate glanceable heads-up alert cards and natural spoken audio scripts. It is built on an extensible adapter pattern:
+### 5. AI Co-Pilot Narration & Route Scout (Optional Configuration)
+The Route Builder features an AI copywriting engine and an interactive Route Scout conversational assistant:
 
-* **Local Zero-Config (Recommended):** If the Antigravity CLI (`agy`) is in your PATH (e.g. `~/.local/bin/agy`), the Route Builder automatically resolves and invokes the active/latest Gemini Flash model (e.g. `gemini-3.8-flash-high`) using your active session. **Zero API keys required.** (Optional override: `export AGY_MODEL="model-name"`).
-* **Cloud API Fallback:** Supply a Google AI Studio developer API key in the UI modal or via environment variable:
-  ```bash
-  export GEMINI_API_KEY="your-google-ai-studio-api-key"
-  ```
-  *(Defaults to `gemini-3.8-flash`; override via `export GEMINI_MODEL="model-name"`).*
-* **Offline Deterministic Fallback:** If neither `agy` nor an API key is present, context-aware template alerts are generated automatically without failing.
-* **Future Providers:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama) are planned. See [IDEAS.md](docs/IDEAS.md).
+* **Heads-Up Alerts & Speech Scripts:** Generates glanceable in-car heads-up notification cards (titles $\le 30$ chars, messages $\le 2$ lines) and natural spoken audio scripts with clamped trigger radii ($0.3$–$6.0$ miles).
+* **Route Scout Conversational Co-Pilot:** An interactive route intelligence advisor in the Route Builder that audits daily driving pace, discovers scenic vistas, local food, fuel stops, and historical points of interest along the driving corridor, and inserts verified waypoints directly into your itinerary with 1-click timeline cascading.
+* **Pluggable Harness Architecture:** Built on an extensible adapter pattern:
+  * **Local Zero-Config (Recommended):** If the Antigravity CLI (`agy`) is in your PATH (e.g. `~/.local/bin/agy`), the Route Builder automatically resolves and invokes the active/latest Gemini Flash model (e.g. `gemini-3.8-flash-high`) using your active session. **Zero API keys required.** Grounded web searches verify real-world coordinates and operating hours without headless lockups. (Optional override: `export AGY_MODEL="model-name"`).
+  * **Cloud API Fallback:** Supply a Google AI Studio developer API key in the UI modal or via environment variable:
+    ```bash
+    export GEMINI_API_KEY="your-google-ai-studio-api-key"
+    ```
+    *(Defaults to `gemini-3.8-flash`; override via `export GEMINI_MODEL="model-name"`).*
+  * **Offline Deterministic Fallback:** If neither `agy` nor an API key is present, context-aware template alerts are generated automatically without failing.
+  * **Future Providers:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama) are planned. See [IDEAS.md](docs/IDEAS.md).
 
 ---
 
 ## Route Builder Web Studio
 
-The repository includes a desktop-first web application in `route-builder/` for planning multi-stop road trips, computing real road driving times, cascading arrival/departure schedules, generating AI co-pilot announcements, and syncing itineraries directly to your phone.
+The repository includes a desktop-first web application in `route-builder/` for planning multi-stop road trips, computing real road driving times, cascading arrival/departure schedules, scouting hidden gems, generating AI co-pilot announcements, and syncing itineraries directly to your phone.
+
+* **Interactive Map Canvas & Routing:** OpenStreetMap canvas powered by Leaflet and backend OSRM routing proxies with in-memory caching.
+* **Timeline Cascade Engine:** Live schedule calculations with dwell time ripple, multi-state timezone boundary detection, and backward catch-up scheduling.
+* **Route Scout AI Assistant:** Interactive sidebar co-pilot to audit drive segments, discover overlooks, and insert vetted waypoints with 1-click timeline integration.
+* **AI Heads-Up Generation:** Instant batch generation of Android Auto heads-up cards and TTS scripts matching car audio constraints.
+* **Multi-Leg Google Maps Export:** Generates route-shaping navigation links with automatic 9-stop leg chunking and QR codes to prevent unwanted highway rerouting.
+* **1-Click Device Handoff:** Instant ADB push to `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/` or local Wi-Fi QR code download.
 
 ### Quickstart
 ```bash
