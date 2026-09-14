@@ -94,7 +94,8 @@ roadtrip-copilot/
 ├── docs/
 │   ├── IDEAS.md               # Feature backlog and roadmap proposals
 │   ├── ORCHESTRATION_PLAN.md  # Engineering verification checklist & roadmap
-│   └── route_builder_research_and_architecture.md # Technical specification & domain architecture
+│   ├── route_builder_research_and_architecture.md # Technical specification & domain architecture
+│   └── route_scout_cloud_architecture.md # Production cloud model API architecture & function calling blueprint
 ├── scripts/                   # Environment setup & run scripts (run_dhu.sh, setup_env.sh)
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
 ├── settings.gradle.kts        # Multi-project gradle settings
