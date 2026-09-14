@@ -94,13 +94,13 @@ export async function defaultExecAgy(prompt: string): Promise<string> {
   const customPath = `${process.env.HOME || '/home/eric'}/.local/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
 
   const model = await resolveLatestAgyFlashModel();
-  const args = ['-p', prompt, '--output-format', 'json', '--print-timeout', '10m'];
+  const args = ['-p', prompt, '--output-format', 'json', '--print-timeout', '15m'];
   if (model) {
     args.push('--model', model);
   }
 
   const { stdout } = await execFileAsync('agy', args, {
-    timeout: 600000,
+    timeout: 900000,
     maxBuffer: 10 * 1024 * 1024,
     env: {
       ...process.env,
@@ -198,7 +198,7 @@ export async function defaultStreamExecAgy(
 ): Promise<string> {
   const customPath = `${process.env.HOME || '/home/eric'}/.local/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
   const model = await resolveLatestAgyFlashModel();
-  const args = ['-p', prompt, '--output-format', 'stream-json', '--print-timeout', '10m'];
+  const args = ['-p', prompt, '--output-format', 'stream-json', '--print-timeout', '15m'];
   if (model) {
     args.push('--model', model);
   }
@@ -217,15 +217,15 @@ export async function defaultStreamExecAgy(
     let isDone = false;
     const rl = readline.createInterface({ input: child.stdout });
 
-    // Trust OS process liveness and agy's internal lifecycle rather than fighting arbitrary
-    // inactivity timeouts. We provide an extended 10-minute safety ceiling.
-    const MAX_TOTAL_MS = 600000;
+    // Generous 15-minute watchdog ceiling for the child process.
+    // The agent self-governs its timing via prompt directives (soft 1-2m target, 5m hard cap).
+    const MAX_TOTAL_MS = 900000;
 
     const maxTimer = setTimeout(() => {
       if (!isDone) {
         isDone = true;
         child.kill('SIGTERM');
-        reject(new Error('Route Scout stream execution timed out after 600s'));
+        reject(new Error('Route Scout stream execution timed out after 900s'));
       }
     }, MAX_TOTAL_MS);
 
@@ -387,13 +387,17 @@ export class AgyHarnessAdapter implements AiHarnessAdapter {
     return `CRITICAL OPERATIONAL HARNESS DIRECTIVES:
 1. You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
 2. You MAY invoke \`search_web\`, \`read_url_content\`, and \`run_command\` (for curl network checks, python coordinate math, or quick data inspection) to verify real-world place names, highway exits, amenities, closures, and accurate GPS coordinates.
-3. ABSOLUTE TOOL BUDGET: You have a strict budget of at most 2 tool calls for this entire turn. After at most 2 tool calls, you MUST formulate your response and output your candidate suggestions immediately. Never run loops, multi-coordinate reverse geocodes, bulk scraping chains, or iterative scripts.
-4. FAST SYNTHESIS: Answer the driver's question directly with practical highway road-trip knowledge. Do NOT attempt to calculate millimetric precision or run continuous API trials when the general highway corridor or town location is already established.
-5. DO NOT launch background tasks, cron schedules, subagents, or browser automation. Never write or modify workspace files.
-6. Respond directly, naturally, and warmly to the driver like a knowledgeable passenger sitting in the vehicle.
-7. NEVER include meta-commentary about system tools, agent harnesses, or background tasks (e.g. NEVER say "Wait for the background task to complete" or "Querying coordinates").
-8. NEVER narrate UI mechanics or JSON blocks in your prose (e.g. do not say "I have framed this as a candidate update below", "I have attached the JSON below", or "See the card below"). Simply explain your recommendation naturally.
-9. Provide accurate, real-world coordinates on the road corridor for all candidate suggestions.
+3. TIME & EFFICIENCY TARGETS:
+   - Soft Target (1-2 minutes): For standard questions and single-stop checks, aim to complete your investigation and deliver a response within 1 to 2 minutes.
+   - Secondary Hard Cap (5 minutes): For comprehensive multi-stop route audits or complex corridor inquiries, you must conclude all tool usage and output your final synthesized answer and candidate suggestions before 5 minutes elapse.
+   - Macro Corridor Over Micro Scanning: Focus on corridor-level landmarks (towns, highway junctions, official park/tribal boundaries, published overlooks). Do NOT run micro-level coordinate scans or iterative point-by-point reverse geocoding chains.
+   - Efficient Calculations: When calculating distances or geometries, batch operations into a single script or query rather than chaining sequential trials.
+   - Graceful Confidence: If an exact coordinate cannot be pinpointed after a few checks, synthesize the best known high-confidence corridor position on the highway and state your confidence clearly, rather than running continuous queries until timeout.
+4. DO NOT launch background tasks, cron schedules, subagents, or browser automation. Never write or modify workspace files.
+5. Respond directly, naturally, and warmly to the driver like a knowledgeable passenger sitting in the vehicle.
+6. NEVER include meta-commentary about system tools, agent harnesses, or background tasks (e.g. NEVER say "Wait for the background task to complete" or "Querying coordinates").
+7. NEVER narrate UI mechanics or JSON blocks in your prose (e.g. do not say "I have framed this as a candidate update below", "I have attached the JSON below", or "See the card below"). Simply explain your recommendation naturally.
+8. Provide accurate, real-world coordinates on the road corridor for all candidate suggestions.
 
 ${domainPrompt}`;
   }
