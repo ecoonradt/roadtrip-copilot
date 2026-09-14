@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Compass,
   Send,
@@ -54,134 +56,97 @@ function getScopeKey(scope: ScoutScope, activeDayIndex: number): string {
   return `day:${scope.dayNumber ?? activeDayIndex + 1}`;
 }
 
-function renderFormattedInline(str: string): React.ReactNode {
-  // Splits by `inline code`, **bold**, *italic*, _italic_
-  const parts = str.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_)/g);
-  return parts.map((part, i) => {
-    if (!part) return null;
-    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
-      return (
-        <code
-          key={i}
-          className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 font-mono text-[11px] text-cyan-200"
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-      return (
-        <strong key={i} className="text-white font-semibold">
-          {renderFormattedInline(part.slice(2, -2))}
-        </strong>
-      );
-    }
-    if (
-      ((part.startsWith('*') && part.endsWith('*')) ||
-        (part.startsWith('_') && part.endsWith('_'))) &&
-      part.length >= 2
-    ) {
-      return (
-        <em key={i} className="text-slate-200 italic">
-          {renderFormattedInline(part.slice(1, -1))}
-        </em>
-      );
-    }
-    return part;
-  });
-}
-
-// Markdown formatter for assistant responses (headings, blockquotes, lists, code, bold, italic)
+// Markdown formatter for assistant responses powered by react-markdown + remark-gfm
 function FormattedAssistantText({ text }: { text: string }) {
-  const lines = text.split('\n');
-
   return (
     <div className="space-y-1.5 text-xs text-slate-200 leading-relaxed select-text cursor-text">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return <div key={idx} className="h-1" />;
-        }
-
-        // Horizontal rule
-        if (/^(\*\*\*|---|___)$/.test(trimmed)) {
-          return <hr key={idx} className="border-slate-700/80 my-2" />;
-        }
-
-        // Headings
-        if (trimmed.startsWith('#### ')) {
-          return (
-            <h5 key={idx} className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider mt-2 mb-0.5">
-              {renderFormattedInline(trimmed.slice(5))}
-            </h5>
-          );
-        }
-        if (trimmed.startsWith('### ')) {
-          return (
-            <h4 key={idx} className="text-xs font-bold text-cyan-300 mt-2.5 mb-1 flex items-center gap-1.5">
-              <span className="w-1 h-3 bg-cyan-400 rounded-full shrink-0" />
-              <span>{renderFormattedInline(trimmed.slice(4))}</span>
-            </h4>
-          );
-        }
-        if (trimmed.startsWith('## ')) {
-          return (
-            <h3 key={idx} className="text-xs font-bold text-white mt-3 mb-1">
-              {renderFormattedInline(trimmed.slice(3))}
-            </h3>
-          );
-        }
-        if (trimmed.startsWith('# ')) {
-          return (
-            <h2 key={idx} className="text-sm font-bold text-white mt-3.5 mb-1.5 border-b border-slate-750 pb-1">
-              {renderFormattedInline(trimmed.slice(2))}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => (
+            <h2 className="text-sm font-bold text-white mt-3.5 mb-1.5 border-b border-slate-750 pb-1">
+              {children}
             </h2>
-          );
-        }
-
-        // Blockquote
-        if (trimmed.startsWith('> ')) {
-          return (
-            <blockquote
-              key={idx}
-              className="border-l-2 border-cyan-500/70 pl-2.5 py-0.5 my-1 bg-slate-900/50 rounded-r text-slate-300 italic"
-            >
-              {renderFormattedInline(trimmed.slice(2))}
+          ),
+          h2: ({ children }) => (
+            <h3 className="text-xs font-bold text-white mt-3 mb-1">{children}</h3>
+          ),
+          h3: ({ children }) => (
+            <h4 className="text-xs font-bold text-cyan-300 mt-2.5 mb-1 flex items-center gap-1.5">
+              <span className="w-1 h-3 bg-cyan-400 rounded-full shrink-0" />
+              <span>{children}</span>
+            </h4>
+          ),
+          h4: ({ children }) => (
+            <h5 className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider mt-2 mb-0.5">
+              {children}
+            </h5>
+          ),
+          p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
+          strong: ({ children }) => (
+            <strong className="text-white font-semibold">{children}</strong>
+          ),
+          em: ({ children }) => <em className="text-slate-200 italic">{children}</em>,
+          code: ({ children }) => (
+            <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-750 font-mono text-[11px] text-cyan-200">
+              {children}
+            </code>
+          ),
+          pre: ({ children }) => (
+            <pre className="p-2 rounded-lg bg-slate-900 border border-slate-750 overflow-x-auto text-[11px] font-mono my-1.5 text-cyan-200">
+              {children}
+            </pre>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-cyan-500/70 pl-2.5 py-0.5 my-1 bg-slate-900/50 rounded-r text-slate-300 italic">
+              {children}
             </blockquote>
-          );
-        }
-
-        // Bullet point
-        if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
-          const content = trimmed.slice(2);
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-1 my-0.5">
-              <span className="text-cyan-400 font-bold shrink-0 mt-0.5">&bull;</span>
-              <span className="flex-1">{renderFormattedInline(content)}</span>
+          ),
+          ul: ({ children }) => (
+            <ul className="list-disc list-inside space-y-1 my-1 pl-1 marker:text-cyan-400">
+              {children}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal list-inside space-y-1 my-1 pl-1 marker:text-cyan-400 marker:font-mono">
+              {children}
+            </ol>
+          ),
+          li: ({ children }) => (
+            <li className="text-slate-200 leading-snug">{children}</li>
+          ),
+          hr: () => <hr className="border-slate-700/80 my-2" />,
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-2">
+              <table className="min-w-full text-left border-collapse border border-slate-750 text-[11px]">
+                {children}
+              </table>
             </div>
-          );
-        }
-
-        // Numbered list
-        const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
-        if (numMatch) {
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-1 my-0.5">
-              <span className="text-cyan-400 font-mono font-bold shrink-0 mt-0.5">
-                {numMatch[1]}.
-              </span>
-              <span className="flex-1">{renderFormattedInline(numMatch[2])}</span>
-            </div>
-          );
-        }
-
-        // Standard paragraph
-        return (
-          <p key={idx} className="my-0.5">
-            {renderFormattedInline(trimmed)}
-          </p>
-        );
-      })}
+          ),
+          th: ({ children }) => (
+            <th className="border border-slate-700 px-2 py-1 bg-slate-800 font-bold text-white">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-slate-800 px-2 py-1 text-slate-300">
+              {children}
+            </td>
+          ),
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-cyan-400 hover:text-cyan-300 underline"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
