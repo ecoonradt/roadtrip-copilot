@@ -57,6 +57,7 @@ export interface ScoutMessage {
   timestamp: number;
   suggestions?: ScoutSuggestion[];
   engine?: AiEngineType;
+  thought?: string;
 }
 
 export interface ScoutChatRequest {
@@ -71,7 +72,15 @@ export interface ScoutChatResponse {
   suggestions: ScoutSuggestion[];
   sessionId: string;
   engine: AiEngineType;
+  thought?: string;
 }
+
+export type ScoutStreamEvent =
+  | { event: 'thought'; data: { text: string } }
+  | { event: 'delta'; data: { text: string } }
+  | { event: 'suggestions'; data: { suggestions: ScoutSuggestion[] } }
+  | { event: 'done'; data: ScoutChatResponse }
+  | { event: 'error'; data: { error: string } };
 
 export interface ScoutQuickPromptsResponse {
   prompts: string[];

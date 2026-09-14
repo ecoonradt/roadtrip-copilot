@@ -9,7 +9,7 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
-import { X } from 'lucide-react';
+import { X, Compass, Trash2 } from 'lucide-react';
 import type { Waypoint, RouteResponse } from '../types/routing';
 
 export interface ScoutPreviewPin {
@@ -18,11 +18,13 @@ export interface ScoutPreviewPin {
   name: string;
 }
 
-interface MapCanvasProps {
+export interface MapCanvasProps {
   waypoints: Waypoint[];
   route: RouteResponse | null;
   onMapClick?: (lat: number, lng: number) => void;
   onDeleteWaypoint?: (id: string) => void;
+  onSelectWaypoint?: (id: string) => void;
+  onOpenScoutForWaypoint?: (waypoint: Waypoint) => void;
   scoutPreviewPin?: ScoutPreviewPin | null;
   onClearScoutPreviewPin?: () => void;
 }
@@ -103,6 +105,8 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   route,
   onMapClick,
   onDeleteWaypoint,
+  onSelectWaypoint,
+  onOpenScoutForWaypoint,
   scoutPreviewPin,
   onClearScoutPreviewPin,
 }) => {
@@ -189,35 +193,53 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
             key={waypoint.id}
             position={[waypoint.lat, waypoint.lng]}
             icon={createWaypointIcon(index + 1, waypoint.type)}
+            eventHandlers={{
+              click: () => {
+                onSelectWaypoint?.(waypoint.id);
+              },
+            }}
           >
             <Popup className="custom-leaflet-popup">
-              <div className="p-1 min-w-[200px] text-slate-900">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="text-xs font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-slate-200 text-slate-700">
-                    Stop #{index + 1}
-                  </span>
-                  <span className="text-xs text-slate-500 font-mono">
-                    {waypoint.type}
+              <div className="min-w-[210px] max-w-[260px] text-slate-100 space-y-2">
+                <div className="flex items-center justify-between gap-2 pr-4">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-slate-800 text-cyan-300 font-mono border border-slate-700">
+                    Stop #{index + 1} &bull; {waypoint.type.replace(/_/g, ' ')}
                   </span>
                 </div>
-                <h4 className="font-semibold text-sm text-slate-900 leading-snug mb-1">
+
+                <h4 className="font-bold text-sm text-white leading-snug">
                   {waypoint.name}
                 </h4>
-                <div className="text-xs text-slate-600 font-mono mb-2">
-                  {waypoint.lat.toFixed(4)}, {waypoint.lng.toFixed(4)}
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono bg-slate-950/60 px-2 py-1 rounded-lg border border-slate-800">
+                  <span>
+                    {waypoint.lat.toFixed(4)}, {waypoint.lng.toFixed(4)}
+                  </span>
+                  <span>{waypoint.dwell_minutes}m dwell</span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-600 border-t border-slate-200 pt-2 mb-2">
-                  <span>Dwell: {waypoint.dwell_minutes}m</span>
-                  <span>Trigger: {waypoint.trigger_radius_miles}mi</span>
+
+                <div className="flex items-center gap-1.5 pt-1">
+                  {onOpenScoutForWaypoint && (
+                    <button
+                      onClick={() => onOpenScoutForWaypoint(waypoint)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold bg-gradient-to-tr from-cyan-600 to-sky-500 hover:from-cyan-500 hover:to-sky-400 text-white shadow-md shadow-cyan-950/40 transition-all cursor-pointer"
+                      title="Open Route Scout for this stop"
+                    >
+                      <Compass className="w-3.5 h-3.5" />
+                      <span>Ask Scout</span>
+                    </button>
+                  )}
+
+                  {onDeleteWaypoint && (
+                    <button
+                      onClick={() => onDeleteWaypoint(waypoint.id)}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg border border-slate-800 transition-colors cursor-pointer"
+                      title="Remove waypoint"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-                {onDeleteWaypoint && (
-                  <button
-                    onClick={() => onDeleteWaypoint(waypoint.id)}
-                    className="w-full py-1 px-2 text-xs font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded border border-rose-200 transition-colors"
-                  >
-                    Remove Waypoint
-                  </button>
-                )}
               </div>
             </Popup>
           </Marker>
@@ -230,24 +252,24 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
             icon={createScoutPreviewIcon()}
           >
             <Popup className="custom-leaflet-popup" autoPan={false}>
-              <div className="p-1 min-w-[200px] text-slate-900">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-cyan-100 text-cyan-800">
+              <div className="min-w-[200px] text-slate-100 space-y-1.5 pr-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-cyan-950/80 text-cyan-300 font-mono border border-cyan-800/60">
                     Route Scout Preview
                   </span>
                   {onClearScoutPreviewPin && (
                     <button
                       onClick={onClearScoutPreviewPin}
-                      className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                      className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
                     >
                       Dismiss
                     </button>
                   )}
                 </div>
-                <h4 className="font-semibold text-sm text-slate-900 leading-snug mb-1">
+                <h4 className="font-bold text-sm text-white leading-snug">
                   {scoutPreviewPin.name}
                 </h4>
-                <div className="text-xs text-slate-600 font-mono">
+                <div className="text-[11px] text-slate-400 font-mono bg-slate-950/60 px-2 py-1 rounded-lg border border-slate-800">
                   {scoutPreviewPin.lat.toFixed(4)}, {scoutPreviewPin.lng.toFixed(4)}
                 </div>
               </div>

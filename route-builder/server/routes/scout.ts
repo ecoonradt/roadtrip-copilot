@@ -60,6 +60,42 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
     }
   });
 
+  // POST /api/ai/scout/chat/stream (SSE streaming)
+  fastify.post<{ Body: ChatBody }>('/api/ai/scout/chat/stream', async (request, reply) => {
+    const { scope, messages, tripContext, sessionId, apiKey, preferredEngine } = request.body || {};
+
+    if (!scope || !scope.type || !Array.isArray(messages) || messages.length === 0 || !tripContext) {
+      return reply.status(400).send({
+        error: 'Invalid request payload for Scout chat stream',
+      });
+    }
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+    const sendEvent = (event: string, data: unknown) => {
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      await scoutService.chatStream(
+        { scope, messages, tripContext, sessionId },
+        (streamEvent) => {
+          sendEvent(streamEvent.event, streamEvent.data);
+        },
+        { apiKey, preferredEngine }
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Route Scout streaming error';
+      fastify.log.error({ err }, `Route Scout stream failed: ${message}`);
+      sendEvent('error', { error: message });
+    } finally {
+      reply.raw.end();
+    }
+  });
+
   // GET /api/ai/scout/quick-prompts
   fastify.get<{ Querystring: QuickPromptsQuery }>('/api/ai/scout/quick-prompts', async (request, reply) => {
     const { type = 'day', dayNumber, waypointId, waypointName } = request.query || {};

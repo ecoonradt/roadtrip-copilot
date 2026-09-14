@@ -34,6 +34,8 @@ interface TimelineSidebarProps {
   onFocusAddStop: () => void;
   onOpenScoutForDay?: () => void;
   onOpenScoutForWaypoint?: (waypoint: Waypoint) => void;
+  selectedWaypointId?: string | null;
+  onSelectWaypoint?: (id: string | null) => void;
 }
 
 const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
@@ -65,6 +67,8 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   onFocusAddStop,
   onOpenScoutForDay,
   onOpenScoutForWaypoint,
+  selectedWaypointId,
+  onSelectWaypoint,
 }) => {
   // Resizable sidebar width with localStorage persistence
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -87,6 +91,20 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
   // Waypoint edit state (which waypoint is expanded for inline editing)
   const [editingWaypointId, setEditingWaypointId] = useState<string | null>(null);
+
+  // Synchronize editing / expanded state when a waypoint is selected (e.g. from map)
+  useEffect(() => {
+    if (selectedWaypointId) {
+      setEditingWaypointId(selectedWaypointId);
+      setIsCollapsed(false);
+      setTimeout(() => {
+        const el = document.getElementById(`waypoint-card-${selectedWaypointId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }, 60);
+    }
+  }, [selectedWaypointId]);
 
   // AI Co-Pilot Alert Modal state
   const [selectedWaypointForAi, setSelectedWaypointForAi] = useState<Waypoint | null>(null);
@@ -359,6 +377,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
                 {/* Waypoint Card */}
                 <div
+                  id={`waypoint-card-${stop.id}`}
                   className={`rounded-xl border transition-all ${
                     isEditing
                       ? 'bg-slate-800/95 border-sky-500/80 shadow-lg ring-1 ring-sky-500/20'
@@ -409,7 +428,10 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           {/* Co-Pilot Alert Status Tag (if configured) */}
                           {stop.notification && !isEditing && (
                             <div
-                              onClick={() => setEditingWaypointId(stop.id)}
+                              onClick={() => {
+                                setEditingWaypointId(stop.id);
+                                onSelectWaypoint?.(stop.id);
+                              }}
                               className="mt-1.5 flex items-center gap-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-2 py-0.5 cursor-pointer hover:bg-emerald-950/70 transition-colors w-fit"
                               title="Click to view or edit AI Co-Pilot announcement"
                             >
@@ -444,9 +466,11 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                         )}
 
                         <button
-                          onClick={() =>
-                            setEditingWaypointId(isEditing ? null : stop.id)
-                          }
+                          onClick={() => {
+                            const next = isEditing ? null : stop.id;
+                            setEditingWaypointId(next);
+                            onSelectWaypoint?.(next);
+                          }}
                           className={`p-1 rounded-lg transition-colors ${
                             isEditing
                               ? 'bg-sky-600 text-white shadow-sm'
@@ -656,8 +680,11 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                       {/* Done Button */}
                       <div className="pt-1 flex justify-end">
                         <button
-                          onClick={() => setEditingWaypointId(null)}
-                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors"
+                          onClick={() => {
+                            setEditingWaypointId(null);
+                            onSelectWaypoint?.(null);
+                          }}
+                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                         >
                           <Check className="w-3 h-3 text-emerald-400" />
                           <span>Done</span>

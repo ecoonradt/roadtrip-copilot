@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import readline from 'node:readline';
 import { promisify } from 'node:util';
 import type {
   WaypointContext,
@@ -116,6 +117,91 @@ export async function defaultExecAgy(prompt: string): Promise<string> {
   return rawJson;
 }
 
+export interface AgyStreamEvent {
+  type: 'thought' | 'delta';
+  text: string;
+}
+
+/**
+ * Child process streaming execution for agy CLI using NDJSON stream-json output.
+ */
+export async function defaultStreamExecAgy(
+  prompt: string,
+  onChunk: (event: AgyStreamEvent) => void
+): Promise<string> {
+  const customPath = `${process.env.HOME || '/home/eric'}/.local/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
+  const model = await resolveLatestAgyFlashModel();
+  const args = ['-p', prompt, '--output-format', 'stream-json'];
+  if (model) {
+    args.push('--model', model);
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('agy', args, {
+      env: {
+        ...process.env,
+        PATH: customPath,
+      },
+    });
+
+    let fullResponse = '';
+    let isDone = false;
+    const rl = readline.createInterface({ input: child.stdout });
+
+    const timer = setTimeout(() => {
+      if (!isDone) {
+        child.kill();
+        reject(new Error('agy stream execution timed out after 90s'));
+      }
+    }, 90000);
+
+    rl.on('line', (line) => {
+      try {
+        const data = JSON.parse(line.trim());
+        if (data.event === 'step_update' && data.step_update) {
+          const su = data.step_update;
+          if (su.step_type === 'agent_response' && su.text_delta) {
+            onChunk({ type: 'delta', text: su.text_delta });
+          } else if (
+            su.step_type === 'tool' ||
+            su.step_type === 'tool_use' ||
+            su.step_type === 'tool_call' ||
+            su.step_type === 'thought'
+          ) {
+            const toolName = su.tool_name || su.tool_info?.name;
+            const desc = toolName
+              ? `Inspecting route via ${toolName}...`
+              : (su.text_delta || 'Analyzing route geometry...');
+            onChunk({ type: 'thought', text: String(desc) });
+          }
+        } else if (data.event === 'result' && data.result) {
+          if (data.result.response && typeof data.result.response === 'string') {
+            fullResponse = data.result.response;
+          }
+        }
+      } catch {
+        // ignore non-json lines
+      }
+    });
+
+    child.on('close', (code) => {
+      isDone = true;
+      clearTimeout(timer);
+      if (code !== 0 && !fullResponse) {
+        reject(new Error(`agy process exited with code ${code}`));
+      } else {
+        resolve(fullResponse);
+      }
+    });
+
+    child.on('error', (err) => {
+      isDone = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
 export const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
 /**
@@ -189,6 +275,13 @@ export class AgyHarnessAdapter implements AiHarnessAdapter {
 
   async generate(prompt: string): Promise<string> {
     return this.execFn(prompt);
+  }
+
+  async generateStream(
+    prompt: string,
+    onChunk: (event: AgyStreamEvent) => void
+  ): Promise<string> {
+    return defaultStreamExecAgy(prompt, onChunk);
   }
 }
 

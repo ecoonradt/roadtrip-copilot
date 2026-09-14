@@ -28,7 +28,7 @@ import type {
 import type { ParsedTrip, ParsedDay } from '../engine/itineraryParser';
 import type { Waypoint } from '../types/routing';
 import type { ScoutPreviewPin } from './MapCanvas';
-import { chatWithScout, fetchScoutQuickPrompts } from '../services/api';
+import { chatWithScoutStream, fetchScoutQuickPrompts } from '../services/api';
 
 export interface RouteScoutDrawerProps {
   isOpen: boolean;
@@ -54,6 +54,19 @@ function getScopeKey(scope: ScoutScope, activeDayIndex: number): string {
     return `wp:${scope.waypointId || 'unknown'}`;
   }
   return `day:${scope.dayNumber ?? activeDayIndex + 1}`;
+}
+
+function cleanStreamingText(raw: string): { content: string; thought?: string } {
+  const withoutJson = raw.replace(/```(?:json:suggestions|json)?[\s\S]*?(?:```|$)/i, '').trim();
+  const multiLineRegex = /^((?:I (?:have launched|am checking|am inspecting|will analyze|will inspect|will check|have initiated|need to inspect)[^\n]+(?:\n+|$))+)\n*([\s\S]*)$/i;
+  const match = withoutJson.match(multiLineRegex);
+  if (match && match[1] && match[2] && match[2].trim().length > 0) {
+    return {
+      thought: match[1].trim(),
+      content: match[2].trim(),
+    };
+  }
+  return { content: withoutJson };
 }
 
 // Markdown formatter for assistant responses powered by react-markdown + remark-gfm
@@ -347,11 +360,20 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       timestamp: Date.now(),
     };
 
-    // Update conversation immediately with user message
+    const assistantMsgId = `msg_a_${Date.now()}`;
+    const initialAssistantMessage: ScoutMessage = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      engine: 'agy',
+    };
+
+    // Update conversation with user message and placeholder assistant message
     const updatedHistory = [...currentMessages, userMessage];
     setConversations((prev) => ({
       ...prev,
-      [currentScopeKey]: updatedHistory,
+      [currentScopeKey]: [...updatedHistory, initialAssistantMessage],
     }));
 
     setIsLoading(true);
@@ -410,24 +432,90 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         sessionId: `scout_${currentScopeKey}`,
       };
 
-      const response = await chatWithScout(request);
+      let accumulatedRaw = '';
+      let currentThought: string | undefined = undefined;
+      let accumulatedSuggestions: ScoutSuggestion[] = [];
 
-      const assistantMessage: ScoutMessage = {
-        id: `msg_a_${Date.now()}`,
-        role: 'assistant',
-        content: response.reply,
-        timestamp: Date.now(),
-        suggestions: response.suggestions,
-        engine: response.engine,
-      };
+      await chatWithScoutStream(request, (event) => {
+        if (event.event === 'thought') {
+          currentThought = event.data.text;
+          setConversations((prev) => {
+            const list = prev[currentScopeKey] || [];
+            return {
+              ...prev,
+              [currentScopeKey]: list.map((m) =>
+                m.id === assistantMsgId ? { ...m, thought: currentThought } : m
+              ),
+            };
+          });
+        } else if (event.event === 'delta') {
+          accumulatedRaw += event.data.text;
+          const { content: cleanedContent, thought: detectedThought } =
+            cleanStreamingText(accumulatedRaw);
+          const effectiveThought = detectedThought || currentThought;
 
-      setConversations((prev) => ({
-        ...prev,
-        [currentScopeKey]: [...updatedHistory, assistantMessage],
-      }));
+          setConversations((prev) => {
+            const list = prev[currentScopeKey] || [];
+            return {
+              ...prev,
+              [currentScopeKey]: list.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: cleanedContent,
+                      thought: effectiveThought,
+                    }
+                  : m
+              ),
+            };
+          });
+        } else if (event.event === 'suggestions') {
+          accumulatedSuggestions = event.data.suggestions;
+          setConversations((prev) => {
+            const list = prev[currentScopeKey] || [];
+            return {
+              ...prev,
+              [currentScopeKey]: list.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, suggestions: accumulatedSuggestions }
+                  : m
+              ),
+            };
+          });
+        } else if (event.event === 'done') {
+          const finalResp = event.data;
+          setConversations((prev) => {
+            const list = prev[currentScopeKey] || [];
+            return {
+              ...prev,
+              [currentScopeKey]: list.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: finalResp.reply,
+                      suggestions: finalResp.suggestions,
+                      engine: finalResp.engine,
+                      thought: finalResp.thought || currentThought,
+                    }
+                  : m
+              ),
+            };
+          });
+        }
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Route Scout request failed';
       setErrorMessage(msg);
+      // Remove empty assistant message if it failed before receiving content
+      setConversations((prev) => {
+        const list = prev[currentScopeKey] || [];
+        return {
+          ...prev,
+          [currentScopeKey]: list.filter(
+            (m) => !(m.id === assistantMsgId && !m.content.trim())
+          ),
+        };
+      });
     } finally {
       setIsLoading(false);
     }
@@ -720,22 +808,44 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleCopyMessage(msg.id, msg.content)}
-                      className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors cursor-pointer"
-                      title="Copy response to clipboard"
-                    >
-                      {copiedMessageId === msg.id ? (
-                        <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono font-medium">
-                          <Check className="w-3 h-3" />
-                          <span>Copied</span>
-                        </span>
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
+                    {msg.content && (
+                      <button
+                        onClick={() => handleCopyMessage(msg.id, msg.content)}
+                        className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                        title="Copy response to clipboard"
+                      >
+                        {copiedMessageId === msg.id ? (
+                          <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono font-medium">
+                            <Check className="w-3 h-3" />
+                            <span>Copied</span>
+                          </span>
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    )}
                   </div>
-                  <FormattedAssistantText text={msg.content} />
+
+                  {msg.thought && (
+                    <div className="mb-2 px-2.5 py-1.5 bg-slate-800/80 border border-slate-700/60 rounded-xl text-[11px] text-slate-300 flex items-start gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                      <div className="leading-snug">
+                        <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block font-mono">
+                          Scout Investigation
+                        </span>
+                        <span className="italic text-slate-300">{msg.thought}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.content ? (
+                    <FormattedAssistantText text={msg.content} />
+                  ) : (
+                    <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                      <span>Route Scout is analyzing route geometry &amp; corridor...</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Structured Suggestion Action Cards */}
@@ -873,12 +983,14 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         ))}
 
         {/* Loading Bubble */}
-        {isLoading && (
-          <div className="flex items-center gap-2 p-3 bg-slate-850/80 border border-slate-800 rounded-2xl text-xs text-cyan-300 animate-pulse">
-            <Loader2 className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
-            <span>Route Scout is analyzing route geometry &amp; corridor...</span>
-          </div>
-        )}
+        {isLoading &&
+          (!currentMessages.length ||
+            currentMessages[currentMessages.length - 1]?.role !== 'assistant') && (
+            <div className="flex items-center gap-2 p-3 bg-slate-850/80 border border-slate-800 rounded-2xl text-xs text-cyan-300 animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
+              <span>Route Scout is analyzing route geometry &amp; corridor...</span>
+            </div>
+          )}
 
         {/* Error Message */}
         {errorMessage && (

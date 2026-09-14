@@ -3,8 +3,9 @@ import type {
   ScoutSuggestion,
   ScoutChatRequest,
   ScoutChatResponse,
+  ScoutStreamEvent,
 } from '../types/scout.js';
-import type { GenerationOptions } from './aiService.js';
+import type { GenerationOptions, AgyHarnessAdapter } from './aiService.js';
 import { AiService } from './aiService.js';
 
 /**
@@ -80,7 +81,7 @@ GUIDELINES:
 1. Provide practical, driver-oriented advice: parking accessibility (e.g. pull-offs vs steep lots), paved vs dirt roads, scenic value, pacing, daylight/golden hour timing, and local tips.
 2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Present recommendations as candidate suggestions.
 3. Keep responses conversational, concise, and helpful (typically 2-4 focused paragraphs).
-4. When you recommend adding new stops or updating an existing waypoint's coordinates/dwell, append an exact structured JSON block at the very end using the format below.
+4. When you recommend adding new stops or updating an existing waypoint's coordinates/dwell, append an exact structured JSON block at the very end using the format below. You are ABLE to emit multiple suggestion cards in the array when genuinely appropriate (for instance, if an audit warrants updating the current stop to a drive-by AND adding a specific recommended viewpoint/pull-off). However, do not force or spam multiple cards when a single targeted recommendation or simple reassurance is sufficient.
 5. If no waypoint actions are needed (e.g. general questions or reassurance), do not include the json:suggestions block.
 
 JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendations):
@@ -119,9 +120,36 @@ Please respond to the latest User request.`;
 }
 
 /**
+ * Separates intermediate tool-calling or reasoning preambles from the final answer.
+ */
+export function separateThoughtAndReply(text: string): { thought?: string; reply: string } {
+  // Matches agent preambles (e.g. "I have launched a query...", "I will analyze...") before markdown heading or main body
+  const multiLineRegex = /^((?:I (?:have launched|am checking|am inspecting|will analyze|will inspect|will check|have initiated|need to inspect)[^\n]+(?:\n+|$))+)\n*([\s\S]*)$/i;
+  const match = text.match(multiLineRegex);
+  if (match && match[1] && match[2] && match[2].trim().length > 0) {
+    return {
+      thought: match[1].trim(),
+      reply: match[2].trim(),
+    };
+  }
+
+  const singlePreambleRegex = /^(?:I have launched a query[^.\n]*\.[^.\n]*\.\s*|I will analyze the results as soon as they return\.\s*|Let me inspect[^.\n]*\.\s*)/i;
+  const singleMatch = text.match(singlePreambleRegex);
+  if (singleMatch && singleMatch[0]) {
+    const thought = singleMatch[0].trim();
+    const reply = text.slice(singleMatch[0].length).trim();
+    if (reply.length > 0) {
+      return { thought, reply };
+    }
+  }
+
+  return { reply: text };
+}
+
+/**
  * Parses Route Scout output, extracting markdown conversation and structured suggestion actions.
  */
-export function parseScoutResponse(rawOutput: string): { reply: string; suggestions: ScoutSuggestion[] } {
+export function parseScoutResponse(rawOutput: string): { reply: string; suggestions: ScoutSuggestion[]; thought?: string } {
   if (!rawOutput) {
     return { reply: 'No response received from Route Scout.', suggestions: [] };
   }
@@ -170,7 +198,12 @@ export function parseScoutResponse(rawOutput: string): { reply: string; suggesti
     }
   }
 
-  return { reply, suggestions };
+  const separated = separateThoughtAndReply(reply);
+  return {
+    reply: separated.reply,
+    suggestions,
+    thought: separated.thought,
+  };
 }
 
 /**
@@ -288,8 +321,8 @@ export class ScoutService {
       if (agy) {
         try {
           const rawOutput = await agy.generate(prompt);
-          const { reply, suggestions } = parseScoutResponse(rawOutput);
-          return { reply, suggestions, sessionId, engine: 'agy' };
+          const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+          return { reply, suggestions, sessionId, engine: 'agy', thought };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[RouteScout] agy adapter generation failed (${msg}), attempting cloud/template fallback...`);
@@ -304,8 +337,8 @@ export class ScoutService {
         const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
         if (apiKey && (await cloud.isAvailable(apiKey))) {
           const rawOutput = await cloud.generate(prompt, apiKey);
-          const { reply, suggestions } = parseScoutResponse(rawOutput);
-          return { reply, suggestions, sessionId, engine: 'cloud' };
+          const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+          return { reply, suggestions, sessionId, engine: 'cloud', thought };
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -316,6 +349,67 @@ export class ScoutService {
     // 3. Fallback: Deterministic Template
     const { reply, suggestions } = generateTemplateScoutResponse(request);
     return { reply, suggestions, sessionId, engine: 'template' };
+  }
+
+  /**
+   * Executes a streaming multi-turn chat interaction with Route Scout over SSE.
+   */
+  async chatStream(
+    request: ScoutChatRequest,
+    onEvent: (event: ScoutStreamEvent) => void,
+    options: GenerationOptions = {}
+  ): Promise<ScoutChatResponse> {
+    const sessionId = request.sessionId || `scout_${Date.now()}`;
+    const preferredEngine = options.preferredEngine || 'auto';
+
+    if (preferredEngine === 'template') {
+      const { reply, suggestions } = generateTemplateScoutResponse(request);
+      onEvent({ event: 'delta', data: { text: reply } });
+      if (suggestions.length > 0) {
+        onEvent({ event: 'suggestions', data: { suggestions } });
+      }
+      const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'template' };
+      onEvent({ event: 'done', data: doneResponse });
+      return doneResponse;
+    }
+
+    const prompt = buildScoutPrompt(request);
+
+    // 1. Try Primary: agy adapter streaming
+    if (preferredEngine !== 'cloud') {
+      const agy = this.aiService.getAdapter('agy') as (AgyHarnessAdapter | undefined);
+      if (agy && typeof agy.generateStream === 'function') {
+        try {
+          const rawOutput = await agy.generateStream(prompt, (chunk) => {
+            if (chunk.type === 'thought') {
+              onEvent({ event: 'thought', data: { text: chunk.text } });
+            } else if (chunk.type === 'delta') {
+              onEvent({ event: 'delta', data: { text: chunk.text } });
+            }
+          });
+
+          const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+          if (suggestions.length > 0) {
+            onEvent({ event: 'suggestions', data: { suggestions } });
+          }
+          const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'agy', thought };
+          onEvent({ event: 'done', data: doneResponse });
+          return doneResponse;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[RouteScout] agy adapter streaming failed (${msg}), falling back to non-stream chat...`);
+        }
+      }
+    }
+
+    // Fallback to standard chat()
+    const nonStreamResponse = await this.chat(request, options);
+    onEvent({ event: 'delta', data: { text: nonStreamResponse.reply } });
+    if (nonStreamResponse.suggestions.length > 0) {
+      onEvent({ event: 'suggestions', data: { suggestions: nonStreamResponse.suggestions } });
+    }
+    onEvent({ event: 'done', data: nonStreamResponse });
+    return nonStreamResponse;
   }
 
   /**

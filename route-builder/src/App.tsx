@@ -125,6 +125,9 @@ export function App() {
   });
   const [scoutPreviewPin, setScoutPreviewPin] = useState<ScoutPreviewPin | null>(null);
 
+  // Selected waypoint synchronization (e.g. clicked on map)
+  const [selectedWaypointId, setSelectedWaypointId] = useState<string | null>(null);
+
   // Save states
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -691,6 +694,8 @@ export function App() {
           onFocusAddStop={handleFocusAddStop}
           onOpenScoutForDay={handleOpenScoutForDay}
           onOpenScoutForWaypoint={handleOpenScoutForWaypoint}
+          selectedWaypointId={selectedWaypointId}
+          onSelectWaypoint={setSelectedWaypointId}
         />
 
         {/* Interactive Map Area */}
@@ -709,6 +714,8 @@ export function App() {
             route={route}
             onMapClick={handleMapClick}
             onDeleteWaypoint={handleDeleteWaypoint}
+            onSelectWaypoint={(id) => setSelectedWaypointId(id)}
+            onOpenScoutForWaypoint={handleOpenScoutForWaypoint}
             scoutPreviewPin={scoutPreviewPin}
             onClearScoutPreviewPin={() => setScoutPreviewPin(null)}
           />

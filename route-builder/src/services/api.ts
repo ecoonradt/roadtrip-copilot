@@ -9,6 +9,7 @@ import type {
   ScoutChatRequest,
   ScoutChatResponse,
   ScoutScope,
+  ScoutStreamEvent,
 } from '../types/scout';
 
 export interface GenerateAlertRequestOptions {
@@ -234,6 +235,93 @@ export async function chatWithScout(request: ScoutChatRequest): Promise<ScoutCha
   }
 
   return (await res.json()) as ScoutChatResponse;
+}
+
+export async function chatWithScoutStream(
+  request: ScoutChatRequest,
+  onEvent: (event: ScoutStreamEvent) => void
+): Promise<ScoutChatResponse> {
+  const res = await fetch('/api/ai/scout/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Route Scout stream request failed' }))) as {
+      error?: string;
+    };
+    throw new Error(errorData.error || `Route Scout stream failed with HTTP ${res.status}`);
+  }
+
+  if (!res.body) {
+    throw new Error('Response body is null');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let finalResponse: ScoutChatResponse | null = null;
+
+  const processFrame = (frame: string) => {
+    let eventType = 'message';
+    let dataStr = '';
+
+    for (const line of frame.split('\n')) {
+      if (line.startsWith('event:')) {
+        eventType = line.replace(/^event:\s*/, '').trim();
+      } else if (line.startsWith('data:')) {
+        dataStr = line.replace(/^data:\s*/, '').trim();
+      }
+    }
+
+    if (!dataStr) return;
+
+    const parsedData = JSON.parse(dataStr);
+    if (eventType === 'error') {
+      const errEvt: ScoutStreamEvent = { event: 'error', data: parsedData };
+      onEvent(errEvt);
+      throw new Error(parsedData.error || 'Streaming error');
+    } else if (eventType === 'thought') {
+      onEvent({ event: 'thought', data: parsedData });
+    } else if (eventType === 'delta') {
+      onEvent({ event: 'delta', data: parsedData });
+    } else if (eventType === 'suggestions') {
+      onEvent({ event: 'suggestions', data: parsedData });
+    } else if (eventType === 'done') {
+      finalResponse = parsedData as ScoutChatResponse;
+      onEvent({ event: 'done', data: finalResponse });
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundaryIndex: number;
+      while ((boundaryIndex = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, boundaryIndex).trim();
+        buffer = buffer.slice(boundaryIndex + 2);
+        if (frame) {
+          processFrame(frame);
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      processFrame(buffer.trim());
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!finalResponse) {
+    throw new Error('Stream completed without receiving final response');
+  }
+
+  return finalResponse;
 }
 
 export async function fetchScoutQuickPrompts(scope: ScoutScope): Promise<string[]> {

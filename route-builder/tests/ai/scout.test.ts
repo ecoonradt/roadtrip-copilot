@@ -156,6 +156,53 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions[0].lng).toBe(-108.6921);
     });
 
+    it('separates agent tool preamble from substantive answer', () => {
+      const rawWithPreamble = `I have launched a query to inspect the exact road geometry and satellite imagery around exit 294 on I-40. I will analyze the results as soon as they return.
+
+### Meteor Crater Road Exit (Exit 294) - Safety & Access Review
+
+Upon inspecting the coordinates, the current pin is on the Interstate shoulder. I recommend shifting it to the paved rest area.`;
+
+      const { reply, thought } = parseScoutResponse(rawWithPreamble);
+      expect(thought).toContain('I have launched a query to inspect');
+      expect(thought).toContain('I will analyze the results as soon as they return');
+      expect(reply).toContain('### Meteor Crater Road Exit');
+      expect(reply).not.toContain('I have launched a query');
+    });
+
+    it('parses multiple suggestions when appropriate without error', () => {
+      const rawMultiOutput = `Here are two recommendations for your leg: a scenic overlook and a diner stop.
+
+\`\`\`json:suggestions
+[
+  {
+    "action": "add_waypoint",
+    "name": "Meteor Crater Overlook",
+    "type": "scenic_pull_off",
+    "lat": 35.0278,
+    "lng": -111.0222,
+    "dwell_minutes": 25,
+    "reason": "Dramatic crater view right off I-40."
+  },
+  {
+    "action": "add_waypoint",
+    "name": "Twin Arrows Diner",
+    "type": "meal",
+    "lat": 35.1589,
+    "lng": -111.2819,
+    "dwell_minutes": 40,
+    "reason": "Classic Route 66 diner break."
+  }
+]
+\`\`\``;
+
+      const { reply, suggestions } = parseScoutResponse(rawMultiOutput);
+      expect(reply).toContain('Here are two recommendations');
+      expect(suggestions).toHaveLength(2);
+      expect(suggestions[0].name).toBe('Meteor Crater Overlook');
+      expect(suggestions[1].name).toBe('Twin Arrows Diner');
+    });
+
     it('gracefully returns clean prose when no suggestions block is present', () => {
       const rawOutput = 'The timing on this leg looks fantastic! 7:30 AM departure gives you plenty of daylight.';
       const { reply, suggestions } = parseScoutResponse(rawOutput);
@@ -274,6 +321,26 @@ describe('Route Scout Service & Prompts', () => {
       const data = response.json();
       expect(data.reply).toBeTruthy();
       expect(data.engine).toBe('template');
+    });
+
+    it('POST /api/ai/scout/chat/stream streams SSE events with delta and done', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: { type: 'day', dayNumber: 2 },
+          messages: [{ role: 'user', content: 'Where can we stop for lunch?' }],
+          tripContext: sampleTripContext,
+          preferredEngine: 'template',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('text/event-stream');
+      const body = response.body;
+      expect(body).toContain('event: delta');
+      expect(body).toContain('event: done');
+      expect(body).toContain('Mid-Route Dining Recommendations');
     });
   });
 });
