@@ -9,14 +9,12 @@ import {
   Copy,
   Check,
   Calendar,
-  Globe,
   ChevronDown,
   FolderOpen,
   Save,
   Loader2,
 } from 'lucide-react';
-import { SearchBar } from './SearchBar';
-import type { RouteResponse, GeocodeResult } from '../types/routing';
+import type { RouteResponse } from '../types/routing';
 import type {
   TimelineCascadeResult,
   BackwardScheduleResult,
@@ -24,8 +22,6 @@ import type {
 } from '../engine/types';
 
 interface AppHeaderProps {
-  searchRef: React.RefObject<HTMLInputElement>;
-  onSelectLocation: (result: GeocodeResult) => void;
   route: RouteResponse | null;
   isLoadingRoute: boolean;
   routeError: string | null;
@@ -52,8 +48,6 @@ interface AppHeaderProps {
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
-  searchRef,
-  onSelectLocation,
   route,
   isLoadingRoute,
   routeError,
@@ -162,15 +156,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   ? 'Route Ready (Cached)'
                   : 'Route Ready'}
               </span>
-              {cascadeResult.timezonesCrossed.length > 0 && (
-                <>
-                  <span className="text-slate-600">&bull;</span>
-                  <div className="flex items-center gap-0.5 text-[10px] text-sky-400/90 font-mono">
-                    <Globe className="w-2.5 h-2.5" />
-                    <span>{cascadeResult.timezonesCrossed.map((tz) => tz.split('/')[1] || tz).join(' → ')}</span>
-                  </div>
-                </>
-              )}
             </div>
           </div>
         </div>
@@ -189,16 +174,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
           </button>
         )}
-      </div>
-
-      {/* Center: Search Bar */}
-      <div className="flex-1 max-w-sm lg:max-w-md mx-2">
-        <SearchBar
-          ref={searchRef}
-          onSelectLocation={onSelectLocation}
-          placeholder="Search place or address to add stop..."
-          className="w-full"
-        />
       </div>
 
       {/* Right Controls: Schedule, Telemetry, Maps & Export */}
@@ -320,8 +295,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             </div>
             {totalTripSecs > totalDriveSecs && (
               <>
-                <span className="text-slate-600">&bull;</span>
-                <div className="flex items-center gap-1 text-slate-400" title="Total Elapsed Time (Drive + Stops)">
+                <span className="text-slate-600 hidden xl:inline">&bull;</span>
+                <div className="hidden xl:flex items-center gap-1 text-slate-400" title="Total Elapsed Time (Drive + Stops)">
                   <Timer className="w-3 h-3 text-indigo-400" />
                   <span>{formatDuration(totalTripSecs)} total</span>
                 </div>

@@ -48,6 +48,21 @@ export interface ScoutSuggestion {
   reason: string;
   insertAfterWaypointId?: string;
   targetWaypointId?: string;
+  newId?: string;
+  notification?: {
+    title: string;
+    message: string;
+    speech: string;
+  };
+}
+
+export interface ScoutActivity {
+  id: string;
+  type: 'search' | 'command' | 'tool' | 'thought';
+  label: string;
+  detail?: string;
+  state: 'active' | 'done' | 'error';
+  durationSeconds?: number;
 }
 
 export interface ScoutMessage {
@@ -58,6 +73,7 @@ export interface ScoutMessage {
   suggestions?: ScoutSuggestion[];
   engine?: AiEngineType;
   thought?: string;
+  activities?: ScoutActivity[];
 }
 
 export interface ScoutChatRequest {
@@ -73,10 +89,12 @@ export interface ScoutChatResponse {
   sessionId: string;
   engine: AiEngineType;
   thought?: string;
+  activities?: ScoutActivity[];
 }
 
 export type ScoutStreamEvent =
   | { event: 'thought'; data: { text: string } }
+  | { event: 'activity'; data: ScoutActivity }
   | { event: 'delta'; data: { text: string } }
   | { event: 'suggestions'; data: { suggestions: ScoutSuggestion[] } }
   | { event: 'done'; data: ScoutChatResponse }

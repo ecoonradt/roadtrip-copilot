@@ -7,6 +7,7 @@ import type {
   GenerateAlertResult,
   BatchAlertResult,
 } from '../types/ai.js';
+import type { ScoutActivity } from '../types/scout.js';
 
 import {
   buildSingleWaypointPrompt,
@@ -99,7 +100,7 @@ export async function defaultExecAgy(prompt: string): Promise<string> {
   }
 
   const { stdout } = await execFileAsync('agy', args, {
-    timeout: 60000,
+    timeout: 300000,
     maxBuffer: 10 * 1024 * 1024,
     env: {
       ...process.env,
@@ -120,8 +121,72 @@ export async function defaultExecAgy(prompt: string): Promise<string> {
 }
 
 export interface AgyStreamEvent {
-  type: 'thought' | 'delta';
+  type: 'thought' | 'delta' | 'activity';
   text: string;
+  activity?: ScoutActivity;
+}
+
+/**
+ * Formats raw tool calls and steps from agy's stream-json into user-friendly, abstracted activity descriptions.
+ */
+export function formatAgyActivity(su: {
+  step_index?: number;
+  state?: string;
+  tool_name?: string;
+  tool_info?: {
+    name?: string;
+    parameters?: Record<string, unknown>;
+    output?: unknown;
+  };
+  duration_seconds?: number;
+  text_delta?: string;
+}): ScoutActivity {
+  const toolName = su.tool_name || su.tool_info?.name || 'tool';
+  const params = su.tool_info?.parameters || {};
+  const isDone = su.state === 'DONE';
+  const state: 'active' | 'done' | 'error' = su.state === 'ERROR' ? 'error' : isDone ? 'done' : 'active';
+  const id = `step_${su.step_index ?? Date.now()}_${toolName}`;
+  const durationSeconds = su.duration_seconds;
+
+  if (toolName === 'search_web') {
+    const query = typeof params.query === 'string' ? params.query.trim() : '';
+    const label = query ? `Searching web: "${query}"` : 'Searching the web...';
+    return { id, type: 'search', label, state, durationSeconds };
+  }
+
+  if (toolName === 'read_url_content') {
+    const rawUrl = typeof params.Url === 'string' ? params.Url : '';
+    let host = rawUrl;
+    try {
+      if (rawUrl) host = new URL(rawUrl).hostname.replace(/^www\./, '');
+    } catch {
+      // ignore
+    }
+    const label = host ? `Reading content from ${host}` : 'Reading web content...';
+    return { id, type: 'tool', label, detail: rawUrl, state, durationSeconds };
+  }
+
+  if (toolName === 'run_command') {
+    const cmd = typeof params.CommandLine === 'string' ? params.CommandLine.trim() : '';
+    let label = 'Executing command';
+    if (cmd.startsWith('curl')) {
+      label = 'Querying network endpoint via curl';
+    } else if (cmd.includes('python')) {
+      label = 'Calculating route geometry via Python';
+    } else if (cmd) {
+      const truncated = cmd.length > 40 ? `${cmd.substring(0, 37)}...` : cmd;
+      label = `Running: ${truncated}`;
+    }
+    return { id, type: 'command', label, detail: cmd, state, durationSeconds };
+  }
+
+  if (toolName === 'view_file' || toolName === 'grep_search' || toolName === 'find_by_name') {
+    return { id, type: 'tool', label: 'Inspecting itinerary files', state, durationSeconds };
+  }
+
+  const cleanName = toolName.replace(/_/g, ' ');
+  const label = isDone ? `Completed ${cleanName}` : `Running ${cleanName}...`;
+  return { id, type: 'tool', label, state, durationSeconds };
 }
 
 /**
@@ -148,43 +213,33 @@ export async function defaultStreamExecAgy(
 
     let fullResponse = '';
     let accumulatedDelta = '';
+    let stderrOutput = '';
     let isDone = false;
     const rl = readline.createInterface({ input: child.stdout });
 
-    let inactivityTimer: NodeJS.Timeout | null = null;
-    const INACTIVITY_MS = 50000;
-    const MAX_TOTAL_MS = 120000;
-
-    const cleanup = () => {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      clearTimeout(maxTimer);
-    };
-
-    const resetInactivityTimer = () => {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      if (!isDone) {
-        inactivityTimer = setTimeout(() => {
-          if (!isDone) {
-            cleanup();
-            child.kill();
-            reject(new Error('Route Scout stream timed out (no data from AI model for 50s)'));
-          }
-        }, INACTIVITY_MS);
-      }
-    };
+    // Trust OS process liveness and agy's internal lifecycle rather than fighting arbitrary
+    // inactivity timeouts. Multi-waypoint route corridor analysis can legitimately take 40-60s
+    // of model reasoning between web lookups. We set a generous 5-minute safety ceiling
+    // matching agy's default 5m0s --print-timeout.
+    const MAX_TOTAL_MS = 300000;
 
     const maxTimer = setTimeout(() => {
       if (!isDone) {
-        cleanup();
-        child.kill();
-        reject(new Error('Route Scout stream execution timed out after 120s'));
+        isDone = true;
+        child.kill('SIGTERM');
+        reject(new Error('Route Scout stream execution timed out after 300s'));
       }
     }, MAX_TOTAL_MS);
 
-    resetInactivityTimer();
+    const cleanup = () => {
+      clearTimeout(maxTimer);
+    };
+
+    child.stderr.on('data', (chunk) => {
+      stderrOutput += chunk.toString();
+    });
 
     rl.on('line', (line) => {
-      resetInactivityTimer();
       try {
         const data = JSON.parse(line.trim());
         if (data.event === 'step_update' && data.step_update) {
@@ -195,14 +250,25 @@ export async function defaultStreamExecAgy(
           } else if (
             su.step_type === 'tool' ||
             su.step_type === 'tool_use' ||
-            su.step_type === 'tool_call' ||
-            su.step_type === 'thought'
+            su.step_type === 'tool_call'
           ) {
-            const toolName = su.tool_name || su.tool_info?.name;
-            const desc = toolName
-              ? `Inspecting route via ${toolName}...`
-              : (su.text_delta || 'Analyzing route geometry...');
-            onChunk({ type: 'thought', text: String(desc) });
+            const activity = formatAgyActivity(su);
+            onChunk({ type: 'activity', text: activity.label, activity });
+            onChunk({ type: 'thought', text: activity.label });
+          } else if (
+            su.step_type === 'thought' ||
+            (su.step_type === 'agent_response' && !su.text_delta && su.thought)
+          ) {
+            const thoughtText = su.text_delta || su.thought || 'Analyzing route corridor...';
+            const activity: ScoutActivity = {
+              id: `thought_${su.step_index ?? Date.now()}`,
+              type: 'thought',
+              label: thoughtText,
+              state: su.state === 'DONE' ? 'done' : 'active',
+              durationSeconds: su.duration_seconds,
+            };
+            onChunk({ type: 'activity', text: thoughtText, activity });
+            onChunk({ type: 'thought', text: thoughtText });
           }
         } else if (data.event === 'result' && data.result) {
           if (data.result.response && typeof data.result.response === 'string') {
@@ -219,7 +285,8 @@ export async function defaultStreamExecAgy(
       cleanup();
       const finalResult = fullResponse || accumulatedDelta;
       if (code !== 0 && !finalResult) {
-        reject(new Error(`agy process exited with code ${code}`));
+        const detail = stderrOutput.trim() || `agy process exited with code ${code}`;
+        reject(new Error(detail));
       } else {
         resolve(finalResult);
       }
@@ -321,9 +388,9 @@ export class AgyHarnessAdapter implements AiHarnessAdapter {
   decorateScoutPrompt(domainPrompt: string): string {
     return `CRITICAL OPERATIONAL HARNESS DIRECTIVES:
 1. You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
-2. You MAY invoke \`search_web\` and \`read_url_content\` to verify real-world place names, highway exits, amenities, closures, and accurate GPS coordinates.
-3. Keep lookups fast and focused: perform at most 1–2 quick web lookups if needed before formulating your response.
-4. DO NOT launch background tasks, cron schedules, subagents, browser automation, or interactive question prompts. Never write or modify workspace files.
+2. You MAY invoke \`search_web\`, \`read_url_content\`, and \`run_command\` (e.g. for curl network checks, python coordinate math, or quick data inspection) to verify real-world place names, highway exits, amenities, closures, and accurate GPS coordinates.
+3. Keep lookups and commands fast and focused before formulating your response.
+4. DO NOT launch background tasks, cron schedules, subagents, or browser automation. Never write or modify workspace files.
 5. Respond directly, naturally, and warmly to the driver like a knowledgeable passenger sitting in the vehicle.
 6. NEVER include meta-commentary about system tools, agent harnesses, or background tasks (e.g. NEVER say "Wait for the background task to complete" or "Querying coordinates").
 7. NEVER narrate UI mechanics or JSON blocks in your prose (e.g. do not say "I have framed this as a candidate update below", "I have attached the JSON below", or "See the card below"). Simply explain your recommendation naturally.

@@ -3,6 +3,19 @@ import { RouteCache, defaultRouteCache } from './routeCache.js';
 
 export const OSRM_BASE_URL = 'https://router.project-osrm.org/route/v1/driving';
 
+/**
+ * Calibration factor applied to raw OSRM durations.
+ *
+ * OSRM's public demo server uses the European car.lua profile which:
+ * 1. Multiplies all posted legal speed limits by speed_reduction = 0.8 (an automatic 20% penalty, 1/0.8 = 1.25x duration inflation).
+ * 2. Defaults untagged rural highways to conservative European defaults (primary = 65 km/h / 40.4 mph, trunk = 85 km/h / 52.8 mph)
+ *    rather than North American rural cruising speeds (60-65 mph on US highways, 75 mph on interstates).
+ * 3. Adds aggressive turn and lane marking penalties.
+ *
+ * A calibration factor of 0.77 (or ~1.30x speedup) aligns OSRM driving durations with real-world Google Maps telemetry.
+ */
+export const OSRM_SPEED_CALIBRATION_FACTOR = 0.77;
+
 export interface CoordinatePair {
   lon: number;
   lat: number;
@@ -11,10 +24,16 @@ export interface CoordinatePair {
 export class RouteService {
   private readonly baseUrl: string;
   private readonly cache: RouteCache;
+  private readonly calibrationFactor: number;
 
-  constructor(baseUrl = OSRM_BASE_URL, cache = defaultRouteCache) {
+  constructor(
+    baseUrl = OSRM_BASE_URL,
+    cache = defaultRouteCache,
+    calibrationFactor = OSRM_SPEED_CALIBRATION_FACTOR
+  ) {
     this.baseUrl = baseUrl;
     this.cache = cache;
+    this.calibrationFactor = calibrationFactor;
   }
 
   public parseAndValidateCoordinates(coordsStr: string): CoordinatePair[] {
@@ -56,14 +75,20 @@ export class RouteService {
     return parsedPairs;
   }
 
-  public async getRoute(coordsStr: string): Promise<RouteResponse> {
+  public async getRoute(coordsStr: string, customCalibration?: number): Promise<RouteResponse> {
     const validPairs = this.parseAndValidateCoordinates(coordsStr);
+
+    const effectiveCalibration =
+      typeof customCalibration === 'number' && customCalibration > 0 && !isNaN(customCalibration)
+        ? customCalibration
+        : this.calibrationFactor;
 
     // Format coordinates as OSRM expects: {lon},{lat};{lon},{lat}...
     const formattedCoords = validPairs.map((p) => `${p.lon},${p.lat}`).join(';');
+    const cacheKey = `${formattedCoords}@cal=${effectiveCalibration.toFixed(4)}`;
 
     // Check cache first
-    const cached = this.cache.get(formattedCoords);
+    const cached = this.cache.get(cacheKey);
     if (cached) {
       return cached;
     }
@@ -91,8 +116,6 @@ export class RouteService {
     const primaryRoute = data.routes[0];
     const distanceMeters = Math.round(primaryRoute.distance);
     const distanceMiles = Number((distanceMeters / 1609.344).toFixed(2));
-    const durationSeconds = Math.round(primaryRoute.duration);
-    const durationMinutes = Number((durationSeconds / 60).toFixed(1));
 
     const waypoints = data.waypoints?.map((wp) => ({
       name: wp.name,
@@ -101,7 +124,7 @@ export class RouteService {
 
     const legs = primaryRoute.legs?.map((leg) => {
       const distMeters = Math.round(leg.distance);
-      const durSec = Math.round(leg.duration);
+      const durSec = Math.round(leg.duration * effectiveCalibration);
       return {
         distanceMeters: distMeters,
         distanceMiles: Number((distMeters / 1609.344).toFixed(2)),
@@ -110,6 +133,13 @@ export class RouteService {
         summary: leg.summary,
       };
     });
+
+    // Sum calibrated leg durations to guarantee mathematical consistency across the timeline
+    const durationSeconds =
+      legs && legs.length > 0
+        ? legs.reduce((acc, leg) => acc + leg.durationSeconds, 0)
+        : Math.round(primaryRoute.duration * effectiveCalibration);
+    const durationMinutes = Number((durationSeconds / 60).toFixed(1));
 
     const response: RouteResponse = {
       geometry: primaryRoute.geometry,
@@ -123,9 +153,13 @@ export class RouteService {
     };
 
     // Save to cache
-    this.cache.set(formattedCoords, response);
+    this.cache.set(cacheKey, response);
 
     return response;
+  }
+
+  public getCalibrationFactor(): number {
+    return this.calibrationFactor;
   }
 
   public getCache(): RouteCache {

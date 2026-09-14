@@ -17,16 +17,22 @@ import {
   Calendar,
   Layers,
   AlertCircle,
+  Volume2,
+  Search,
+  Terminal,
+  Globe,
+  ChevronRight,
 } from 'lucide-react';
 import type {
   ScoutScope,
   ScoutSuggestion,
   ScoutMessage,
+  ScoutActivity,
   ScoutTripContext,
   ScoutChatRequest,
 } from '../types/scout';
 import type { ParsedTrip, ParsedDay } from '../engine/itineraryParser';
-import type { Waypoint } from '../types/routing';
+import type { Waypoint, WaypointType } from '../types/routing';
 import type { ScoutPreviewPin } from './MapCanvas';
 import { chatWithScoutStream, fetchScoutQuickPrompts } from '../services/api';
 
@@ -76,6 +82,76 @@ function cleanStreamingText(raw: string): { content: string; thought?: string } 
     };
   }
   return { content: stripped };
+}
+
+// Interactive activity log showing abstracted tool execution, web lookups, and commands
+function InvestigationActivityLog({ activities }: { activities: ScoutActivity[] }) {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  if (!activities || activities.length === 0) return null;
+
+  const completedCount = activities.filter((a) => a.state === 'done').length;
+
+  return (
+    <div className="mb-2 bg-slate-900/90 border border-slate-750/70 rounded-xl overflow-hidden text-[11px] shadow-sm select-none">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-750/80 transition-colors text-left cursor-pointer"
+      >
+        <div className="flex items-center gap-1.5 text-cyan-400 font-mono text-[10px] font-bold uppercase tracking-wider">
+          <Sparkles className="w-3 h-3 text-cyan-400 shrink-0" />
+          <span>Investigation Activity ({completedCount}/{activities.length})</span>
+        </div>
+        <div className="flex items-center gap-1 text-slate-400 text-[10px]">
+          {isExpanded ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" />
+          )}
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="p-2 space-y-1.5 border-t border-slate-800/80 font-mono text-[10px]">
+          {activities.map((act) => (
+            <div key={act.id} className="flex items-start gap-2 text-slate-300">
+              {act.state === 'active' ? (
+                <Loader2 className="w-3 h-3 animate-spin text-cyan-400 shrink-0 mt-0.5" />
+              ) : act.state === 'error' ? (
+                <AlertCircle className="w-3 h-3 text-rose-400 shrink-0 mt-0.5" />
+              ) : (
+                <Check className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  {act.type === 'search' && <Search className="w-2.5 h-2.5 text-sky-400 shrink-0" />}
+                  {act.type === 'command' && <Terminal className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
+                  {act.type === 'tool' && <Globe className="w-2.5 h-2.5 text-teal-400 shrink-0" />}
+                  <span
+                    className={`truncate ${
+                      act.state === 'active' ? 'text-cyan-200 font-semibold' : 'text-slate-300'
+                    }`}
+                  >
+                    {act.label}
+                  </span>
+                  {act.durationSeconds !== undefined && (
+                    <span className="text-slate-500 shrink-0 text-[9px]">
+                      ({act.durationSeconds.toFixed(1)}s)
+                    </span>
+                  )}
+                </div>
+                {act.detail && act.state === 'active' && (
+                  <div className="text-slate-400 text-[9px] truncate pl-4">
+                    {act.detail}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Markdown formatter for assistant responses powered by react-markdown + remark-gfm
@@ -209,7 +285,24 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const [conversations, setConversations] = useState<Record<string, ScoutMessage[]>>({});
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Timer while analyzing to provide continuous feedback
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (isLoading) {
+      setElapsedSeconds(0);
+      interval = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isLoading]);
 
   // Track added and updated suggestions for UI feedback
   const [addedSuggestionIds, setAddedSuggestionIds] = useState<Set<string>>(new Set());
@@ -273,16 +366,16 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           setQuickPrompts(
             scope.type === 'waypoint'
               ? [
-                  'Check if coordinates & parking are accessible',
-                  'Is this on tribal or private land?',
-                  'Best photo spots or viewpoints at this stop',
+                  'Is the coordinate directly on the highway without exiting?',
+                  'Verify if this is an authentic commercial location or off-route',
+                  'Check parking, fuel pumps & restroom accessibility',
                   'Recommended dwell time for this stop',
                 ]
               : [
-                  'Any scenic overlooks or pull-offs along this leg?',
-                  'Recommend a local lunch stop approximately midway',
-                  'Where are good fuel or EV charging stops?',
-                  'Audit this day\'s timing, dwell durations, and pace',
+                  'Where should we stop for lunch along this leg?',
+                  'Audit route for off-highway detours and broken coordinates',
+                  'Verify all drive-by waypoints stay on the highway',
+                  'Check fuel stops: verify gas stations, pumps & restrooms',
                 ]
           );
         }
@@ -446,7 +539,33 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       let accumulatedSuggestions: ScoutSuggestion[] = [];
 
       await chatWithScoutStream(request, (event) => {
-        if (event.event === 'thought') {
+        if (event.event === 'activity') {
+          const act = event.data;
+          currentThought = act.label;
+          setConversations((prev) => {
+            const list = prev[currentScopeKey] || [];
+            return {
+              ...prev,
+              [currentScopeKey]: list.map((m) => {
+                if (m.id !== assistantMsgId) return m;
+                const existing = m.activities || [];
+                const idx = existing.findIndex((a) => a.id === act.id);
+                let nextActivities: ScoutActivity[];
+                if (idx >= 0) {
+                  nextActivities = [...existing];
+                  nextActivities[idx] = act;
+                } else {
+                  nextActivities = [...existing, act];
+                }
+                return {
+                  ...m,
+                  thought: act.label,
+                  activities: nextActivities,
+                };
+              }),
+            };
+          });
+        } else if (event.event === 'thought') {
           currentThought = event.data.text;
           setConversations((prev) => {
             const list = prev[currentScopeKey] || [];
@@ -501,10 +620,14 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                 m.id === assistantMsgId
                   ? {
                       ...m,
-                      content: finalResp.reply,
-                      suggestions: finalResp.suggestions,
                       engine: finalResp.engine,
-                      thought: finalResp.thought || currentThought,
+                      content: finalResp.reply,
+                      thought: finalResp.thought || m.thought,
+                      suggestions:
+                        finalResp.suggestions.length > 0
+                          ? finalResp.suggestions
+                          : m.suggestions,
+                      activities: finalResp.activities || m.activities,
                     }
                   : m
               ),
@@ -550,11 +673,14 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     if (!targetId) return;
 
     onUpdateWaypoint(targetId, {
+      ...(suggestion.newId ? { id: suggestion.newId } : {}),
       name: suggestion.name,
+      type: suggestion.type as WaypointType,
       lat: suggestion.lat,
       lng: suggestion.lng,
       dwell_minutes: suggestion.dwell_minutes,
       trigger_radius_miles: suggestion.trigger_radius_miles,
+      ...(suggestion.notification ? { notification: suggestion.notification } : {}),
     });
     setUpdatedSuggestionIds((prev) => new Set([...prev, suggestion.id]));
   };
@@ -835,7 +961,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                     )}
                   </div>
 
-                  {msg.thought && (
+                  {msg.activities && msg.activities.length > 0 ? (
+                    <InvestigationActivityLog activities={msg.activities} />
+                  ) : msg.thought ? (
                     <div className="mb-2 px-2.5 py-1.5 bg-slate-800/80 border border-slate-700/60 rounded-xl text-[11px] text-slate-300 flex items-start gap-2">
                       <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
                       <div className="leading-snug">
@@ -845,14 +973,21 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                         <span className="italic text-slate-300">{msg.thought}</span>
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                   {msg.content ? (
                     <FormattedAssistantText text={msg.content} />
                   ) : (
                     <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-                      <span>Route Scout is analyzing route geometry &amp; corridor...</span>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400 shrink-0" />
+                      <span>
+                        {msg.thought || 'Route Scout is analyzing route geometry & corridor...'}
+                        {elapsedSeconds > 1 && (
+                          <span className="font-mono text-cyan-400 text-[11px] ml-1.5 font-medium">
+                            ({elapsedSeconds}s)
+                          </span>
+                        )}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -914,6 +1049,31 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                               )}
                             </div>
                           </div>
+
+                          {/* Sync ID Badge */}
+                          {sug.newId && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono px-0.5">
+                              <span className="text-slate-400">Sync ID:</span>
+                              <span className="bg-slate-900 border border-cyan-800/60 px-1.5 py-0.5 rounded text-cyan-200">
+                                {sug.newId}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Alert & Audio Notification Preview */}
+                          {sug.notification && (
+                            <div className="bg-slate-900/80 border border-slate-800/90 rounded-lg p-2 space-y-1 text-[11px]">
+                              <div className="flex items-center gap-1.5 text-cyan-300 font-semibold text-[10px] uppercase tracking-wider">
+                                <Volume2 className="w-3 h-3 text-cyan-400 shrink-0" />
+                                <span className="truncate">Alert: {sug.notification.title}</span>
+                              </div>
+                              {sug.notification.speech && (
+                                <p className="text-slate-300 text-[10px] italic leading-snug line-clamp-2">
+                                  &ldquo;{sug.notification.speech}&rdquo;
+                                </p>
+                              )}
+                            </div>
+                          )}
 
                           {/* Action Buttons */}
                           <div className="flex items-center gap-1.5 pt-1">
@@ -997,7 +1157,14 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             currentMessages[currentMessages.length - 1]?.role !== 'assistant') && (
             <div className="flex items-center gap-2 p-3 bg-slate-850/80 border border-slate-800 rounded-2xl text-xs text-cyan-300 animate-pulse">
               <Loader2 className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
-              <span>Route Scout is analyzing route geometry &amp; corridor...</span>
+              <span>
+                Route Scout is analyzing route geometry &amp; corridor...
+                {elapsedSeconds > 1 && (
+                  <span className="font-mono text-cyan-400 text-[11px] ml-1.5 font-medium">
+                    ({elapsedSeconds}s)
+                  </span>
+                )}
+              </span>
             </div>
           )}
 

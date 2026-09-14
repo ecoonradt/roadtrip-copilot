@@ -13,6 +13,7 @@ interface GeocodeQuery {
 
 interface RouteQuery {
   coords?: string;
+  calibration?: string;
 }
 
 export const routingRoutes: FastifyPluginAsync<RoutingPluginOptions> = async (
@@ -51,7 +52,7 @@ export const routingRoutes: FastifyPluginAsync<RoutingPluginOptions> = async (
   fastify.get<{ Querystring: RouteQuery }>(
     '/api/routing/route',
     async (request, reply) => {
-      const { coords } = request.query;
+      const { coords, calibration } = request.query;
 
       if (!coords || typeof coords !== 'string' || !coords.trim()) {
         return reply.status(400).send({
@@ -59,8 +60,15 @@ export const routingRoutes: FastifyPluginAsync<RoutingPluginOptions> = async (
         });
       }
 
+      const parsedCalibration = calibration ? parseFloat(calibration) : undefined;
+      if (calibration !== undefined && (isNaN(parsedCalibration!) || parsedCalibration! <= 0)) {
+        return reply.status(400).send({
+          error: 'Query parameter "calibration" must be a positive number',
+        });
+      }
+
       try {
-        const route = await routeService.getRoute(coords);
+        const route = await routeService.getRoute(coords, parsedCalibration);
         return reply.status(200).send(route);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown routing error';

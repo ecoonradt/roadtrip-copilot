@@ -9,6 +9,7 @@ import {
   Sparkles,
   Loader2,
   Plus,
+  X,
   Edit2,
   Check,
   ChevronLeft,
@@ -16,9 +17,10 @@ import {
   Compass,
 } from 'lucide-react';
 
-import type { Waypoint, WaypointType } from '../types/routing';
+import type { Waypoint, WaypointType, GeocodeResult } from '../types/routing';
 import type { WaypointContext, CopilotAlert } from '../types/ai';
 import type { TimelineCascadeResult, ScheduledStop } from '../engine/types';
+import { SearchBar } from './SearchBar';
 import { AiAlertModal } from './AiAlertModal';
 import { generateBatchCopilotAlerts } from '../services/api';
 
@@ -31,7 +33,7 @@ interface TimelineSidebarProps {
   onMoveWaypoint: (index: number, direction: 'up' | 'down') => void;
   onResetSample: () => void;
   onClearAll: () => void;
-  onFocusAddStop: () => void;
+  onSelectLocation: (result: GeocodeResult) => void;
   onOpenScoutForDay?: () => void;
   onOpenScoutForWaypoint?: (waypoint: Waypoint) => void;
   selectedWaypointId?: string | null;
@@ -64,7 +66,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   onMoveWaypoint,
   onResetSample,
   onClearAll,
-  onFocusAddStop,
+  onSelectLocation,
   onOpenScoutForDay,
   onOpenScoutForWaypoint,
   selectedWaypointId,
@@ -88,6 +90,21 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const dragStartXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(DEFAULT_WIDTH);
+
+  // Add stop inline drawer state
+  const [isAddStopOpen, setIsAddStopOpen] = useState(false);
+
+  // Close Add Stop inline panel on Escape key
+  useEffect(() => {
+    if (!isAddStopOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAddStopOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAddStopOpen]);
 
   // Waypoint edit state (which waypoint is expanded for inline editing)
   const [editingWaypointId, setEditingWaypointId] = useState<string | null>(null);
@@ -282,12 +299,20 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
         {/* Row 2: Dedicated 3-Column Primary Action Bar */}
         <div className="grid grid-cols-3 gap-1.5 mt-2.5">
           <button
-            onClick={onFocusAddStop}
-            className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap"
-            title="Add a new stop by searching"
+            onClick={() => setIsAddStopOpen((prev) => !prev)}
+            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer whitespace-nowrap ${
+              isAddStopOpen
+                ? 'bg-sky-500 text-white ring-2 ring-sky-400/40 shadow-sky-500/20'
+                : 'bg-sky-600 hover:bg-sky-500 text-white'
+            }`}
+            title={isAddStopOpen ? 'Close add stop panel' : 'Add a new stop by searching'}
           >
-            <Plus className="w-3.5 h-3.5 shrink-0" />
-            <span>Add Stop</span>
+            {isAddStopOpen ? (
+              <X className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+            )}
+            <span>{isAddStopOpen ? 'Close' : 'Add Stop'}</span>
           </button>
 
           {onOpenScoutForDay ? (
@@ -322,6 +347,30 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
           )}
         </div>
 
+        {/* Inline Add Stop Panel */}
+        {isAddStopOpen && (
+          <div className="mt-2.5 p-2.5 bg-slate-950/80 border border-sky-500/40 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin className="w-3 h-3 text-sky-400" />
+                <span>Add New Stop</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">ESC to cancel</span>
+            </div>
+            <SearchBar
+              onSelectLocation={(result) => {
+                onSelectLocation(result);
+                setIsAddStopOpen(false);
+              }}
+              placeholder="Search place or address..."
+              className="w-full"
+            />
+            <p className="text-[10px] text-slate-400 leading-tight">
+              Type to search for any place, or click directly anywhere on the map to drop a stop.
+            </p>
+          </div>
+        )}
+
         {batchProgress && (
           <div className="mt-2 text-[11px] text-sky-300 font-mono text-center bg-sky-950/50 border border-sky-800/60 rounded-lg py-1 px-2 animate-pulse">
             {batchProgress}
@@ -336,11 +385,11 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
             <MapPin className="w-10 h-10 mx-auto text-slate-600 mb-3" />
             <h3 className="text-sm font-semibold text-slate-200">No stops added yet</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-              Use the search bar in the top header, click anywhere on the map, or load the sample itinerary to get started.
+              Click Add Stop above, click anywhere on the map, or load the sample itinerary to get started.
             </p>
             <div className="mt-5 flex items-center justify-center gap-2">
               <button
-                onClick={onFocusAddStop}
+                onClick={() => setIsAddStopOpen(true)}
                 className="px-3.5 py-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />

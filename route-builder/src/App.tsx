@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MapCanvas, type ScoutPreviewPin } from './components/MapCanvas';
 import { TimelineSidebar } from './components/TimelineSidebar';
 import { AppHeader } from './components/AppHeader';
@@ -132,9 +132,6 @@ export function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [lastSavedTripJson, setLastSavedTripJson] = useState<string>('');
-
-  // Search input ref for programmatic focus from "+ Add Stop"
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
   useEffect(() => {
@@ -367,13 +364,6 @@ export function App() {
     updateCurrentDayWaypoints([...waypoints, newWaypoint]);
   }, [updateCurrentDayWaypoints, waypoints]);
 
-  const handleFocusAddStop = useCallback(() => {
-    if (searchInputRef.current) {
-      searchInputRef.current.focus();
-      searchInputRef.current.select();
-    }
-  }, []);
-
   const handleMapClick = useCallback((lat: number, lng: number) => {
     const stopNum = waypoints.length + 1;
     const newWaypoint: Waypoint = {
@@ -396,7 +386,22 @@ export function App() {
     updateCurrentDayWaypoints(
       waypoints.map((w) => (w.id === id ? { ...w, ...updates } : w))
     );
-  }, [updateCurrentDayWaypoints, waypoints]);
+    if (updates.id && updates.id !== id) {
+      if (selectedWaypointId === id) {
+        setSelectedWaypointId(updates.id);
+      }
+      setScoutScope((prev) => {
+        if (prev.type === 'waypoint' && prev.waypointId === id) {
+          return {
+            ...prev,
+            waypointId: updates.id,
+            waypointName: updates.name || prev.waypointName,
+          };
+        }
+        return prev;
+      });
+    }
+  }, [updateCurrentDayWaypoints, waypoints, selectedWaypointId]);
 
   const handleMoveWaypoint = useCallback((index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
@@ -443,7 +448,7 @@ export function App() {
   const handleAddWaypointFromScout = useCallback(
     (suggestion: ScoutSuggestion) => {
       const newWp: Waypoint = {
-        id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: suggestion.newId || `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         name: suggestion.name,
         type: (suggestion.type as WaypointType) || 'scenic_pull_off',
         lat: suggestion.lat,
@@ -452,6 +457,7 @@ export function App() {
         trigger_radius_miles: suggestion.trigger_radius_miles ?? 1.5,
         target_time: '12:00:00',
         notes: suggestion.reason,
+        notification: suggestion.notification,
       };
 
       const updated = [...waypoints];
@@ -643,8 +649,6 @@ export function App() {
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950">
       {/* Top Application Header: Branding, Search, Schedule, Telemetry & Export */}
       <AppHeader
-        searchRef={searchInputRef}
-        onSelectLocation={handleSelectLocation}
         route={route}
         isLoadingRoute={isLoadingRoute}
         routeError={routeError}
@@ -691,7 +695,7 @@ export function App() {
           onMoveWaypoint={handleMoveWaypoint}
           onResetSample={handleResetSample}
           onClearAll={handleClearAll}
-          onFocusAddStop={handleFocusAddStop}
+          onSelectLocation={handleSelectLocation}
           onOpenScoutForDay={handleOpenScoutForDay}
           onOpenScoutForWaypoint={handleOpenScoutForWaypoint}
           selectedWaypointId={selectedWaypointId}

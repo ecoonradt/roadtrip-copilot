@@ -1,4 +1,5 @@
 import type { Waypoint, WaypointType } from '../types/routing';
+import { detectTimezone } from './cascade';
 
 export interface ParsedDay {
   dayNumber: number;
@@ -237,7 +238,12 @@ function convertRawCheckpointToWaypoint(
     dwell_minutes,
     trigger_radius_miles,
     notification,
-    timezone: typeof cp.timezone === 'string' ? cp.timezone : defaultTz,
+    timezone:
+      typeof cp.timezone === 'string' && cp.timezone.trim()
+        ? cp.timezone
+        : lat && lng
+        ? detectTimezone(lat, lng, defaultTz)
+        : defaultTz,
     approachHighway: typeof cp.approachHighway === 'string' ? cp.approachHighway : undefined,
     notes: typeof cp.notes === 'string' ? cp.notes : undefined,
   };

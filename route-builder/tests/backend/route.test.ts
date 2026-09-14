@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createApp } from '../../server/app.js';
-import { RouteService } from '../../server/services/routeService.js';
+import { RouteService, OSRM_SPEED_CALIBRATION_FACTOR } from '../../server/services/routeService.js';
 import { RouteCache } from '../../server/services/routeCache.js';
 import type { OsrmRawResponse } from '../../server/types/index.js';
 
@@ -90,11 +90,12 @@ describe('OSRM Routing Proxy (/api/routing/route)', () => {
     expect(body.geometry.coordinates[0]).toEqual([-112.0152, 33.4357]);
     expect(body.geometry.coordinates[2]).toEqual([-111.7645, 34.801]);
 
-    // Verify distance and drive duration calculations
+    // Verify distance and drive duration calculations (calibrated for North American driving)
+    const expectedDurationSec = Math.round(7200 * OSRM_SPEED_CALIBRATION_FACTOR);
     expect(body.distanceMeters).toBe(185200);
     expect(body.distanceMiles).toBeCloseTo(115.08, 1);
-    expect(body.durationSeconds).toBe(7200);
-    expect(body.durationMinutes).toBe(120);
+    expect(body.durationSeconds).toBe(expectedDurationSec);
+    expect(body.durationMinutes).toBe(Number((expectedDurationSec / 60).toFixed(1)));
 
     // Verify waypoints
     expect(body.waypoints).toHaveLength(2);
@@ -198,5 +199,58 @@ describe('OSRM Routing Proxy (/api/routing/route)', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toContain('HTTP 500');
+  });
+
+  it('supports custom calibration factor parameter (e.g. 1.0 for uncalibrated raw duration)', async () => {
+    const mockOsrmResponse: OsrmRawResponse = {
+      code: 'Ok',
+      routes: [
+        {
+          distance: 100000,
+          duration: 3600,
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [-112.0, 33.4],
+              [-111.7, 34.8],
+            ],
+          },
+          legs: [
+            {
+              distance: 100000,
+              duration: 3600,
+              summary: 'Highway',
+            },
+          ],
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response(JSON.stringify(mockOsrmResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/routing/route?coords=-112.0,33.4;-111.7,34.8&calibration=1.0',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.durationSeconds).toBe(3600);
+    expect(body.durationMinutes).toBe(60);
+  });
+
+  it('rejects invalid non-positive calibration parameter', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/routing/route?coords=-112.0,33.4;-111.7,34.8&calibration=-0.5',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('calibration');
   });
 });

@@ -284,6 +284,8 @@ export async function chatWithScoutStream(
       throw new Error(parsedData.error || 'Streaming error');
     } else if (eventType === 'thought') {
       onEvent({ event: 'thought', data: parsedData });
+    } else if (eventType === 'activity') {
+      onEvent({ event: 'activity', data: parsedData });
     } else if (eventType === 'delta') {
       onEvent({ event: 'delta', data: parsedData });
     } else if (eventType === 'suggestions') {

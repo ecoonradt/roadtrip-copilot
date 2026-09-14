@@ -35,7 +35,7 @@
   * **Day Scope:** Evaluates overall driving pace, scenic corridors, overlook opportunities, and meal/fuel deserts.
   * **Waypoint Scope:** Audits road accessibility (paved vs. dirt), parking pull-offs, lighting/golden hour timing, and coordinate precision.
 * **Pluggable Adapter Seam:** The core road-trip domain prompt (`buildScoutDomainPrompt`) is kept strictly pure and harness-agnostic. All harness-specific tool permissions and execution rules live behind the `AiHarnessAdapter` lifecycle hooks:
-  * `decorateScoutPrompt?(domainPrompt)`: In `AgyHarnessAdapter`, explicitly grants Green-tier search tools (`search_web`, `read_url_content`) and fast synchronous checks for real-world coordinate & exit accuracy; limits queries to 1–2 lookups; strictly forbids background tasks, subagents, interactive questions (`ask_question`), browser sessions, and workspace file modifications.
+  * `decorateScoutPrompt?(domainPrompt)`: In `AgyHarnessAdapter`, grants research and calculation tools (`search_web`, `read_url_content`, and `run_command` for fast coordinate math/network checks); strictly forbids background tasks, subagents, interactive questions (`ask_question`), browser sessions, and modifications to workspace files.
   * `sanitizeResponse?(rawText)`: In `AgyHarnessAdapter`, strips internal harness preambles (e.g. background task yields) and trailing meta-commentary from driver-facing prose.
   * Cloud and future adapters (Claude Code, OpenAI, Codex) plug into this seam with their respective tool declarations and prompt decorations.
 * **Interactive Suggestion Cards:** Emits actionable candidate blocks (`json:suggestions`) allowing 1-click **Add Waypoint** or **Update Waypoint** with dynamic map preview pins before driver approval.
@@ -97,7 +97,7 @@ route-builder/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
 │   └── types/                  # Frontend data models (routing, ai, scout)
-└── tests/                      # Comprehensive Vitest test suites (132 tests)
+└── tests/                      # Comprehensive Vitest test suites (139 tests)
 ```
 
 ---

@@ -116,7 +116,7 @@ roadtrip-copilot/
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models (routing, ai, scout)
-│   └── tests/                 # Vitest test suites (132 tests: backend, engine, ai, schema, device, itineraries, scout)
+│   └── tests/                 # Vitest test suites (139 tests: backend, engine, ai, schema, device, itineraries, scout)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/
@@ -197,7 +197,7 @@ roadtrip-copilot/
   ```bash
   cd route-builder && npm run build
   ```
-* **Run All 132 Vitest Tests:**
+* **Run All 139 Vitest Tests:**
   ```bash
   cd route-builder && npm test
   ```

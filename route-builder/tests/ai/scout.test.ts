@@ -83,6 +83,29 @@ describe('Route Scout Service & Prompts', () => {
       expect(domainPrompt).not.toContain('without invoking any tools');
     });
 
+    it('domain prompt explicitly specifies highway alignment and commercial fuel stop guidelines', () => {
+      const scope: ScoutScope = {
+        type: 'day',
+        dayNumber: 2,
+      };
+      const request: ScoutChatRequest = {
+        scope,
+        messages: [{ role: 'user', content: 'Audit my route waypoints' }],
+        tripContext: sampleTripContext,
+      };
+
+      const domainPrompt = buildScoutDomainPrompt(request);
+      expect(domainPrompt).toContain('DRIVE-BY WAYPOINTS MUST NEVER LEAVE THE HIGHWAY');
+      expect(domainPrompt).toContain('highway centerline');
+      expect(domainPrompt).toContain('FUEL STOPS MUST BE VERIFIED COMMERCIAL SERVICE STATIONS');
+      expect(domainPrompt).toContain('NEVER suggest or accept coordinates in residential neighborhoods, trailer parks');
+      expect(domainPrompt).toContain('WAYPOINTS MUST BE GOOGLE MAPS COMPATIBLE LOCATIONS');
+      expect(domainPrompt).toContain('ROUTE AUDITING & REPAIR');
+      expect(domainPrompt).toContain('SYNCHRONIZE WAYPOINT ID, HEADS-UP NOTIFICATION & VOICE ALERT COPY');
+      expect(domainPrompt).toContain('newId');
+      expect(domainPrompt).toContain('CRITICAL NOTIFICATION CONSISTENCY');
+    });
+
     it('AgyHarnessAdapter decorates domain prompt with green tool permissions and guardrails', () => {
       const agy = new AgyHarnessAdapter();
       const domainPrompt = 'Test domain prompt content';
@@ -204,6 +227,42 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions[0].lng).toBe(-108.6921);
     });
 
+    it('extracts notification fields from update_waypoint suggestion card', () => {
+      const rawModelOutput = `I have audited your Farmington stop. Moving it to the real Maverik station.
+
+\`\`\`json:suggestions
+[
+  {
+    "action": "update_waypoint",
+    "targetWaypointId": "wp_farmington",
+    "newId": "maverik_farmington",
+    "name": "Maverik Adventure's First Stop (Farmington)",
+    "type": "fuel",
+    "lat": 36.7328,
+    "lng": -108.2443,
+    "dwell_minutes": 15,
+    "trigger_radius_miles": 1.5,
+    "reason": "Commercial service station with 16 pumps and clean restrooms.",
+    "notification": {
+      "title": "Maverik Fuel & Food Stop",
+      "message": "2710 W Main St on US-64. Fuel pumps, clean restrooms, and refreshments.",
+      "speech": "Approaching Maverik Adventure Stop on West Main Street. Fuel and rest break recommended."
+    }
+  }
+]
+\`\`\``;
+
+      const { reply, suggestions } = parseScoutResponse(rawModelOutput);
+      expect(reply).toContain('I have audited your Farmington stop');
+      expect(suggestions).toHaveLength(1);
+      expect(suggestions[0].action).toBe('update_waypoint');
+      expect(suggestions[0].targetWaypointId).toBe('wp_farmington');
+      expect(suggestions[0].newId).toBe('maverik_farmington');
+      expect(suggestions[0].notification).toBeDefined();
+      expect(suggestions[0].notification?.title).toBe('Maverik Fuel & Food Stop');
+      expect(suggestions[0].notification?.speech).toContain('Approaching Maverik Adventure Stop');
+    });
+
     it('separates agent tool preamble from substantive answer', () => {
       const rawWithPreamble = `I have launched a query to inspect the exact road geometry and satellite imagery around exit 294 on I-40. I will analyze the results as soon as they return.
 
@@ -310,6 +369,156 @@ I have framed this as a candidate update below to convert your focused Gallup fu
 
       const result = generateTemplateScoutResponse(request);
       expect(result.reply).toContain('Waypoint Accessibility: Shiprock Peak');
+    });
+
+    it('provides multi-stop route audit fallback for day scope detecting off-highway detours and trailer park fuel stop', () => {
+      const problematicTripContext: ScoutTripContext = {
+        tripName: 'Phoenix to Albuquerque Road Trip',
+        origin: 'Flagstaff, AZ',
+        destination: 'Chama, NM',
+        waypoints: [
+          {
+            id: 'painted_desert_view',
+            name: 'Painted Desert Badlands',
+            type: 'scenic_pull_off',
+            lat: 34.981,
+            lng: -110.0545, // on dirt Goodwater Rd
+            dwell_minutes: 0,
+          },
+          {
+            id: 'gallup_fuel',
+            name: 'Red Rock Park (Picnic & Stretch)',
+            type: 'meal',
+            lat: 35.5458,
+            lng: -108.6255,
+            dwell_minutes: 30,
+            notification: {
+              title: 'Gallup, NM - Fuel & Stretch',
+              message: 'Target 11:30 AM MDT. Turn north on US-491 next.',
+              speech: 'Arriving in Gallup, New Mexico. Fuel stop recommended before heading north on US-491.',
+            },
+          },
+          {
+            id: 'shiprock_peak',
+            name: 'Shiprock Peak (US-491)',
+            type: 'scenic_pull_off',
+            lat: 36.6872,
+            lng: -108.6875, // 1.1 mi into desert scrub
+            dwell_minutes: 0,
+          },
+          {
+            id: 'wp_1789354019621_9s3w',
+            name: "Maverik Adventure's First Stop (Farmington)",
+            type: 'fuel',
+            lat: 36.7465,
+            lng: -108.2675, // residential trailer park on Finch Ave
+            dwell_minutes: 15,
+          },
+        ],
+      };
+
+      const request: ScoutChatRequest = {
+        scope: { type: 'day', dayNumber: 2 },
+        messages: [{ role: 'user', content: 'Look carefully at some of the drive by waypoints and the fuel stop. They each take me off the highway. Can you audit and fix these?' }],
+        tripContext: problematicTripContext,
+      };
+
+      const result = generateTemplateScoutResponse(request);
+      expect(result.reply).toContain('Route Audit & Highway Alignment Report');
+      expect(result.suggestions.length).toBe(4);
+
+      const pdSug = result.suggestions.find((s) => s.targetWaypointId === 'painted_desert_view');
+      expect(pdSug).toBeDefined();
+      expect(pdSug?.lat).toBe(34.9809);
+      expect(pdSug?.lng).toBe(-110.0525);
+      expect(pdSug?.dwell_minutes).toBe(0);
+
+      const gallupSug = result.suggestions.find((s) => s.targetWaypointId === 'gallup_fuel');
+      expect(gallupSug).toBeDefined();
+      expect(gallupSug?.newId).toBe('gallup_red_rock_park');
+      expect(gallupSug?.type).toBe('meal');
+      expect(gallupSug?.notification?.title).toBe('Red Rock Park Picnic & Stretch');
+      expect(gallupSug?.notification?.speech).toContain('picnic');
+      expect(gallupSug?.notification?.speech).not.toContain('Fuel stop');
+
+      const srSug = result.suggestions.find((s) => s.targetWaypointId === 'shiprock_peak');
+      expect(srSug).toBeDefined();
+      expect(srSug?.lat).toBe(36.6878);
+      expect(srSug?.lng).toBe(-108.7078);
+      expect(srSug?.dwell_minutes).toBe(0);
+
+      const fuelSug = result.suggestions.find((s) => s.targetWaypointId === 'wp_1789354019621_9s3w');
+      expect(fuelSug).toBeDefined();
+      expect(fuelSug?.newId).toBe('maverik_farmington');
+      expect(fuelSug?.lat).toBe(36.7328);
+      expect(fuelSug?.lng).toBe(-108.2443);
+      expect(fuelSug?.type).toBe('fuel');
+      expect(fuelSug?.notification?.title).toContain('Maverik');
+    });
+
+    it('provides waypoint copy and ID synchronization fallback when meal stop has fuel ID and speech', () => {
+      const gallupWaypoint = {
+        id: 'gallup_fuel',
+        name: 'Red Rock Park (Picnic & Stretch)',
+        type: 'meal',
+        lat: 35.5458,
+        lng: -108.6255,
+        dwell_minutes: 30,
+        notification: {
+          title: 'Gallup, NM - Fuel & Stretch',
+          message: 'Target 11:30 AM MDT. Turn north on US-491 next.',
+          speech: 'Arriving in Gallup, New Mexico. Fuel stop recommended before heading north on US-491.',
+        },
+      };
+      const request: ScoutChatRequest = {
+        scope: { type: 'waypoint', waypointId: gallupWaypoint.id, waypointName: gallupWaypoint.name },
+        messages: [{ role: 'user', content: 'Why does the alert and voice say fuel stop when this is a picnic lunch stop at a park?' }],
+        tripContext: {
+          tripName: 'Test Trip',
+          waypoints: [gallupWaypoint],
+          focusedWaypoint: gallupWaypoint,
+        },
+      };
+
+      const result = generateTemplateScoutResponse(request);
+      expect(result.reply).toContain('Waypoint Copy & ID Synchronization');
+      expect(result.suggestions).toHaveLength(1);
+      expect(result.suggestions[0].action).toBe('update_waypoint');
+      expect(result.suggestions[0].targetWaypointId).toBe('gallup_fuel');
+      expect(result.suggestions[0].newId).toBe('gallup_red_rock_park');
+      expect(result.suggestions[0].type).toBe('meal');
+      expect(result.suggestions[0].notification?.title).toBe('Red Rock Park Picnic & Stretch');
+      expect(result.suggestions[0].notification?.speech).toContain('picnic');
+      expect(result.suggestions[0].notification?.speech).not.toContain('Fuel stop');
+    });
+
+    it('provides fuel stop audit fallback for waypoint scope relocating trailer park pin to commercial Maverik', () => {
+      const fuelWaypoint = {
+        id: 'wp_1789354019621_9s3w',
+        name: "Maverik Adventure's First Stop (Farmington)",
+        type: 'fuel',
+        lat: 36.7465,
+        lng: -108.2675,
+        dwell_minutes: 15,
+      };
+      const request: ScoutChatRequest = {
+        scope: { type: 'waypoint', waypointId: fuelWaypoint.id, waypointName: fuelWaypoint.name },
+        messages: [{ role: 'user', content: 'This fuel stop is in a residential trailer park. Where is the real gas station?' }],
+        tripContext: {
+          tripName: 'Test Trip',
+          waypoints: [fuelWaypoint],
+          focusedWaypoint: fuelWaypoint,
+        },
+      };
+
+      const result = generateTemplateScoutResponse(request);
+      expect(result.reply).toContain('Commercial Fuel Stop Audit');
+      expect(result.reply).toContain('2710 W Main St');
+      expect(result.suggestions).toHaveLength(1);
+      expect(result.suggestions[0].action).toBe('update_waypoint');
+      expect(result.suggestions[0].lat).toBe(36.7328);
+      expect(result.suggestions[0].lng).toBe(-108.2443);
+      expect(result.suggestions[0].notification?.title).toBe('Maverik Fuel & Food Stop');
     });
 
     it('returns quick prompts appropriate to the scope', () => {
