@@ -85,6 +85,19 @@ const INITIAL_FALLBACK_TRIP: ParsedTrip = {
   ],
 };
 
+function getInitialRouteInfo(): { file: string; day: number } {
+  if (typeof window === 'undefined') return { file: 'sample_itinerary.json', day: 0 };
+  const params = new URLSearchParams(window.location.search);
+  const routeParam = params.get('route');
+  const dayParam = params.get('day');
+  const savedRoute = localStorage.getItem('copilot_active_file');
+  const savedDay = localStorage.getItem('copilot_active_day');
+
+  const file = routeParam || savedRoute || 'sample_itinerary.json';
+  const day = dayParam !== null ? parseInt(dayParam, 10) : savedDay !== null ? parseInt(savedDay, 10) : 0;
+  return { file, day: isNaN(day) ? 0 : day };
+}
+
 export function App() {
   const [trip, setTrip] = useState<ParsedTrip>(INITIAL_FALLBACK_TRIP);
   const [activeDayIndex, setActiveDayIndex] = useState<number>(0);
@@ -104,27 +117,61 @@ export function App() {
   // Save states
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [lastSavedTripJson, setLastSavedTripJson] = useState<string>('');
 
   // Search input ref for programmatic focus from "+ Add Stop"
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-load workspace sample_itinerary.json on initial mount
+  // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
   useEffect(() => {
     let isSubscribed = true;
-    const loadDefaultTrip = async () => {
+    const loadInitialTrip = async () => {
+      const { file, day } = getInitialRouteInfo();
       try {
-        const raw = await fetchItinerary('sample_itinerary.json');
+        const raw = await fetchItinerary(file);
         if (isSubscribed && raw) {
-          const parsed = parseItineraryJson(raw, 'sample_itinerary.json');
+          const parsed = parseItineraryJson(raw, file);
           setTrip(parsed);
-          setActiveDayIndex(0);
+          setLastSavedTripJson(JSON.stringify(parsed));
+          const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
+          setActiveDayIndex(validDay);
+          localStorage.setItem('copilot_active_file', file);
+          localStorage.setItem('copilot_active_day', String(validDay));
+          const url = new URL(window.location.href);
+          url.searchParams.set('route', file);
+          url.searchParams.set('day', String(validDay));
+          window.history.replaceState({}, '', url.toString());
+          return;
         }
       } catch {
-        // Fall back to INITIAL_FALLBACK_TRIP
+        // If specified file fails to load (e.g. was deleted), try fallback sample_itinerary.json
+        if (file !== 'sample_itinerary.json') {
+          try {
+            const fallbackRaw = await fetchItinerary('sample_itinerary.json');
+            if (isSubscribed && fallbackRaw) {
+              const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
+              setTrip(parsed);
+              setLastSavedTripJson(JSON.stringify(parsed));
+              setActiveDayIndex(0);
+              localStorage.setItem('copilot_active_file', 'sample_itinerary.json');
+              localStorage.setItem('copilot_active_day', '0');
+              const url = new URL(window.location.href);
+              url.searchParams.set('route', 'sample_itinerary.json');
+              url.searchParams.set('day', '0');
+              window.history.replaceState({}, '', url.toString());
+              return;
+            }
+          } catch {
+            // Fall back to INITIAL_FALLBACK_TRIP
+          }
+        }
+      }
+      if (isSubscribed) {
+        setLastSavedTripJson(JSON.stringify(INITIAL_FALLBACK_TRIP));
       }
     };
 
-    loadDefaultTrip();
+    loadInitialTrip();
 
     return () => {
       isSubscribed = false;
@@ -366,9 +413,13 @@ export function App() {
   }, [activeDayIndex]);
 
   // Multi-day operations
-  const handleSelectDay = (index: number) => {
+  const handleSelectDay = useCallback((index: number) => {
     setActiveDayIndex(index);
-  };
+    localStorage.setItem('copilot_active_day', String(index));
+    const url = new URL(window.location.href);
+    url.searchParams.set('day', String(index));
+    window.history.replaceState({}, '', url.toString());
+  }, []);
 
   const handleAddDay = useCallback(() => {
     setTrip((prev) => {
@@ -408,7 +459,12 @@ export function App() {
         days: [...prev.days, newDay],
       };
     });
-    setActiveDayIndex(trip.days.length);
+    const nextIdx = trip.days.length;
+    setActiveDayIndex(nextIdx);
+    localStorage.setItem('copilot_active_day', String(nextIdx));
+    const url = new URL(window.location.href);
+    url.searchParams.set('day', String(nextIdx));
+    window.history.replaceState({}, '', url.toString());
   }, [trip.days]);
 
   const handleDeleteDay = useCallback((index: number) => {
@@ -418,13 +474,26 @@ export function App() {
       const reindexed = filtered.map((d, i) => ({ ...d, dayNumber: i + 1 }));
       return { ...prev, days: reindexed };
     });
-    setActiveDayIndex((prev) => Math.min(prev, Math.max(0, trip.days.length - 2)));
-  }, [trip.days.length]);
+    const nextIdx = Math.min(activeDayIndex, Math.max(0, trip.days.length - 2));
+    setActiveDayIndex(nextIdx);
+    localStorage.setItem('copilot_active_day', String(nextIdx));
+    const url = new URL(window.location.href);
+    url.searchParams.set('day', String(nextIdx));
+    window.history.replaceState({}, '', url.toString());
+  }, [activeDayIndex, trip.days.length]);
 
   const handleSelectTrip = useCallback((newTrip: ParsedTrip) => {
     setTrip(newTrip);
+    setLastSavedTripJson(JSON.stringify(newTrip));
     setActiveDayIndex(0);
     setRoute(null);
+    const fileName = newTrip.fileName || `${newTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
+    localStorage.setItem('copilot_active_file', fileName);
+    localStorage.setItem('copilot_active_day', '0');
+    const url = new URL(window.location.href);
+    url.searchParams.set('route', fileName);
+    url.searchParams.set('day', '0');
+    window.history.replaceState({}, '', url.toString());
   }, []);
 
   const handleSaveTrip = useCallback(async () => {
@@ -433,7 +502,12 @@ export function App() {
       const serialized = serializeTripToItineraryJson(trip);
       const fileName = trip.fileName || `${trip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
       await saveItinerary(fileName, serialized);
+      setLastSavedTripJson(JSON.stringify(trip));
       setSaveSuccess(true);
+      localStorage.setItem('copilot_active_file', fileName);
+      const url = new URL(window.location.href);
+      url.searchParams.set('route', fileName);
+      window.history.replaceState({}, '', url.toString());
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Save failed';
@@ -442,6 +516,23 @@ export function App() {
       setIsSaving(false);
     }
   }, [trip]);
+
+  // Dirty state tracking (indicates unsaved changes)
+  const isDirty = useMemo(() => {
+    if (!lastSavedTripJson) return false;
+    return JSON.stringify(trip) !== lastSavedTripJson;
+  }, [trip, lastSavedTripJson]);
+
+  // Warn user before closing/refreshing tab with unsaved changes
+  useEffect(() => {
+    if (!isDirty) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
 
   return (
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950">
@@ -469,6 +560,7 @@ export function App() {
         onSaveTrip={handleSaveTrip}
         isSaving={isSaving}
         saveSuccess={saveSuccess}
+        isDirty={isDirty}
       />
 
       {/* Multi-Day Leg Switcher Bar (Visible for multi-day itineraries) */}

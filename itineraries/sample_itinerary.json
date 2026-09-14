@@ -6,7 +6,8 @@
   },
   "metadata": {
     "version": "2.0.0",
-    "description": "Scenic mountain and canyon drive from Phoenix Sky Harbor Airport to historic Flagstaff via Sedona and Oak Creek Canyon."
+    "author": "Roadtrip Co-Pilot Studio",
+    "created_at": "2026-09-13T23:31:07.109Z"
   },
   "days": [
     {
@@ -16,15 +17,16 @@
       "title": "Red Rock Entry & Oak Creek Canyon Switchbacks",
       "origin": "Phoenix Sky Harbor International Airport (PHX)",
       "destination": "Flagstaff, AZ",
-      "total_distance_miles": 140,
-      "total_drive_hours": "2.25 - 2.5",
+      "departure_time": "14:30:00",
       "checkpoints": [
         {
           "id": "phx_rental_pickup",
           "name": "PHX Rental Car Facility",
-          "target_time": "14:30:00",
+          "type": "origin",
           "lat": 33.4357,
           "lng": -112.0152,
+          "target_time": "14:30:00",
+          "dwell_minutes": 0,
           "trigger_radius_miles": 0.5,
           "notification": {
             "title": "Road Trip Begins!",
@@ -35,10 +37,12 @@
         {
           "id": "sedona_bell_rock",
           "name": "Sedona Red Rock Vistas (Bell Rock Pull-off)",
-          "target_time": "16:30:00",
-          "lat": 34.8010,
+          "type": "scenic_pull_off",
+          "lat": 34.801,
           "lng": -111.7645,
-          "trigger_radius_miles": 3.0,
+          "target_time": "16:30:00",
+          "dwell_minutes": 15,
+          "trigger_radius_miles": 3,
           "notification": {
             "title": "Approaching Sedona Red Rocks",
             "message": "Target arrival: 4:30 PM. Recommended stop for red rock vistas and photos.",
@@ -48,10 +52,12 @@
         {
           "id": "oak_creek_switchbacks",
           "name": "Oak Creek Canyon & Vista Viewpoint",
-          "target_time": "17:15:00",
+          "type": "scenic_pull_off",
           "lat": 35.0345,
-          "lng": -111.7330,
-          "trigger_radius_miles": 2.0,
+          "lng": -111.733,
+          "target_time": "17:15:00",
+          "dwell_minutes": 15,
+          "trigger_radius_miles": 2,
           "notification": {
             "title": "Oak Creek Canyon Switchbacks",
             "message": "Target 5:15 PM. Scenic climb on AZ-89A up to Oak Creek Vista overlook.",
@@ -61,10 +67,12 @@
         {
           "id": "flagstaff_arrival",
           "name": "Flagstaff Historic Downtown & Visitor Center",
-          "target_time": "18:00:00",
+          "type": "destination",
           "lat": 35.1982,
           "lng": -111.6465,
-          "trigger_radius_miles": 1.0,
+          "target_time": "18:00:00",
+          "dwell_minutes": 0,
+          "trigger_radius_miles": 1,
           "notification": {
             "title": "Arrival in Flagstaff",
             "message": "Arrived in historic Flagstaff. Explore downtown Route 66 and local dining.",

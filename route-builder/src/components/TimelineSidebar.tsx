@@ -539,10 +539,12 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           </span>
                           <button
                             onClick={() => {
-                              const currentWp = originalWp || {
-                                ...stop,
-                                target_time: stop.arrivalTime,
-                              };
+                              const currentWp = originalWp
+                                ? { ...originalWp, target_time: stop.arrivalTime }
+                                : {
+                                    ...stop,
+                                    target_time: stop.arrivalTime,
+                                  };
                               setSelectedWaypointForAi(currentWp);
                             }}
                             className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer"

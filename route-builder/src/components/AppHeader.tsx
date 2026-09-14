@@ -46,6 +46,7 @@ interface AppHeaderProps {
   onSaveTrip?: () => void;
   isSaving?: boolean;
   saveSuccess?: boolean;
+  isDirty?: boolean;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -71,6 +72,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onSaveTrip,
   isSaving = false,
   saveSuccess = false,
+  isDirty = false,
 }) => {
   const [isSchedulePopoverOpen, setIsSchedulePopoverOpen] = useState(false);
   const [isMapsDropdownOpen, setIsMapsDropdownOpen] = useState(false);
@@ -419,18 +421,29 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer disabled:opacity-50 ${
               saveSuccess
                 ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700/80'
+                : isDirty
+                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/60 shadow-sm shadow-amber-950/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/80'
             }`}
-            title="Save changes to route file on disk"
+            title={
+              isDirty
+                ? 'Unsaved changes! Click to save to route file on disk'
+                : 'All changes saved to route file on disk'
+            }
           >
             {isSaving ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
             ) : saveSuccess ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
+            ) : isDirty ? (
+              <Save className="w-3.5 h-3.5 text-amber-400" />
             ) : (
-              <Save className="w-3.5 h-3.5 text-sky-400" />
+              <Save className="w-3.5 h-3.5 text-slate-400" />
             )}
-            <span>{saveSuccess ? 'Saved!' : 'Save'}</span>
+            <span>{saveSuccess ? 'Saved!' : isDirty ? 'Save *' : 'Save'}</span>
+            {isDirty && !saveSuccess && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Unsaved changes" />
+            )}
           </button>
         )}
 

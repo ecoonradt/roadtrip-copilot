@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Bot,
@@ -26,6 +27,8 @@ interface AiAlertModalProps {
   onApply: (waypointId: string, alert: CopilotAlert) => void;
 }
 
+type ModalEngineState = AiEngineType | 'saved';
+
 export const AiAlertModal: React.FC<AiAlertModalProps> = ({
   isOpen,
   waypoint,
@@ -36,7 +39,7 @@ export const AiAlertModal: React.FC<AiAlertModalProps> = ({
   const [message, setMessage] = useState('');
   const [speech, setSpeech] = useState('');
   const [radius, setRadius] = useState<number>(2.0);
-  const [engine, setEngine] = useState<AiEngineType>('template');
+  const [engine, setEngine] = useState<ModalEngineState>('saved');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -53,7 +56,7 @@ export const AiAlertModal: React.FC<AiAlertModalProps> = ({
       setMessage(waypoint.notification.message);
       setSpeech(waypoint.notification.speech);
       setRadius(waypoint.trigger_radius_miles || 2.0);
-      setEngine('template');
+      setEngine('saved');
     } else {
       // Trigger fresh generation
       handleGenerate();
@@ -68,6 +71,18 @@ export const AiAlertModal: React.FC<AiAlertModalProps> = ({
       }
     };
   }, []);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const wordCount = useMemo(() => {
     return speech.trim().split(/\s+/).filter(Boolean).length;
@@ -151,8 +166,15 @@ export const AiAlertModal: React.FC<AiAlertModalProps> = ({
       ? 'Scenic Byway / Pull-off (Moderate Speed)'
       : 'Destination / Urban / Parking Approach';
 
-  return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+  const modalContent = (
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-5 py-3.5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
@@ -178,14 +200,22 @@ export const AiAlertModal: React.FC<AiAlertModalProps> = ({
           <div className="flex items-center gap-2">
             <span
               className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${
-                engine === 'agy'
+                engine === 'saved'
+                  ? 'bg-sky-950/80 text-sky-300 border-sky-700/60'
+                  : engine === 'agy'
                   ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
                   : engine === 'cloud'
                   ? 'bg-purple-950 text-purple-300 border-purple-700/60'
                   : 'bg-slate-800 text-slate-300 border-slate-700'
               }`}
             >
-              {engine === 'agy' ? 'agy CLI (Local)' : engine === 'cloud' ? 'Gemini API' : 'Deterministic Fallback'}
+              {engine === 'saved'
+                ? 'Saved Itinerary Alert'
+                : engine === 'agy'
+                ? 'agy CLI (Local)'
+                : engine === 'cloud'
+                ? 'Gemini API'
+                : 'Deterministic Fallback'}
             </span>
             <button
               onClick={onClose}
@@ -412,4 +442,6 @@ export const AiAlertModal: React.FC<AiAlertModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };
