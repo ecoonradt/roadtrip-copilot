@@ -44,10 +44,19 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
     contextBlock += `\nACTIVE SCOPE: Waypoint Audit & Refinement\n`;
     if (focused) {
       contextBlock += `FOCUSED WAYPOINT DETAILS:\n`;
+      if (tripContext.focusedWaypointIndex && tripContext.totalWaypoints) {
+        contextBlock += `- Route Position: Stop ${tripContext.focusedWaypointIndex} of ${tripContext.totalWaypoints} on today's route\n`;
+      }
       contextBlock += `- ID: ${focused.id}\n`;
       contextBlock += `- Name: ${focused.name}\n`;
       contextBlock += `- Category Type: ${focused.type}\n`;
       contextBlock += `- GPS Coordinates: ${focused.lat.toFixed(6)}, ${focused.lng.toFixed(6)}\n`;
+      if (tripContext.precedingWaypoint) {
+        contextBlock += `- Preceding Stop: "${tripContext.precedingWaypoint.name}"${tripContext.precedingWaypoint.distanceMiles !== undefined ? ` (~${tripContext.precedingWaypoint.distanceMiles} mi earlier)` : ''}\n`;
+      }
+      if (tripContext.followingWaypoint) {
+        contextBlock += `- Following Stop: "${tripContext.followingWaypoint.name}"${tripContext.followingWaypoint.distanceMiles !== undefined ? ` (~${tripContext.followingWaypoint.distanceMiles} mi ahead)` : ''}\n`;
+      }
       if (focused.target_time) contextBlock += `- Scheduled Target Time: ${focused.target_time}\n`;
       if (focused.dwell_minutes !== undefined) contextBlock += `- Planned Dwell Duration: ${focused.dwell_minutes} minutes\n`;
       if (focused.trigger_radius_miles) contextBlock += `- Heads-Up Alert Radius: ${focused.trigger_radius_miles} miles\n`;
@@ -100,13 +109,23 @@ GUIDELINES:
 7. FUEL STOPS MUST BE VERIFIED COMMERCIAL SERVICE STATIONS:
    - A fuel stop must be an established, recognizable commercial brand (e.g. Maverik, Love's, Pilot, Flying J, Chevron, Shell, Speedway) with many fuel pumps, clean restrooms, and traveler amenities, located directly at a highway exit or on the main route.
    - NEVER suggest or accept coordinates in residential neighborhoods, trailer parks, or private roads. Always use the actual street address and verified coordinates of the commercial facility.
-8. WAYPOINTS MUST BE GOOGLE MAPS COMPATIBLE LOCATIONS:
-   - Waypoints should be real, recognizable places (venues, official scenic overlooks, or highway mileposts that Google Maps can navigate to without breaking the route).
-   - If coordinates are specified, they must be verified so that routing stays clean, continuous, and on-highway.
-9. ROUTE AUDITING & REPAIR:
+8. LOCATION TYPES (PHYSICAL STOPS VS IN-TRANSIT SCENIC TRIGGERS):
+   - PHYSICAL STOPS (dwell > 0: meal, fuel, lodging, scenic pull-off with parking):
+     * Must be authentic, recognizable commercial facilities, official state/national park overlooks, or established visitor pull-offs with real addresses, entrances, and parking.
+     * Always verify authentic coordinates so the driver is routed to the genuine parking lot or service station.
+   - IN-TRANSIT SCENIC NOTIFICATION TRIGGERS (dwell == 0, scenic_drive_by):
+     * These exist purely as in-car audio commentary and heads-up alert triggers on the highway. They are NOT destinations and do NOT require a commercial venue, visitor center, or formal cadastral land boundary.
+     * If an official named scenic overlook or roadside turnout exists along the highway corridor, use it.
+     * If the trigger marks a broad landscape transition (e.g. climbing into pine country, entering mountain foothills, or viewing a distant mesa), any high-confidence coordinate directly on the highway centerline where the scenic transition begins is 100% valid and desired.
+     * Never perform cadastral land surveys, tribal boundary polygon calculations, or search for missing entrance signs for an in-transit scenic cue.
+9. SCENIC DRIVE-BY PLACEMENT & DECOUPLING TITLES FROM SCENIC INTENT:
+   - TIMING & PLACEMENT: In-transit scenic announcements must fire *at or before the beginning of the scenic transition* (e.g. where the highway begins its climb into the foothills or pines, or as a vista first comes into view), rather than near the end of the leg where the scenery is already behind the driver.
+   - DECOUPLING TITLES FROM INTENT: Waypoint titles in draft itineraries often carry nearby town names (e.g. "Jicarilla Apache Nation / Dulce") or legacy labels. Do not over-index on the title or assume the question is a forensic audit of the town's location. Focus on the experiential intent expressed in the driver's question, alert title, and spoken audio (e.g. "Climbing into Pine Country").
+   - SYNCHRONIZE TITLE & AUDIO UPON RELOCATION: When relocating a scenic trigger earlier/westward along the corridor (e.g. moving from Dulce west to the Carson NF / Gobernador foothills where the highway ascent begins), enthusiastically update the waypoint title (e.g. "Climbing into Pine Country (US-64)") and refresh the spoken audio to match the new location.
+10. ROUTE AUDITING & REPAIR:
    - When the driver asks to audit the route or fix coordinates (e.g. "some waypoints take me off the highway", "the fuel stop is in a trailer park", or "fix drive-by points"), inspect all waypoints on the active day or focused stop.
    - Identify which waypoints depart from the highway or point to wrong locations, explain the error clearly to the driver, and emit concrete "update_waypoint" suggestion cards with the exact, verified highway coordinates and corrected names/dwells so the driver can apply the fixes with 1 click.
-10. SYNCHRONIZE WAYPOINT ID, HEADS-UP NOTIFICATION & VOICE ALERT COPY:
+11. SYNCHRONIZE WAYPOINT ID, HEADS-UP NOTIFICATION & VOICE ALERT COPY:
    - When suggesting an "update_waypoint" or "add_waypoint", ALWAYS include an updated "notification" object containing:
      * "title": Short heads-up card title (<= 30 chars), formatted concisely (e.g. "Red Rock Park Picnic").
      * "message": In-car heads-up text (<= 2 lines), describing the upcoming stop, target time, and immediate highway direction.
@@ -381,7 +400,48 @@ export function generateTemplateScoutResponse(request: ScoutChatRequest): { repl
       }
     }
 
-    // 3. Highway alignment / coordinate audit for drive-by waypoints
+    // 3. Scenic repositioning / timing audit for in-transit triggers (e.g. westward scenery adjustment)
+    if (
+      lastMessage.includes('farther west') ||
+      lastMessage.includes('further west') ||
+      lastMessage.includes('west') ||
+      lastMessage.includes('scenery') ||
+      lastMessage.includes('passed') ||
+      lastMessage.includes('earlier')
+    ) {
+      if (
+        focused?.id === 'dulce_foothills' ||
+        focused?.name.toLowerCase().includes('dulce') ||
+        focused?.notification?.title.toLowerCase().includes('pine') ||
+        lastMessage.includes('pine') ||
+        lastMessage.includes('dulce')
+      ) {
+        return {
+          reply: `### Scenic Trigger Repositioning: ${name}\n\nYou are spot on. By the time you reach Dulce, you are already through the primary ascent out of the San Juan Basin and only about 25 miles from Chama—meaning most of the dramatic elevation gain and pine forest transition has already passed.\n\nBecause an **in-transit scenic drive-by trigger** is meant to alert you as the landscape transforms, shifting this point ~28 miles west along US-64 places the trigger near the Carson National Forest / Gobernador transition zone (\`36.7625, -107.2018\`). This fires the audio alert right as the highway begins its steady climb into the ponderosa pines and foothills.\n\nI have prepared an update card below to reposition the trigger to the US-64 highway corridor, synchronize the title to **Climbing into Pine Country (US-64)**, and update the spoken audio for the ascent.`,
+          suggestions: [
+            {
+              id: `scout_fallback_dulce_reposition_${Date.now()}`,
+              action: 'update_waypoint',
+              targetWaypointId: focused?.id || 'dulce_foothills',
+              name: 'Climbing into Pine Country (US-64)',
+              type: 'scenic_drive_by',
+              lat: 36.7625,
+              lng: -107.2018,
+              dwell_minutes: 0,
+              trigger_radius_miles: 3.0,
+              reason: 'Relocated ~28 miles west on US-64 to fire audio commentary at the start of the pine foothills ascent rather than near the end of the corridor.',
+              notification: {
+                title: 'Climbing into Pine Country',
+                message: 'US-64 climbing into Carson National Forest foothills toward Chama.',
+                speech: 'Climbing east along US-64 into the Carson National Forest foothills. Watch for the transition into ponderosa pines and early autumn color as we gain elevation.',
+              },
+            },
+          ],
+        };
+      }
+    }
+
+    // 4. Highway alignment / coordinate audit for drive-by waypoints
     if (
       lastMessage.includes('coord') ||
       lastMessage.includes('wrong') ||

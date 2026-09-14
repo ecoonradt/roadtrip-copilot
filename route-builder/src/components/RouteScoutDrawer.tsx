@@ -387,6 +387,20 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     };
   }, [scope.type, scope.waypointName]);
 
+  // Reconcile scope if focused waypoint does not exist in active day waypoints
+  useEffect(() => {
+    if (scope.type === 'waypoint' && waypoints.length > 0) {
+      const exists = waypoints.some((w) => w.id === scope.waypointId);
+      if (!exists) {
+        onChangeScope({
+          type: 'day',
+          dayNumber: activeDay.dayNumber,
+          dayTitle: activeDay.title,
+        });
+      }
+    }
+  }, [waypoints, scope.type, scope.waypointId, activeDay.dayNumber, activeDay.title, onChangeScope]);
+
   // Auto-scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -481,9 +495,61 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     setIsLoading(true);
 
     try {
-      const focusedWp =
+      const calcDistanceMiles = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 3958.8; // miles
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return Number((R * c).toFixed(1));
+      };
+
+      const focusedWpIndex =
         scope.type === 'waypoint'
-          ? waypoints.find((w) => w.id === scope.waypointId)
+          ? waypoints.findIndex((w) => w.id === scope.waypointId)
+          : -1;
+      const focusedWp = focusedWpIndex >= 0 ? waypoints[focusedWpIndex] : undefined;
+
+      const precedingWp =
+        focusedWpIndex > 0 ? waypoints[focusedWpIndex - 1] : undefined;
+      const followingWp =
+        focusedWpIndex >= 0 && focusedWpIndex < waypoints.length - 1
+          ? waypoints[focusedWpIndex + 1]
+          : undefined;
+
+      const precedingRef =
+        precedingWp && focusedWp
+          ? {
+              id: precedingWp.id,
+              name: precedingWp.name,
+              type: precedingWp.type,
+              distanceMiles: calcDistanceMiles(
+                precedingWp.lat,
+                precedingWp.lng,
+                focusedWp.lat,
+                focusedWp.lng
+              ),
+            }
+          : undefined;
+
+      const followingRef =
+        followingWp && focusedWp
+          ? {
+              id: followingWp.id,
+              name: followingWp.name,
+              type: followingWp.type,
+              distanceMiles: calcDistanceMiles(
+                focusedWp.lat,
+                focusedWp.lng,
+                followingWp.lat,
+                followingWp.lng
+              ),
+            }
           : undefined;
 
       const tripContext: ScoutTripContext = {
@@ -522,6 +588,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               notification: focusedWp.notification,
             }
           : undefined,
+        focusedWaypointIndex: focusedWpIndex >= 0 ? focusedWpIndex + 1 : undefined,
+        totalWaypoints: waypoints.length,
+        precedingWaypoint: precedingRef,
+        followingWaypoint: followingRef,
       };
 
       const request: ScoutChatRequest = {

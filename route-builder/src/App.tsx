@@ -204,7 +204,7 @@ export function App() {
   const baseDate = currentDay.date;
   const departureTime = currentDay.departureTime || '09:00:00';
 
-  // Sync day number and title into Scout scope if currently on day scope
+  // Sync day number and title into Scout scope, or reset to day scope if focused waypoint does not exist on active day
   useEffect(() => {
     if (scoutScope.type === 'day') {
       setScoutScope((prev) => ({
@@ -212,8 +212,19 @@ export function App() {
         dayNumber: currentDay.dayNumber,
         dayTitle: currentDay.title,
       }));
+    } else if (scoutScope.type === 'waypoint') {
+      const waypointExists = (currentDay.waypoints || []).some(
+        (w) => w.id === scoutScope.waypointId
+      );
+      if (!waypointExists) {
+        setScoutScope({
+          type: 'day',
+          dayNumber: currentDay.dayNumber,
+          dayTitle: currentDay.title,
+        });
+      }
     }
-  }, [currentDay.dayNumber, currentDay.title, scoutScope.type]);
+  }, [currentDay.dayNumber, currentDay.title, currentDay.waypoints, scoutScope.type, scoutScope.waypointId]);
 
   const coordKey = waypoints.map((w) => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join(';');
 
@@ -442,8 +453,23 @@ export function App() {
   }, []);
 
   const handleToggleScout = useCallback(() => {
-    setIsScoutOpen((prev) => !prev);
-  }, []);
+    setIsScoutOpen((prev) => {
+      const willOpen = !prev;
+      if (willOpen && scoutScope.type === 'waypoint') {
+        const waypointExists = (currentDay.waypoints || []).some(
+          (w) => w.id === scoutScope.waypointId
+        );
+        if (!waypointExists) {
+          setScoutScope({
+            type: 'day',
+            dayNumber: currentDay.dayNumber,
+            dayTitle: currentDay.title,
+          });
+        }
+      }
+      return willOpen;
+    });
+  }, [currentDay.dayNumber, currentDay.title, currentDay.waypoints, scoutScope.type, scoutScope.waypointId]);
 
   const handleAddWaypointFromScout = useCallback(
     (suggestion: ScoutSuggestion) => {
@@ -526,6 +552,17 @@ export function App() {
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
     setActiveDayIndex(index);
+    setTrip((currentTrip) => {
+      const targetDay = currentTrip.days[index];
+      if (targetDay) {
+        setScoutScope({
+          type: 'day',
+          dayNumber: targetDay.dayNumber,
+          dayTitle: targetDay.title,
+        });
+      }
+      return currentTrip;
+    });
     localStorage.setItem('copilot_active_day', String(index));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(index));
@@ -722,6 +759,7 @@ export function App() {
             onOpenScoutForWaypoint={handleOpenScoutForWaypoint}
             scoutPreviewPin={scoutPreviewPin}
             onClearScoutPreviewPin={() => setScoutPreviewPin(null)}
+            isScoutOpen={isScoutOpen}
           />
         </main>
 

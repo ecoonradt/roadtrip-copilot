@@ -27,6 +27,7 @@ export interface MapCanvasProps {
   onOpenScoutForWaypoint?: (waypoint: Waypoint) => void;
   scoutPreviewPin?: ScoutPreviewPin | null;
   onClearScoutPreviewPin?: () => void;
+  isScoutOpen?: boolean;
 }
 
 // Custom DivIcon generator with sequence number and type color
@@ -64,15 +65,49 @@ const ScoutPreviewFlyTo: React.FC<{
   return null;
 };
 
+// Map container resize listener ensuring Leaflet dimensions synchronize dynamically
+const MapResizeHandler: React.FC<{ isScoutOpen?: boolean }> = ({ isScoutOpen }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    if (!container) return;
+
+    const ro = new ResizeObserver(() => {
+      map.invalidateSize({ pan: false });
+    });
+    ro.observe(container);
+
+    return () => {
+      ro.disconnect();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    // Invalidate size immediately and after layout settles when Route Scout opens or closes
+    map.invalidateSize({ pan: false });
+    const timer = setTimeout(() => {
+      map.invalidateSize({ pan: false });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [map, isScoutOpen]);
+
+  return null;
+};
+
 // Auto-adjust map viewport to contain all waypoints and route path
 const MapViewportManager: React.FC<{
   waypoints: Waypoint[];
   routeCoordinates: [number, number][];
-}> = ({ waypoints, routeCoordinates }) => {
+  isScoutOpen?: boolean;
+}> = ({ waypoints, routeCoordinates, isScoutOpen }) => {
   const map = useMap();
 
   useEffect(() => {
     if (waypoints.length === 0) return;
+
+    // Ensure Leaflet has up-to-date viewport dimensions before fitting bounds
+    map.invalidateSize({ pan: false });
 
     if (routeCoordinates.length > 0) {
       const bounds = L.latLngBounds(routeCoordinates);
@@ -81,7 +116,7 @@ const MapViewportManager: React.FC<{
       const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
     }
-  }, [map, waypoints, routeCoordinates]);
+  }, [map, waypoints, routeCoordinates, isScoutOpen]);
 
   return null;
 };
@@ -109,6 +144,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   onOpenScoutForWaypoint,
   scoutPreviewPin,
   onClearScoutPreviewPin,
+  isScoutOpen,
 }) => {
   // Convert GeoJSON [lon, lat] pairs to Leaflet [lat, lon]
   const polylineCoords = useMemo<[number, number][]>(() => {
@@ -155,7 +191,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           maxZoom={19}
         />
 
-        <MapViewportManager waypoints={waypoints} routeCoordinates={polylineCoords} />
+        <MapResizeHandler isScoutOpen={isScoutOpen} />
+        <MapViewportManager
+          waypoints={waypoints}
+          routeCoordinates={polylineCoords}
+          isScoutOpen={isScoutOpen}
+        />
         <MapClickHandler onMapClick={onMapClick} />
         <ScoutPreviewFlyTo previewPin={scoutPreviewPin} />
 

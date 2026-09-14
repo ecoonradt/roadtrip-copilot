@@ -83,7 +83,7 @@ describe('Route Scout Service & Prompts', () => {
       expect(domainPrompt).not.toContain('without invoking any tools');
     });
 
-    it('domain prompt explicitly specifies highway alignment and commercial fuel stop guidelines', () => {
+    it('domain prompt explicitly specifies highway alignment, commercial fuel stops, and scenic trigger guidelines', () => {
       const scope: ScoutScope = {
         type: 'day',
         dayNumber: 2,
@@ -99,7 +99,8 @@ describe('Route Scout Service & Prompts', () => {
       expect(domainPrompt).toContain('highway centerline');
       expect(domainPrompt).toContain('FUEL STOPS MUST BE VERIFIED COMMERCIAL SERVICE STATIONS');
       expect(domainPrompt).toContain('NEVER suggest or accept coordinates in residential neighborhoods, trailer parks');
-      expect(domainPrompt).toContain('WAYPOINTS MUST BE GOOGLE MAPS COMPATIBLE LOCATIONS');
+      expect(domainPrompt).toContain('LOCATION TYPES (PHYSICAL STOPS VS IN-TRANSIT SCENIC TRIGGERS)');
+      expect(domainPrompt).toContain('SCENIC DRIVE-BY PLACEMENT & DECOUPLING TITLES FROM SCENIC INTENT');
       expect(domainPrompt).toContain('ROUTE AUDITING & REPAIR');
       expect(domainPrompt).toContain('SYNCHRONIZE WAYPOINT ID, HEADS-UP NOTIFICATION & VOICE ALERT COPY');
       expect(domainPrompt).toContain('newId');
@@ -166,6 +167,30 @@ describe('Route Scout Service & Prompts', () => {
       expect(prompt).toContain('36.687200, -108.687500');
       expect(prompt).toContain('View from highway only (sacred tribal land)');
       expect(prompt).toContain('Is this pin on the paved highway or on dirt?');
+    });
+
+    it('builds focused Waypoint Scope prompt with enriched corridor telemetry and stop order', () => {
+      const scope: ScoutScope = {
+        type: 'waypoint',
+        waypointId: 'wp_shiprock',
+      };
+      const enrichedTripContext: ScoutTripContext = {
+        ...sampleTripContext,
+        focusedWaypointIndex: 2,
+        totalWaypoints: 3,
+        precedingWaypoint: { id: 'wp_depart', name: 'Little America Hotel Flagstaff', distanceMiles: 195.2 },
+        followingWaypoint: { id: 'wp_arrive', name: 'Vista Del Rio Lodge Chama', distanceMiles: 142.8 },
+      };
+      const request: ScoutChatRequest = {
+        scope,
+        messages: [{ role: 'user', content: 'Where along the highway should this be positioned?' }],
+        tripContext: enrichedTripContext,
+      };
+
+      const prompt = buildScoutPrompt(request);
+      expect(prompt).toContain('Route Position: Stop 2 of 3 on today\'s route');
+      expect(prompt).toContain('Preceding Stop: "Little America Hotel Flagstaff" (~195.2 mi earlier)');
+      expect(prompt).toContain('Following Stop: "Vista Del Rio Lodge Chama" (~142.8 mi ahead)');
     });
   });
 
@@ -519,6 +544,44 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(result.suggestions[0].lat).toBe(36.7328);
       expect(result.suggestions[0].lng).toBe(-108.2443);
       expect(result.suggestions[0].notification?.title).toBe('Maverik Fuel & Food Stop');
+    });
+
+    it('provides scenic trigger repositioning fallback when driver asks if drive-by should be farther west', () => {
+      const dulceWaypoint = {
+        id: 'dulce_foothills',
+        name: 'Jicarilla Apache Nation / Dulce',
+        type: 'scenic_drive_by',
+        lat: 36.9335,
+        lng: -106.9919,
+        dwell_minutes: 0,
+        notification: {
+          title: 'Climbing into Pine Country',
+          message: 'Target 3:30 PM. Watch for autumn foliage.',
+          speech: 'Climbing through the Jicarilla Apache Nation on US-64. Watch for early autumn aspen color as we enter the foothills.',
+        },
+      };
+      const request: ScoutChatRequest = {
+        scope: { type: 'waypoint', waypointId: dulceWaypoint.id, waypointName: dulceWaypoint.name },
+        messages: [{ role: 'user', content: "Is this accurate? It's pretty close to my final destination for the day and it looks most of scenery will have already passed by this point. Perhaps this should be a little farther west?" }],
+        tripContext: {
+          tripName: 'Test Trip',
+          waypoints: [dulceWaypoint],
+          focusedWaypoint: dulceWaypoint,
+        },
+      };
+
+      const result = generateTemplateScoutResponse(request);
+      expect(result.reply).toContain('Scenic Trigger Repositioning');
+      expect(result.reply).toContain('~28 miles west');
+      expect(result.suggestions).toHaveLength(1);
+      expect(result.suggestions[0].action).toBe('update_waypoint');
+      expect(result.suggestions[0].name).toBe('Climbing into Pine Country (US-64)');
+      expect(result.suggestions[0].type).toBe('scenic_drive_by');
+      expect(result.suggestions[0].lat).toBe(36.7625);
+      expect(result.suggestions[0].lng).toBe(-107.2018);
+      expect(result.suggestions[0].dwell_minutes).toBe(0);
+      expect(result.suggestions[0].notification?.title).toBe('Climbing into Pine Country');
+      expect(result.suggestions[0].notification?.speech).toContain('Carson National Forest');
     });
 
     it('returns quick prompts appropriate to the scope', () => {

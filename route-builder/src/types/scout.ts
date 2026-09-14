@@ -25,6 +25,13 @@ export interface ScoutWaypointSummary {
   };
 }
 
+export interface ScoutWaypointRef {
+  id: string;
+  name: string;
+  type?: string;
+  distanceMiles?: number;
+}
+
 export interface ScoutTripContext {
   tripName: string;
   date?: string;
@@ -34,6 +41,10 @@ export interface ScoutTripContext {
   corridor?: string;
   waypoints: ScoutWaypointSummary[];
   focusedWaypoint?: ScoutWaypointSummary;
+  focusedWaypointIndex?: number;
+  totalWaypoints?: number;
+  precedingWaypoint?: ScoutWaypointRef;
+  followingWaypoint?: ScoutWaypointRef;
 }
 
 export interface ScoutSuggestion {
