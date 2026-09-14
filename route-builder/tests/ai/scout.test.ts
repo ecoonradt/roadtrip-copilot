@@ -5,6 +5,7 @@ import {
   generateTemplateScoutResponse,
   getQuickPrompts,
   ScoutService,
+  sanitizeScoutReply,
 } from '../../server/services/scoutService.js';
 import { createApp } from '../../server/app.js';
 import type { ScoutChatRequest, ScoutScope, ScoutTripContext } from '../../server/types/scout.js';
@@ -203,11 +204,39 @@ Upon inspecting the coordinates, the current pin is on the Interstate shoulder. 
       expect(suggestions[1].name).toBe('Twin Arrows Diner');
     });
 
+    it('strips harness noise like "Wait for the background task to complete" and trailing meta-commentary', () => {
+      const dirtyOutput = `Wait for the background task to complete. That makes total sense. Since you will be topped off leaving Flagstaff, skipping a generic commercial fuel stop in central Gallup keeps you out of unnecessary traffic.
+
+My top recommendation is Red Rock Park, situated just about 6 miles east of Gallup.
+
+I have framed this as a candidate update below to convert your focused Gallup fuel waypoint into a 35-minute scenic lunch and restroom stop.`;
+
+      const cleaned = sanitizeScoutReply(dirtyOutput);
+      expect(cleaned).not.toContain('Wait for the background task to complete');
+      expect(cleaned).not.toContain('I have framed this as a candidate update below');
+      expect(cleaned).toContain('That makes total sense.');
+      expect(cleaned).toContain('Red Rock Park');
+    });
+
     it('gracefully returns clean prose when no suggestions block is present', () => {
       const rawOutput = 'The timing on this leg looks fantastic! 7:30 AM departure gives you plenty of daylight.';
       const { reply, suggestions } = parseScoutResponse(rawOutput);
       expect(reply).toBe(rawOutput);
       expect(suggestions).toEqual([]);
+    });
+
+    it('chat throws friendly error when engine fails rather than returning silent template', async () => {
+      const scout = new ScoutService();
+      await expect(
+        scout.chat(
+          {
+            scope: { type: 'day', dayNumber: 2 },
+            messages: [{ role: 'user', content: 'hello' }],
+            tripContext: sampleTripContext,
+          },
+          { preferredEngine: 'cloud', apiKey: 'invalid-key' }
+        )
+      ).rejects.toThrow(/Route Scout/);
     });
   });
 

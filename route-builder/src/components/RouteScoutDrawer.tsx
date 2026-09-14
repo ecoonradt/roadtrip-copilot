@@ -58,15 +58,24 @@ function getScopeKey(scope: ScoutScope, activeDayIndex: number): string {
 
 function cleanStreamingText(raw: string): { content: string; thought?: string } {
   const withoutJson = raw.replace(/```(?:json:suggestions|json)?[\s\S]*?(?:```|$)/i, '').trim();
+
+  // Strip leading harness messages (e.g. "Wait for the background task to complete.")
+  const leadingHarnessRegex = /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi;
+  const strippedLeading = withoutJson.replace(leadingHarnessRegex, '').trim();
+
+  // Strip trailing meta-commentary about JSON / candidate cards below
+  const trailingHarnessRegex = /\n+(?:I have (?:framed|attached|included|provided|appended|added) this as a candidate (?:update|stop|suggestion)[^\n]*|I have (?:appended|included|generated|provided) the (?:JSON|structured|candidate)[^\n]*|See the candidate (?:card|update|suggestion) below[^\n]*)\.?\s*$/gi;
+  const stripped = strippedLeading.replace(trailingHarnessRegex, '').trim();
+
   const multiLineRegex = /^((?:I (?:have launched|am checking|am inspecting|will analyze|will inspect|will check|have initiated|need to inspect)[^\n]+(?:\n+|$))+)\n*([\s\S]*)$/i;
-  const match = withoutJson.match(multiLineRegex);
+  const match = stripped.match(multiLineRegex);
   if (match && match[1] && match[2] && match[2].trim().length > 0) {
     return {
       thought: match[1].trim(),
       content: match[2].trim(),
     };
   }
-  return { content: withoutJson };
+  return { content: stripped };
 }
 
 // Markdown formatter for assistant responses powered by react-markdown + remark-gfm

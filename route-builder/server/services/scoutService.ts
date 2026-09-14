@@ -70,16 +70,24 @@ export function buildScoutPrompt(request: ScoutChatRequest): string {
     conversationHistory = `\nCONVERSATION HISTORY:\n`;
     messages.forEach((msg) => {
       const sender = msg.role === 'user' ? 'User' : 'Route Scout';
-      conversationHistory += `${sender}: ${msg.content}\n\n`;
+      const cleanContent = msg.role === 'assistant' ? sanitizeScoutReply(msg.content) : msg.content;
+      conversationHistory += `${sender}: ${cleanContent}\n\n`;
     });
   }
 
-  return `You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
-Your mission is to help the driver audit waypoints, discover scenic overlooks, find vetted meal and fuel stops along highway corridors, and verify route logistics.
+  return `CRITICAL OPERATIONAL INSTRUCTIONS:
+1. You are Route Scout, an expert scenic road-trip co-pilot and navigator embedded in the Roadtrip Co-Pilot Route Builder studio.
+2. DO NOT invoke any tools, search tools, terminal commands, python scripts, subagents, or background tasks. Use ONLY your internal knowledge to formulate your answer immediately.
+3. Speak directly, naturally, and warmly to the driver like a knowledgeable passenger sitting in the vehicle.
+4. NEVER include meta-commentary about system tools, agent harnesses, or background tasks (e.g. NEVER say "Wait for the background task to complete" or "Querying coordinates").
+5. NEVER narrate UI mechanics or JSON blocks in your prose (e.g. do not say "I have framed this as a candidate update below", "I have attached the JSON below", or "See the card below"). Simply explain your recommendation naturally; the application UI will automatically render interactive visual cards from your json block.
+
+MISSION & ROLE:
+Help the driver audit waypoints, discover scenic overlooks, find vetted meal and fuel stops along highway corridors, and verify route logistics.
 
 GUIDELINES:
 1. Provide practical, driver-oriented advice: parking accessibility (e.g. pull-offs vs steep lots), paved vs dirt roads, scenic value, pacing, daylight/golden hour timing, and local tips.
-2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Present recommendations as candidate suggestions.
+2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Suggest ideas naturally without meta-commentary like "I have created a candidate card below".
 3. Keep responses conversational, concise, and helpful (typically 2-4 focused paragraphs).
 4. When you recommend adding new stops or updating an existing waypoint's coordinates/dwell, append an exact structured JSON block at the very end using the format below. You are ABLE to emit multiple suggestion cards in the array when genuinely appropriate (for instance, if an audit warrants updating the current stop to a drive-by AND adding a specific recommended viewpoint/pull-off). However, do not force or spam multiple cards when a single targeted recommendation or simple reassurance is sufficient.
 5. If no waypoint actions are needed (e.g. general questions or reassurance), do not include the json:suggestions block.
@@ -116,34 +124,54 @@ Allowed types: "origin", "destination", "scenic_pull_off", "scenic_drive_by", "m
 
 ${contextBlock}
 ${conversationHistory}
-Please respond to the latest User request.`;
+Please respond to the latest User request directly and conversationally without invoking any tools.`;
+}
+
+/**
+ * Cleans internal agent harness noise, background task text, and meta-commentary from Route Scout responses.
+ */
+export function sanitizeScoutReply(text: string): string {
+  if (!text) return '';
+  let cleaned = text.trim();
+
+  // 1. Strip leading harness noise (e.g. "Wait for the background task to complete.", "Waiting for task...")
+  const leadingHarnessRegex = /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi;
+  cleaned = cleaned.replace(leadingHarnessRegex, '').trim();
+
+  // 2. Strip trailing meta-commentary where the model narrates cards or JSON to the harness
+  const trailingHarnessRegex = /\n+(?:I have (?:framed|attached|included|provided|appended|added) this as a candidate (?:update|stop|suggestion)[^\n]*|I have (?:appended|included|generated|provided) the (?:JSON|structured|candidate)[^\n]*|See the candidate (?:card|update|suggestion) below[^\n]*)\.?\s*$/gi;
+  cleaned = cleaned.replace(trailingHarnessRegex, '').trim();
+
+  return cleaned;
 }
 
 /**
  * Separates intermediate tool-calling or reasoning preambles from the final answer.
  */
 export function separateThoughtAndReply(text: string): { thought?: string; reply: string } {
+  const sanitized = sanitizeScoutReply(text);
+
   // Matches agent preambles (e.g. "I have launched a query...", "I will analyze...") before markdown heading or main body
   const multiLineRegex = /^((?:I (?:have launched|am checking|am inspecting|will analyze|will inspect|will check|have initiated|need to inspect)[^\n]+(?:\n+|$))+)\n*([\s\S]*)$/i;
-  const match = text.match(multiLineRegex);
+  const match = sanitized.match(multiLineRegex);
   if (match && match[1] && match[2] && match[2].trim().length > 0) {
     return {
       thought: match[1].trim(),
-      reply: match[2].trim(),
+      reply: sanitizeScoutReply(match[2]),
     };
   }
 
   const singlePreambleRegex = /^(?:I have launched a query[^.\n]*\.[^.\n]*\.\s*|I will analyze the results as soon as they return\.\s*|Let me inspect[^.\n]*\.\s*)/i;
-  const singleMatch = text.match(singlePreambleRegex);
+  const singleMatch = sanitized.match(singlePreambleRegex);
   if (singleMatch && singleMatch[0]) {
     const thought = singleMatch[0].trim();
-    const reply = text.slice(singleMatch[0].length).trim();
+    const reply = sanitizeScoutReply(sanitized.slice(singleMatch[0].length));
     if (reply.length > 0) {
       return { thought, reply };
     }
   }
 
-  return { reply: text };
+  return { reply: sanitized };
 }
 
 /**
@@ -314,6 +342,7 @@ export class ScoutService {
     }
 
     const prompt = buildScoutPrompt(request);
+    let lastError: string | null = null;
 
     // 1. Try Primary: agy adapter
     if (preferredEngine !== 'cloud') {
@@ -325,7 +354,8 @@ export class ScoutService {
           return { reply, suggestions, sessionId, engine: 'agy', thought };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[RouteScout] agy adapter generation failed (${msg}), attempting cloud/template fallback...`);
+          lastError = msg;
+          console.warn(`[RouteScout] agy adapter generation failed (${msg}), attempting cloud fallback...`);
         }
       }
     }
@@ -342,13 +372,16 @@ export class ScoutService {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[RouteScout] cloud adapter generation failed (${msg}), falling back to template...`);
+        lastError = msg;
+        console.warn(`[RouteScout] cloud adapter generation failed (${msg})`);
       }
     }
 
-    // 3. Fallback: Deterministic Template
-    const { reply, suggestions } = generateTemplateScoutResponse(request);
-    return { reply, suggestions, sessionId, engine: 'template' };
+    throw new Error(
+      lastError?.includes('timed out')
+        ? 'Route Scout timed out while analyzing your request. Please click Retry.'
+        : `Route Scout error: ${lastError || 'unable to connect to an AI model. Please verify your local agy CLI or AI Studio API key.'}`
+    );
   }
 
   /**
@@ -374,6 +407,7 @@ export class ScoutService {
     }
 
     const prompt = buildScoutPrompt(request);
+    let lastError: string | null = null;
 
     // 1. Try Primary: agy adapter streaming
     if (preferredEngine !== 'cloud') {
@@ -397,19 +431,40 @@ export class ScoutService {
           return doneResponse;
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[RouteScout] agy adapter streaming failed (${msg}), falling back to non-stream chat...`);
+          lastError = msg;
+          console.warn(`[RouteScout] agy adapter streaming failed (${msg})`);
         }
       }
     }
 
-    // Fallback to standard chat()
-    const nonStreamResponse = await this.chat(request, options);
-    onEvent({ event: 'delta', data: { text: nonStreamResponse.reply } });
-    if (nonStreamResponse.suggestions.length > 0) {
-      onEvent({ event: 'suggestions', data: { suggestions: nonStreamResponse.suggestions } });
+    // 2. Try Cloud Gemini API
+    const cloud = this.aiService.getAdapter('cloud');
+    const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+    if (cloud && apiKey) {
+      try {
+        const rawOutput = await cloud.generate(prompt, apiKey);
+        const { reply, suggestions, thought } = parseScoutResponse(rawOutput);
+        onEvent({ event: 'delta', data: { text: reply } });
+        if (suggestions.length > 0) {
+          onEvent({ event: 'suggestions', data: { suggestions } });
+        }
+        const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'cloud', thought };
+        onEvent({ event: 'done', data: doneResponse });
+        return doneResponse;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastError = msg;
+        console.warn(`[RouteScout] cloud adapter fallback failed (${msg})`);
+      }
     }
-    onEvent({ event: 'done', data: nonStreamResponse });
-    return nonStreamResponse;
+
+    // Friendly error handling
+    const friendlyError = lastError?.includes('timed out')
+      ? 'Route Scout timed out while analyzing your request. Please click Retry.'
+      : `Route Scout error: ${lastError || 'unable to generate a response. Please retry.'}`;
+
+    onEvent({ event: 'error', data: { error: friendlyError } });
+    throw new Error(friendlyError);
   }
 
   /**

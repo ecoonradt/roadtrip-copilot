@@ -145,22 +145,50 @@ export async function defaultStreamExecAgy(
     });
 
     let fullResponse = '';
+    let accumulatedDelta = '';
     let isDone = false;
     const rl = readline.createInterface({ input: child.stdout });
 
-    const timer = setTimeout(() => {
+    let inactivityTimer: NodeJS.Timeout | null = null;
+    const INACTIVITY_MS = 35000;
+    const MAX_TOTAL_MS = 120000;
+
+    const cleanup = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      clearTimeout(maxTimer);
+    };
+
+    const resetInactivityTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
       if (!isDone) {
-        child.kill();
-        reject(new Error('agy stream execution timed out after 90s'));
+        inactivityTimer = setTimeout(() => {
+          if (!isDone) {
+            cleanup();
+            child.kill();
+            reject(new Error('Route Scout stream timed out (no data from AI model for 35s)'));
+          }
+        }, INACTIVITY_MS);
       }
-    }, 90000);
+    };
+
+    const maxTimer = setTimeout(() => {
+      if (!isDone) {
+        cleanup();
+        child.kill();
+        reject(new Error('Route Scout stream execution timed out after 120s'));
+      }
+    }, MAX_TOTAL_MS);
+
+    resetInactivityTimer();
 
     rl.on('line', (line) => {
+      resetInactivityTimer();
       try {
         const data = JSON.parse(line.trim());
         if (data.event === 'step_update' && data.step_update) {
           const su = data.step_update;
           if (su.step_type === 'agent_response' && su.text_delta) {
+            accumulatedDelta += su.text_delta;
             onChunk({ type: 'delta', text: su.text_delta });
           } else if (
             su.step_type === 'tool' ||
@@ -186,17 +214,18 @@ export async function defaultStreamExecAgy(
 
     child.on('close', (code) => {
       isDone = true;
-      clearTimeout(timer);
-      if (code !== 0 && !fullResponse) {
+      cleanup();
+      const finalResult = fullResponse || accumulatedDelta;
+      if (code !== 0 && !finalResult) {
         reject(new Error(`agy process exited with code ${code}`));
       } else {
-        resolve(fullResponse);
+        resolve(finalResult);
       }
     });
 
     child.on('error', (err) => {
       isDone = true;
-      clearTimeout(timer);
+      cleanup();
       reject(err);
     });
   });
