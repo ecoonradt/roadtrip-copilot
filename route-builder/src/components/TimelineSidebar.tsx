@@ -49,7 +49,7 @@ const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
 const DWELL_PRESETS = [0, 15, 30, 45, 60, 90];
 const RADIUS_PRESETS = [0.5, 1.0, 2.0, 3.0, 5.0];
 
-const DEFAULT_WIDTH = 420;
+const DEFAULT_WIDTH = 440;
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 680;
 
@@ -219,55 +219,20 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
       className="relative h-full flex flex-col bg-slate-900 border-r border-slate-800 text-slate-100 shrink-0 z-20 shadow-xl select-none"
     >
       {/* Sidebar Header: Actions & Controls */}
-      <div className="p-3.5 border-b border-slate-800 bg-slate-900/90 backdrop-blur-sm">
+      <div className="p-3 border-b border-slate-800 bg-slate-900/90 backdrop-blur-sm">
+        {/* Row 1: Title, Count Badge, and Utility Icons */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-bold text-white tracking-tight">
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="text-sm font-bold text-white tracking-tight whitespace-nowrap">
               Route Stops
             </h2>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 font-mono font-semibold border border-slate-700/60 flex items-center gap-1">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 font-mono font-semibold border border-slate-700/60 flex items-center gap-1 shrink-0">
               {isLoadingRoute && <Loader2 className="w-3 h-3 animate-spin text-amber-400" />}
               <span>{waypoints.length}</span>
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onFocusAddStop}
-              className="flex items-center gap-1 px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm cursor-pointer"
-              title="Add a new stop by searching"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Stop</span>
-            </button>
-
-            {waypoints.length > 0 && (
-              <button
-                onClick={handleBatchGenerateAll}
-                disabled={isBatchGenerating}
-                className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer disabled:opacity-50"
-                title="Generate Co-Pilot audio alerts for all stops"
-              >
-                {isBatchGenerating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                ) : (
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                )}
-                <span className="hidden sm:inline">AI Alerts</span>
-              </button>
-            )}
-
-            {onOpenScoutForDay && (
-              <button
-                onClick={onOpenScoutForDay}
-                className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer"
-                title="Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
-              >
-                <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="hidden sm:inline">Scout Leg</span>
-              </button>
-            )}
-
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={onResetSample}
               className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
@@ -294,6 +259,49 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               <ChevronLeft className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* Row 2: Dedicated 3-Column Primary Action Bar */}
+        <div className="grid grid-cols-3 gap-1.5 mt-2.5">
+          <button
+            onClick={onFocusAddStop}
+            className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+            title="Add a new stop by searching"
+          >
+            <Plus className="w-3.5 h-3.5 shrink-0" />
+            <span>Add Stop</span>
+          </button>
+
+          {onOpenScoutForDay ? (
+            <button
+              onClick={onOpenScoutForDay}
+              className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer whitespace-nowrap"
+              title="Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
+            >
+              <Compass className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Scout Leg</span>
+            </button>
+          ) : (
+            <div />
+          )}
+
+          {waypoints.length > 0 ? (
+            <button
+              onClick={handleBatchGenerateAll}
+              disabled={isBatchGenerating}
+              className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-amber-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              title="Generate Co-Pilot audio alerts for all stops"
+            >
+              {isBatchGenerating ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              )}
+              <span>AI Alerts</span>
+            </button>
+          ) : (
+            <div />
+          )}
         </div>
 
         {batchProgress && (
@@ -549,29 +557,11 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
                       {/* AI Co-Pilot Alert Configuration */}
                       <div className="pt-2 border-t border-slate-800 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold text-slate-300">
-                            Co-Pilot In-Car Announcement
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            {onOpenScoutForWaypoint && (
-                              <button
-                                onClick={() => {
-                                  const currentWp = originalWp
-                                    ? { ...originalWp, target_time: stop.arrivalTime }
-                                    : {
-                                        ...stop,
-                                        target_time: stop.arrivalTime,
-                                      };
-                                  onOpenScoutForWaypoint(currentWp);
-                                }}
-                                className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-all border border-slate-700/80 cursor-pointer"
-                                title="Ask Route Scout about this stop (accessibility, tribal land, photo spots)"
-                              >
-                                <Compass className="w-3 h-3 text-cyan-400" />
-                                <span>Ask Scout</span>
-                              </button>
-                            )}
+                        <div className="text-[11px] font-semibold text-slate-300">
+                          Co-Pilot In-Car Announcement
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {onOpenScoutForWaypoint && (
                             <button
                               onClick={() => {
                                 const currentWp = originalWp
@@ -580,14 +570,32 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                       ...stop,
                                       target_time: stop.arrivalTime,
                                     };
-                                setSelectedWaypointForAi(currentWp);
+                                onOpenScoutForWaypoint(currentWp);
                               }}
-                              className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer"
+                              className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-all border border-slate-700/80 cursor-pointer whitespace-nowrap shadow-sm"
+                              title="Ask Route Scout about this stop (accessibility, tribal land, photo spots)"
                             >
-                              <Sparkles className="w-3 h-3 text-amber-300" />
-                              <span>{stop.notification ? 'Edit Alert & Voice' : 'Generate Alert'}</span>
+                              <Compass className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                              <span>Ask Scout</span>
                             </button>
-                          </div>
+                          )}
+                          <button
+                            onClick={() => {
+                              const currentWp = originalWp
+                                ? { ...originalWp, target_time: stop.arrivalTime }
+                                : {
+                                    ...stop,
+                                    target_time: stop.arrivalTime,
+                                  };
+                              setSelectedWaypointForAi(currentWp);
+                            }}
+                            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer whitespace-nowrap ${
+                              !onOpenScoutForWaypoint ? 'col-span-2' : ''
+                            }`}
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                            <span>{stop.notification ? 'Edit Alert & Voice' : 'Generate Alert'}</span>
+                          </button>
                         </div>
 
                         {stop.notification ? (
