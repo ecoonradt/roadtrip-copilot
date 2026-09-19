@@ -93,7 +93,7 @@ function InvestigationActivityLog({ activities }: { activities: ScoutActivity[] 
   const completedCount = activities.filter((a) => a.state === 'done').length;
 
   return (
-    <div className="mb-2 bg-slate-900/90 border border-slate-750/70 rounded-xl overflow-hidden text-[11px] shadow-sm select-none">
+    <div className="w-full mb-2 bg-slate-900/90 border border-slate-750/70 rounded-xl overflow-hidden text-[11px] shadow-sm select-none">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-750/80 transition-colors text-left cursor-pointer"
@@ -573,6 +573,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           trigger_radius_miles: w.trigger_radius_miles,
           notes: w.notes,
           notification: w.notification,
+          address: w.address,
+          google_place_id: w.google_place_id,
+          is_route_anchor: w.is_route_anchor,
         })),
         focusedWaypoint: focusedWp
           ? {
@@ -586,6 +589,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               trigger_radius_miles: focusedWp.trigger_radius_miles,
               notes: focusedWp.notes,
               notification: focusedWp.notification,
+              address: focusedWp.address,
+              google_place_id: focusedWp.google_place_id,
+              is_route_anchor: focusedWp.is_route_anchor,
             }
           : undefined,
         focusedWaypointIndex: focusedWpIndex >= 0 ? focusedWpIndex + 1 : undefined,
@@ -750,6 +756,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       lng: suggestion.lng,
       dwell_minutes: suggestion.dwell_minutes,
       trigger_radius_miles: suggestion.trigger_radius_miles,
+      ...(suggestion.address ? { address: suggestion.address } : {}),
+      ...(suggestion.google_place_id ? { google_place_id: suggestion.google_place_id } : {}),
+      ...(suggestion.is_route_anchor !== undefined ? { is_route_anchor: suggestion.is_route_anchor } : {}),
       ...(suggestion.notification ? { notification: suggestion.notification } : {}),
     });
     setUpdatedSuggestionIds((prev) => new Set([...prev, suggestion.id]));
@@ -977,7 +986,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           <div
             key={msg.id}
             className={`flex flex-col ${
-              msg.role === 'user' ? 'items-end' : 'items-start'
+              msg.role === 'user' ? 'items-end' : 'items-start w-full'
             }`}
           >
             {msg.role === 'user' ? (
@@ -987,8 +996,8 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               </div>
             ) : (
               // Assistant message bubble
-              <div className="max-w-[95%] space-y-2 select-text cursor-text">
-                <div className="bg-slate-850 border border-slate-750 rounded-2xl rounded-tl-sm p-3 shadow-md">
+              <div className="w-full space-y-2 select-text cursor-text">
+                <div className="w-full bg-slate-850 border border-slate-750 rounded-2xl rounded-tl-sm p-3 shadow-md">
                   <div className="flex items-center justify-between gap-1 mb-2 select-none">
                     <div className="flex items-center gap-1.5 text-cyan-400">
                       <Compass className="w-3.5 h-3.5" />
@@ -1127,6 +1136,27 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                               <span className="bg-slate-900 border border-cyan-800/60 px-1.5 py-0.5 rounded text-cyan-200">
                                 {sug.newId}
                               </span>
+                            </div>
+                          )}
+
+                          {/* Navigation & Address Metadata Badges */}
+                          {(sug.is_route_anchor || sug.address || sug.google_place_id) && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono px-0.5">
+                              {sug.is_route_anchor && (sug.type === 'scenic_drive_by' || sug.dwell_minutes === 0) && (
+                                <span className="inline-flex items-center gap-1 bg-amber-950/70 border border-amber-800/80 text-amber-300 px-1.5 py-0.5 rounded font-semibold" title="Route-forcing pass-through pin on highway">
+                                  ⚓ Route Anchor
+                                </span>
+                              )}
+                              {sug.google_place_id && (
+                                <span className="inline-flex items-center gap-1 bg-sky-950/70 border border-sky-800/80 text-sky-300 px-1.5 py-0.5 rounded" title={sug.google_place_id}>
+                                  📍 Place ID
+                                </span>
+                              )}
+                              {sug.address && (
+                                <span className="text-slate-400 truncate max-w-[240px]" title={sug.address}>
+                                  {sug.address}
+                                </span>
+                              )}
                             </div>
                           )}
 

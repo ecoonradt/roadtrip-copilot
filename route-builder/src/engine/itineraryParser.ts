@@ -1,5 +1,6 @@
 import type { Waypoint, WaypointType } from '../types/routing';
-import { detectTimezone } from './cascade';
+import { detectTimezone, calculateTimelineCascade } from './cascade';
+import type { ScheduledStop } from './types';
 
 export interface ParsedDay {
   dayNumber: number;
@@ -202,10 +203,15 @@ function convertRawCheckpointToWaypoint(
       ? normalizeTimeString(cp.target_time)
       : undefined;
 
+  const isFinalStop = idx === total - 1;
+  const isOvernightOrFinalDest = isFinalStop && (type === 'lodging' || type === 'destination');
+
   const dwell_minutes =
-    typeof cp.dwell_minutes === 'number'
+    isOvernightOrFinalDest
+      ? 0
+      : typeof cp.dwell_minutes === 'number'
       ? cp.dwell_minutes
-      : idx === 0
+      : idx === 0 || type === 'scenic_drive_by' || cp.is_route_anchor
       ? 0
       : type === 'lodging'
       ? 0
@@ -246,6 +252,9 @@ function convertRawCheckpointToWaypoint(
         : defaultTz,
     approachHighway: typeof cp.approachHighway === 'string' ? cp.approachHighway : undefined,
     notes: typeof cp.notes === 'string' ? cp.notes : undefined,
+    address: typeof cp.address === 'string' ? cp.address : undefined,
+    google_place_id: typeof cp.google_place_id === 'string' ? cp.google_place_id : undefined,
+    is_route_anchor: typeof cp.is_route_anchor === 'boolean' ? cp.is_route_anchor : undefined,
   };
 }
 
@@ -260,8 +269,69 @@ function normalizeTimeString(timeStr: string): string {
   return timeStr;
 }
 
+function serializeCheckpoint(w: Waypoint, idx?: number, total?: number): Record<string, unknown> {
+  const isLast = total !== undefined && idx !== undefined ? idx === total - 1 : false;
+  const isOvernightOrFinalDest = isLast && (w.type === 'lodging' || w.type === 'destination');
+  const dwellMinutes = isOvernightOrFinalDest ? 0 : Math.max(0, Math.round(w.dwell_minutes || 0));
+
+  const cp: Record<string, unknown> = {
+    id: w.id,
+    name: w.name,
+    type: w.type,
+    lat: Number(w.lat.toFixed(6)),
+    lng: Number(w.lng.toFixed(6)),
+    dwell_minutes: dwellMinutes,
+    trigger_radius_miles: w.trigger_radius_miles ?? 2.0,
+  };
+
+  if (w.target_time) {
+    cp.target_time = w.target_time;
+  }
+
+  if (w.notification && (w.notification.title || w.notification.message || w.notification.speech)) {
+    cp.notification = {
+      title: w.notification.title,
+      message: w.notification.message,
+      speech: w.notification.speech,
+    };
+  }
+
+  if (w.address) {
+    cp.address = w.address;
+  }
+
+  if (w.google_place_id) {
+    cp.google_place_id = w.google_place_id;
+  }
+
+  if (w.is_route_anchor !== undefined) {
+    // Physical stops, endpoints, and lodging/dining/fuel stops are never route anchors
+    const isEndpointOrPhysical =
+      w.type === 'origin' ||
+      w.type === 'destination' ||
+      w.type === 'lodging' ||
+      w.type === 'meal' ||
+      w.type === 'fuel' ||
+      (typeof w.dwell_minutes === 'number' && w.dwell_minutes > 0) ||
+      (idx === 0 && w.type !== 'scenic_drive_by');
+
+    cp.is_route_anchor = isEndpointOrPhysical ? false : w.is_route_anchor;
+  }
+
+  if (w.approachHighway) {
+    cp.approachHighway = w.approachHighway;
+  }
+
+  if (w.notes) {
+    cp.notes = w.notes;
+  }
+
+  return cp;
+}
+
 /**
  * Serializes an in-memory ParsedTrip back into standard Android-compatible JSON.
+ * Synchronizes target times with the dynamic schedule cascade to eliminate stale draft times.
  */
 export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, unknown> {
   if (trip.isMultiDay) {
@@ -276,32 +346,37 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
         author: 'Roadtrip Co-Pilot Studio',
         created_at: new Date().toISOString(),
       },
-      days: trip.days.map((day) => ({
-        day: day.dayNumber,
-        date: day.date,
-        timezone: day.timezone || 'America/Phoenix',
-        title: day.title,
-        origin: day.origin,
-        destination: day.destination,
-        departure_time: day.departureTime,
-        checkpoints: day.waypoints.map((w) => ({
-          id: w.id,
-          name: w.name,
-          type: w.type,
-          lat: Number(w.lat.toFixed(6)),
-          lng: Number(w.lng.toFixed(6)),
-          target_time: w.target_time,
-          dwell_minutes: w.dwell_minutes,
-          trigger_radius_miles: w.trigger_radius_miles,
-          notification: w.notification
-            ? {
-                title: w.notification.title,
-                message: w.notification.message,
-                speech: w.notification.speech,
-              }
-            : undefined,
-        })),
-      })),
+      days: trip.days.map((day) => {
+        let cascadedStops: ScheduledStop[] = [];
+        try {
+          if (day.waypoints && day.waypoints.length > 0) {
+            const cascade = calculateTimelineCascade({
+              baseDate: day.date,
+              departureTime: day.departureTime || '09:00:00',
+              waypoints: day.waypoints,
+            });
+            cascadedStops = cascade.stops;
+          }
+        } catch {
+          // fallback
+        }
+
+        return {
+          day: day.dayNumber,
+          date: day.date,
+          timezone: day.timezone || 'America/Phoenix',
+          title: day.title,
+          origin: day.origin,
+          destination: day.destination,
+          departure_time: day.departureTime,
+          ...(day.notes ? { notes: day.notes } : {}),
+          checkpoints: day.waypoints.map((w, idx) => {
+            const cascadedTarget = cascadedStops[idx]?.arrivalTime;
+            const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
+            return serializeCheckpoint(updatedWp, idx, day.waypoints.length);
+          }),
+        };
+      }),
     };
   }
 
@@ -312,6 +387,20 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
     timezone: 'America/Phoenix',
     waypoints: [],
   };
+
+  let cascadedStops: ScheduledStop[] = [];
+  try {
+    if (singleDay.waypoints && singleDay.waypoints.length > 0) {
+      const cascade = calculateTimelineCascade({
+        baseDate: singleDay.date,
+        departureTime: singleDay.departureTime || '09:00:00',
+        waypoints: singleDay.waypoints,
+      });
+      cascadedStops = cascade.stops;
+    }
+  } catch {
+    // fallback
+  }
 
   return {
     trip_name: trip.tripName,
@@ -324,22 +413,10 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
     },
     origin: singleDay.origin,
     destination: singleDay.destination,
-    checkpoints: singleDay.waypoints.map((w) => ({
-      id: w.id,
-      name: w.name,
-      type: w.type,
-      lat: Number(w.lat.toFixed(6)),
-      lng: Number(w.lng.toFixed(6)),
-      target_time: w.target_time,
-      dwell_minutes: w.dwell_minutes,
-      trigger_radius_miles: w.trigger_radius_miles,
-      notification: w.notification
-        ? {
-            title: w.notification.title,
-            message: w.notification.message,
-            speech: w.notification.speech,
-          }
-        : undefined,
-    })),
+    checkpoints: singleDay.waypoints.map((w, idx) => {
+      const cascadedTarget = cascadedStops[idx]?.arrivalTime;
+      const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
+      return serializeCheckpoint(updatedWp, idx, singleDay.waypoints.length);
+    }),
   };
 }

@@ -37,25 +37,157 @@ export function formatCoord(lat: number, lng: number): string {
 }
 
 /**
+ * Determines if a waypoint represents a physical stopping location (dwell > 0, lodging, meal, fuel, pull-off).
+ * Generic untyped points without dwell default to true to preserve backward compatibility with raw coordinate arrays.
+ */
+export function isPhysicalStop(loc: CoordinateLocation): boolean {
+  if (
+    loc.type === 'scenic_drive_by' ||
+    (loc.dwellMinutes === 0 && loc.type !== 'lodging' && loc.type !== 'destination' && loc.type !== 'origin')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Cleans a waypoint name for search queries by stripping leg prefixes (e.g. "Flagstaff / Little America Hotel" -> "Little America Hotel").
+ */
+export function extractCleanPlaceName(name: string): string {
+  if (!name) return '';
+  const trimmed = name.trim();
+  if (trimmed.includes('/')) {
+    const afterSlash = trimmed.split('/').pop()!.trim();
+    if (afterSlash.length > 0) return afterSlash;
+  }
+  return trimmed;
+}
+
+/**
+ * Formats a location as a query string parameter for Google Maps navigation.
+ * When place name and address are both available, combines them (e.g. "Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ")
+ * so Google Maps displays the establishment name as the destination title while locking to the exact place.
+ * In-transit pass-through anchors and scenic drive-bys (dwell == 0) MUST ALWAYS format as exact coordinates (lat,lng)
+ * to prevent Google Maps from searching for non-existent businesses or snapping to Airbnbs/side-streets.
+ */
+export function formatLocationQuery(loc: CoordinateLocation): string {
+  if (!isPhysicalStop(loc)) {
+    return formatCoord(loc.lat, loc.lng);
+  }
+
+  const cleanName = loc.name ? extractCleanPlaceName(loc.name) : '';
+
+  if (cleanName && loc.address && loc.address.trim().length > 0) {
+    const addr = loc.address.trim();
+    if (!addr.toLowerCase().includes(cleanName.toLowerCase())) {
+      return encodeURIComponent(`${cleanName}, ${addr}`);
+    }
+    return encodeURIComponent(addr);
+  }
+
+  if (cleanName && loc.placeId && loc.placeId.trim().length > 0) {
+    return encodeURIComponent(cleanName);
+  }
+
+  if (loc.address && loc.address.trim().length > 0) {
+    return encodeURIComponent(loc.address.trim());
+  }
+
+  return formatCoord(loc.lat, loc.lng);
+}
+
+/**
+ * Filters a sequence of waypoints for Google Maps Navigation.
+ * - Always includes Origin (first point) and Destination (last point).
+ * - For intermediate points:
+ *   - Explicit route anchors (isRouteAnchor === true) are always included.
+ *   - Explicit non-anchors with dwell 0 (isRouteAnchor === false) are excluded.
+ *   - Physical stops (dwell > 0 or physical stop categories) are included.
+ *   - Legacy / un-audited routes (isRouteAnchor === undefined):
+ *     Preserves the first in-transit scenic drive-by along a corridor as an auto-anchor to prevent highway shortcutting.
+ */
+export function filterWaypointsForNavigation(
+  waypoints: CoordinateLocation[]
+): CoordinateLocation[] {
+  if (!waypoints || waypoints.length <= 2) {
+    return waypoints ? [...waypoints] : [];
+  }
+
+  const origin = waypoints[0];
+  const destination = waypoints[waypoints.length - 1];
+  const intermediates = waypoints.slice(1, -1);
+
+  const selectedIntermediates: CoordinateLocation[] = [];
+  let pendingDriveBys: CoordinateLocation[] = [];
+
+  for (const wp of intermediates) {
+    if (wp.isRouteAnchor === true) {
+      selectedIntermediates.push(wp);
+      pendingDriveBys = [];
+    } else if (wp.isRouteAnchor === false) {
+      if (isPhysicalStop(wp)) {
+        selectedIntermediates.push(wp);
+        pendingDriveBys = [];
+      }
+    } else {
+      // isRouteAnchor is undefined (legacy / default)
+      if (isPhysicalStop(wp)) {
+        if (pendingDriveBys.length > 0) {
+          selectedIntermediates.push(pendingDriveBys[0]);
+          pendingDriveBys = [];
+        }
+        selectedIntermediates.push(wp);
+      } else {
+        pendingDriveBys.push(wp);
+      }
+    }
+  }
+
+  if (pendingDriveBys.length > 0) {
+    selectedIntermediates.push(pendingDriveBys[0]);
+  }
+
+  return [origin, ...selectedIntermediates, destination];
+}
+
+/**
  * Constructs a single valid Google Maps Navigation URL.
  * Format:
- * https://www.google.com/maps/dir/?api=1&origin={lat},{lng}&destination={lat},{lng}&waypoints={lat},{lng}|{lat},{lng}&travelmode=driving
+ * https://www.google.com/maps/dir/?api=1&origin={query}&origin_place_id={id}&destination={query}&destination_place_id={id}&waypoints={query}|{query}&waypoint_place_ids={id}|{id}&travelmode=driving
  */
 export function buildSingleGoogleMapsUrl(
   origin: CoordinateLocation,
   destination: CoordinateLocation,
   intermediateWaypoints: CoordinateLocation[] = []
 ): string {
-  const originCoord = formatCoord(origin.lat, origin.lng);
-  const destCoord = formatCoord(destination.lat, destination.lng);
+  const originQuery = formatLocationQuery(origin);
+  const destQuery = formatLocationQuery(destination);
 
-  let url = `${GOOGLE_MAPS_DIR_BASE}&origin=${originCoord}&destination=${destCoord}`;
+  let url = `${GOOGLE_MAPS_DIR_BASE}&origin=${originQuery}`;
+  if (origin.placeId && origin.placeId.trim()) {
+    url += `&origin_place_id=${encodeURIComponent(origin.placeId.trim())}`;
+  }
+
+  url += `&destination=${destQuery}`;
+  if (destination.placeId && destination.placeId.trim()) {
+    url += `&destination_place_id=${encodeURIComponent(destination.placeId.trim())}`;
+  }
 
   if (intermediateWaypoints.length > 0) {
     const waypointsParam = intermediateWaypoints
-      .map((w) => formatCoord(w.lat, w.lng))
+      .map((w) => formatLocationQuery(w))
       .join('|');
     url += `&waypoints=${waypointsParam}`;
+
+    const allHavePlaceIds = intermediateWaypoints.every(
+      (w) => w.placeId && w.placeId.trim().length > 0
+    );
+    if (allHavePlaceIds) {
+      const placeIdsParam = intermediateWaypoints
+        .map((w) => encodeURIComponent(w.placeId!.trim()))
+        .join('|');
+      url += `&waypoint_place_ids=${placeIdsParam}`;
+    }
   }
 
   url += '&travelmode=driving';
@@ -101,9 +233,13 @@ export function generateGoogleMapsUrls(
     };
   }
 
+  const navPoints = options?.skipNavFiltering
+    ? waypoints
+    : filterWaypointsForNavigation(waypoints);
+
   // Handle single waypoint case
-  if (waypoints.length === 1) {
-    const singlePoint = waypoints[0];
+  if (navPoints.length === 1) {
+    const singlePoint = navPoints[0];
     const url = buildSingleGoogleMapsUrl(singlePoint, singlePoint, []);
     const singleLeg: GoogleMapsLeg = {
       legIndex: 0,
@@ -130,7 +266,7 @@ export function generateGoogleMapsUrls(
   // First pass: compute leg index boundaries to know totalLegs count for title assignment
   const boundaries: Array<{ start: number; end: number }> = [];
   let currentStart = 0;
-  const n = waypoints.length;
+  const n = navPoints.length;
 
   while (currentStart < n - 1) {
     const nextEnd = Math.min(currentStart + maxLegStep, n - 1);
@@ -143,9 +279,9 @@ export function generateGoogleMapsUrls(
 
   for (let i = 0; i < boundaries.length; i++) {
     const { start, end } = boundaries[i];
-    const origin = waypoints[start];
-    const destination = waypoints[end];
-    const intermediateWaypoints = waypoints.slice(start + 1, end);
+    const origin = navPoints[start];
+    const destination = navPoints[end];
+    const intermediateWaypoints = navPoints.slice(start + 1, end);
     const waypointCount = end - start + 1;
 
     const title = resolveLegTitle(i, totalLegs, options?.customLegTitles);

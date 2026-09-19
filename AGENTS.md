@@ -113,11 +113,11 @@ roadtrip-copilot/
 │   │   └── types/             # Strict TypeScript interfaces (0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout & state coordinator
-│   │   ├── components/        # AppHeader, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, AiAlertModal, ExportModal, RouteScoutDrawer
+│   │   ├── components/        # AppHeader, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models (routing, ai, scout)
-│   └── tests/                 # Vitest test suites (139 tests: backend, engine, ai, schema, device, itineraries, scout)
+│   └── tests/                 # Vitest test suites (157 tests: backend, engine, ai, schema, device, itineraries, scout)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/
@@ -198,7 +198,7 @@ roadtrip-copilot/
   ```bash
   cd route-builder && npm run build
   ```
-* **Run All 139 Vitest Tests:**
+* **Run All 157 Vitest Tests:**
   ```bash
   cd route-builder && npm test
   ```

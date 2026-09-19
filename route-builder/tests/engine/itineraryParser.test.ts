@@ -149,4 +149,153 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     const serializedDays = (serialized as { days: Array<{ checkpoints: Array<{ lat: number }> }> }).days;
     expect(serializedDays[0].checkpoints[0].lat).toBe(34.123457);
   });
+
+  it('preserves address, google_place_id, is_route_anchor, notes, and approachHighway when serializing', () => {
+    const sample = {
+      trip_name: 'Place ID Preservation Test',
+      days: [
+        {
+          day: 1,
+          date: '2026-10-09',
+          title: 'Day 1',
+          checkpoints: [
+            {
+              id: 'hotel_stop',
+              name: 'Little America Hotel',
+              lat: 35.1901,
+              lng: -111.6207,
+              address: '2515 E Butler Ave, Flagstaff, AZ 86004',
+              google_place_id: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+              is_route_anchor: false,
+              approachHighway: 'I-40 East',
+              notes: 'Paved lot, EV charging available',
+            },
+            {
+              id: 'anchor_pass',
+              name: 'Scenic Pass Anchor',
+              lat: 34.8,
+              lng: -111.7,
+              is_route_anchor: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const trip = parseItineraryJson(sample);
+    const serialized = serializeTripToItineraryJson(trip);
+
+    const serializedDays = (serialized as { days: Array<{ checkpoints: Array<Record<string, unknown>> }> }).days;
+    const cp1 = serializedDays[0].checkpoints[0];
+    const cp2 = serializedDays[0].checkpoints[1];
+
+    expect(cp1.address).toBe('2515 E Butler Ave, Flagstaff, AZ 86004');
+    expect(cp1.google_place_id).toBe('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
+    expect(cp1.is_route_anchor).toBe(false);
+    expect(cp1.approachHighway).toBe('I-40 East');
+    expect(cp1.notes).toBe('Paved lot, EV charging available');
+
+    expect(cp2.is_route_anchor).toBe(true);
+  });
+
+  it('normalizes overnight lodging and destination stop dwell_minutes to 0 on parse and serialization', () => {
+    const sample = {
+      trip_name: 'Overnight Dwell Test',
+      days: [
+        {
+          day: 1,
+          date: '2026-10-09',
+          title: 'Day 1',
+          checkpoints: [
+            { id: 'origin', name: 'Departure Point', lat: 33.4, lng: -112.0, type: 'origin', dwell_minutes: 0 },
+            { id: 'mid', name: 'Lunch Stop', lat: 34.5, lng: -111.8, type: 'meal', dwell_minutes: 45 },
+            { id: 'hotel', name: 'Little America Flagstaff', lat: 35.1, lng: -111.6, type: 'lodging', dwell_minutes: 60 },
+          ],
+        },
+      ],
+    };
+
+    const trip = parseItineraryJson(sample);
+    expect(trip.days[0].waypoints[0].dwell_minutes).toBe(0);
+    expect(trip.days[0].waypoints[1].dwell_minutes).toBe(45);
+    expect(trip.days[0].waypoints[2].dwell_minutes).toBe(0); // Normalized to 0
+
+    const serialized = serializeTripToItineraryJson(trip);
+    const serializedDays = (serialized as { days: Array<{ checkpoints: Array<Record<string, unknown>> }> }).days;
+    expect(serializedDays[0].checkpoints[2].dwell_minutes).toBe(0);
+  });
+
+  it('automatically purges legacy anchor flags and synchronizes target times on serialization', () => {
+    // Simulates the exact Day 1 road trip scenario:
+    // Origin, Sedona anchor pass, Switchbacks drive-by, Oak Creek Vista (15m dwell), Little America (lodging)
+    const sample = {
+      trip_name: 'Auto-Clean & Sync Test',
+      days: [
+        {
+          day: 1,
+          date: '2026-10-09',
+          title: 'Day 1',
+          departure_time: '14:30:00',
+          checkpoints: [
+            {
+              id: 'phx_origin',
+              name: 'PHX Rental Car',
+              lat: 33.4312,
+              lng: -112.0435,
+              type: 'origin',
+              dwell_minutes: 0,
+              is_route_anchor: true, // Legacy error: origin should not be an anchor
+            },
+            {
+              id: 'sedona_anchor',
+              name: 'Sedona Red Rocks Vista',
+              lat: 34.7802,
+              lng: -111.763,
+              type: 'scenic_drive_by',
+              dwell_minutes: 0,
+              is_route_anchor: true, // Legitimate in-transit corridor anchor
+            },
+            {
+              id: 'oak_creek_vista',
+              name: 'Oak Creek Vista Overlook',
+              lat: 35.0306,
+              lng: -111.7335,
+              type: 'scenic_pull_off',
+              dwell_minutes: 15,
+              target_time: '12:00:00', // Stale draft time
+              is_route_anchor: true, // Legacy error: physical stop with dwell should not be anchor
+            },
+            {
+              id: 'flagstaff_hotel',
+              name: 'Little America Hotel Flagstaff',
+              lat: 35.1901,
+              lng: -111.6207,
+              type: 'lodging',
+              dwell_minutes: 0,
+              is_route_anchor: true, // Legacy error: destination should not be an anchor
+            },
+          ],
+        },
+      ],
+    };
+
+    const trip = parseItineraryJson(sample);
+    const serialized = serializeTripToItineraryJson(trip);
+    const checkpoints = (serialized as { days: Array<{ checkpoints: Array<Record<string, unknown>> }> }).days[0].checkpoints;
+
+    // Origin: anchor stripped, target_time set to departure
+    expect(checkpoints[0].is_route_anchor).toBe(false);
+    expect(checkpoints[0].target_time).toBe('14:30:00');
+
+    // Sedona Red Rocks (in-transit drive-by): anchor preserved!
+    expect(checkpoints[1].is_route_anchor).toBe(true);
+
+    // Oak Creek Vista (physical stop with 15m dwell): anchor stripped, target_time synchronized with afternoon arrival
+    expect(checkpoints[2].is_route_anchor).toBe(false);
+    expect(checkpoints[2].target_time).not.toBe('12:00:00');
+    expect(typeof checkpoints[2].target_time).toBe('string');
+
+    // Little America Hotel (lodging destination): anchor stripped
+    expect(checkpoints[3].is_route_anchor).toBe(false);
+  });
 });

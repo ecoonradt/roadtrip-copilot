@@ -18,6 +18,9 @@ export interface ScoutWaypointSummary {
   dwell_minutes?: number;
   trigger_radius_miles?: number;
   notes?: string;
+  address?: string;
+  google_place_id?: string;
+  is_route_anchor?: boolean;
   notification?: {
     title: string;
     message: string;
@@ -60,6 +63,9 @@ export interface ScoutSuggestion {
   insertAfterWaypointId?: string;
   targetWaypointId?: string;
   newId?: string;
+  address?: string;
+  google_place_id?: string;
+  is_route_anchor?: boolean;
   notification?: {
     title: string;
     message: string;

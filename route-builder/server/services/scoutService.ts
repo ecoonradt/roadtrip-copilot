@@ -33,6 +33,9 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
         if (wp.target_time) contextBlock += ` | Target: ${wp.target_time}`;
         if (wp.dwell_minutes) contextBlock += ` | Dwell: ${wp.dwell_minutes}m`;
         if (wp.notes) contextBlock += ` | Notes: "${wp.notes}"`;
+        if (wp.address) contextBlock += ` | Address: "${wp.address}"`;
+        if (wp.google_place_id) contextBlock += ` | PlaceID: "${wp.google_place_id}"`;
+        if (wp.is_route_anchor) contextBlock += ` | [Route Anchor]`;
         if (wp.notification) {
           contextBlock += ` | Alert: "${wp.notification.title}" / Voice: "${wp.notification.speech}"`;
         }
@@ -51,6 +54,9 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
       contextBlock += `- Name: ${focused.name}\n`;
       contextBlock += `- Category Type: ${focused.type}\n`;
       contextBlock += `- GPS Coordinates: ${focused.lat.toFixed(6)}, ${focused.lng.toFixed(6)}\n`;
+      if (focused.address) contextBlock += `- Street Address / Location: ${focused.address}\n`;
+      if (focused.google_place_id) contextBlock += `- Google Place ID: ${focused.google_place_id}\n`;
+      if (focused.is_route_anchor !== undefined) contextBlock += `- Route-Forcing Anchor: ${focused.is_route_anchor ? 'Yes' : 'No'}\n`;
       if (tripContext.precedingWaypoint) {
         contextBlock += `- Preceding Stop: "${tripContext.precedingWaypoint.name}"${tripContext.precedingWaypoint.distanceMiles !== undefined ? ` (~${tripContext.precedingWaypoint.distanceMiles} mi earlier)` : ''}\n`;
       }
@@ -110,9 +116,10 @@ GUIDELINES:
    - A fuel stop must be an established, recognizable commercial brand (e.g. Maverik, Love's, Pilot, Flying J, Chevron, Shell, Speedway) with many fuel pumps, clean restrooms, and traveler amenities, located directly at a highway exit or on the main route.
    - NEVER suggest or accept coordinates in residential neighborhoods, trailer parks, or private roads. Always use the actual street address and verified coordinates of the commercial facility.
 8. LOCATION TYPES (PHYSICAL STOPS VS IN-TRANSIT SCENIC TRIGGERS):
-   - PHYSICAL STOPS (dwell > 0: meal, fuel, lodging, scenic pull-off with parking):
+   - PHYSICAL STOPS (meal, fuel, lodging, scenic pull-off with parking):
      * Must be authentic, recognizable commercial facilities, official state/national park overlooks, or established visitor pull-offs with real addresses, entrances, and parking.
      * Always verify authentic coordinates so the driver is routed to the genuine parking lot or service station.
+     * FINAL DESTINATION / LODGING OVERNIGHT DWELL: The final stop of a day's driving leg (especially lodging or destination) represents the overnight stay or trip conclusion. It is a physical stop and must be in Google Maps navigation, but does NOT have a scheduled departure on that day. Preserve dwell_minutes as 0 (or overnight) for the final stop rather than assigning an artificial 60-minute duration.
    - IN-TRANSIT SCENIC NOTIFICATION TRIGGERS (dwell == 0, scenic_drive_by):
      * These exist purely as in-car audio commentary and heads-up alert triggers on the highway. They are NOT destinations and do NOT require a commercial venue, visitor center, or formal cadastral land boundary.
      * If an official named scenic overlook or roadside turnout exists along the highway corridor, use it.
@@ -120,24 +127,42 @@ GUIDELINES:
      * Never perform cadastral land surveys, tribal boundary polygon calculations, or search for missing entrance signs for an in-transit scenic cue.
 9. SCENIC DRIVE-BY PLACEMENT & DECOUPLING TITLES FROM SCENIC INTENT:
    - TIMING & PLACEMENT: In-transit scenic announcements must fire *at or before the beginning of the scenic transition* (e.g. where the highway begins its climb into the foothills or pines, or as a vista first comes into view), rather than near the end of the leg where the scenery is already behind the driver.
-   - DECOUPLING TITLES FROM INTENT: Waypoint titles in draft itineraries often carry nearby town names (e.g. "Jicarilla Apache Nation / Dulce") or legacy labels. Do not over-index on the title or assume the question is a forensic audit of the town's location. Focus on the experiential intent expressed in the driver's question, alert title, and spoken audio (e.g. "Climbing into Pine Country").
-   - SYNCHRONIZE TITLE & AUDIO UPON RELOCATION: When relocating a scenic trigger earlier/westward along the corridor (e.g. moving from Dulce west to the Carson NF / Gobernador foothills where the highway ascent begins), enthusiastically update the waypoint title (e.g. "Climbing into Pine Country (US-64)") and refresh the spoken audio to match the new location.
+   - DECOUPLING TITLES FROM INTENT: Waypoint titles in draft itineraries often carry nearby town names (e.g. "Mountain Pass / Valley View") or legacy labels. Do not over-index on the title or assume the question is a forensic audit of the town's location. Focus on the experiential intent expressed in the driver's question, alert title, and spoken audio (e.g. "Climbing into Pine Country").
+   - SYNCHRONIZE TITLE & AUDIO UPON RELOCATION: When relocating a scenic trigger earlier along the corridor (e.g. moving from a summit back to where the scenic highway ascent begins), enthusiastically update the waypoint title (e.g. "Climbing into Pine Country") and refresh the spoken audio to match the new location.
 10. ROUTE AUDITING & REPAIR:
    - When the driver asks to audit the route or fix coordinates (e.g. "some waypoints take me off the highway", "the fuel stop is in a trailer park", or "fix drive-by points"), inspect all waypoints on the active day or focused stop.
    - Identify which waypoints depart from the highway or point to wrong locations, explain the error clearly to the driver, and emit concrete "update_waypoint" suggestion cards with the exact, verified highway coordinates and corrected names/dwells so the driver can apply the fixes with 1 click.
 11. SYNCHRONIZE WAYPOINT ID, HEADS-UP NOTIFICATION & VOICE ALERT COPY:
    - When suggesting an "update_waypoint" or "add_waypoint", ALWAYS include an updated "notification" object containing:
-     * "title": Short heads-up card title (<= 30 chars), formatted concisely (e.g. "Red Rock Park Picnic").
+     * "title": Short heads-up card title (<= 30 chars), formatted concisely (e.g. "Valley Park Picnic").
      * "message": In-car heads-up text (<= 2 lines), describing the upcoming stop, target time, and immediate highway direction.
      * "speech": Natural conversational spoken TTS audio script (15-25 words, ~10s speech duration).
    - CRITICAL NOTIFICATION CONSISTENCY:
      * If a waypoint's purpose, category, or name changes (for example, if what was originally a fuel stop is changed to a lunch stop at a park, or a scenic pull-off is changed to a meal break), the alert "title", "message", and "speech" MUST be completely rewritten to match the new purpose!
      * NEVER retain obsolete notification copy or audio scripts from the previous purpose (e.g. if a stop is now a picnic park or diner, the notification and spoken audio MUST NOT say "Fuel stop recommended" or refer to gas pumps).
    - WAYPOINT ID SYNCHRONIZATION:
-     * If a waypoint's current ID reflects an obsolete purpose or old location (e.g. an ID of "gallup_fuel" for a stop that is now "Red Rock Park (Picnic & Stretch)"), specify "newId" (e.g. "gallup_red_rock_park" or "red_rock_park", in lowercase alphanumeric snake_case) so the underlying waypoint ID stays synchronized.
+     * If a waypoint's current ID reflects an obsolete purpose or old location (e.g. an ID of "stop_fuel" for a stop that is now "Valley Park (Picnic & Stretch)"), specify "newId" (e.g. "valley_park_picnic", in lowercase alphanumeric snake_case) so the underlying waypoint ID stays synchronized.
    - AUDITING ID & NOTIFICATION MISMATCHES:
      * When auditing waypoints, actively check whether a waypoint's ID or notification text conflicts with its name or category (e.g. an ID containing "fuel" when the category is "meal", or spoken audio announcing a fuel stop when arriving at a state park or diner).
      * Flag these contradictions clearly to the driver and emit an "update_waypoint" card with the corrected "newId" and updated "notification" copy to resolve the discrepancy.
+12. GOOGLE MAPS NAVIGATION AUDITING & ROUTE ANCHORS:
+   - When the driver asks to audit waypoints for Google Maps navigation, in-car accuracy, or route glitches (e.g. "some waypoints cause U-turns", "snapping to wrong side of divided highway", "wrong hotel entrance"):
+     * STRICT ROUTE-FORCING ANCHOR DISCIPLINE (is_route_anchor):
+       - A Route Anchor is an INFREQUENTLY used feature. It is ONLY for in-transit pass-through milestones (0m dwell, scenic_drive_by or highway junction via-points) whose sole purpose is to steer Google Maps along a scenic highway corridor (e.g. AZ-179 through Sedona) instead of an interstate bypass (I-17).
+       - NEVER set "is_route_anchor": true on Origin or Destination (they are already the start and end of navigation).
+       - NEVER set "is_route_anchor": true on Physical Stops (lodging, meals, fuel, overlooks with dwell > 0). They are physical stopping places, already included as destinations in navigation.
+       - Pure audio commentary cues along an already locked corridor should have "is_route_anchor": false so they do not clutter Google Maps.
+     * DIVIDED HIGHWAY HAZARDS:
+       - Divided highways with central medians will force Google Maps into unwanted U-turns at roundabouts if an in-transit coordinate is placed slightly closer to the opposing curb or opposite storefront.
+       - To fix this, place the anchor coordinate directly at a neutral roundabout center node or major highway intersection where traffic naturally flows through without U-turns, and set "is_route_anchor": true if it serves as a corridor pass-through milestone.
+     * AUTHENTIC ENTRANCES FOR PHYSICAL STOPS (HOTELS, MEALS, FUEL, OVERLOOKS):
+       - To prevent Google Maps from routing through back service alleys, neighbor workshops, or walking paths, ALWAYS provide the verified street address in "address" and the authentic commercial venue name in "name".
+       - ZERO PLACE ID HALLUCINATION: NEVER guess, invent, or hallucinate a Google Place ID ("google_place_id"). Omit "google_place_id" or leave it undefined unless an authentic, verified Place ID already exists on the stop. Google Maps resolves verified street addresses and business names with 100% reliability, whereas a wrong Place ID completely breaks navigation!
+       - For scenic overlooks with parking, place coordinates on the paved visitor parking lot / access drive, NOT out on a pedestrian cliff rim or hiking trail.
+     * FINAL LODGING & DESTINATION OVERNIGHT STOPS:
+       - The final stop of a day's driving route is the overnight destination. It does not have a departure time. Preserve dwell_minutes as 0 (overnight) for final lodging stops.
+     * KEEP AUDITING FAST & LEAN:
+       - You do NOT need to perform forensic sub-meter lane calculations or run loops. Provide an authentic commercial address, recognizable roundabout/junction coordinate, and clean highway placement.
 
 JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendations):
 \`\`\`json:suggestions
@@ -150,6 +175,9 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
     "lng": -111.5678,
     "dwell_minutes": 20,
     "trigger_radius_miles": 2.0,
+    "address": "123 Scenic Hwy, City, ST 12345",
+    "google_place_id": "ChIJ...",
+    "is_route_anchor": false,
     "insertAfterWaypointId": "optional_preceding_waypoint_id",
     "reason": "Clear explanation of why this stop is recommended.",
     "notification": {
@@ -168,6 +196,9 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
     "lng": -111.1234,
     "dwell_minutes": 30,
     "trigger_radius_miles": 3.0,
+    "address": "456 Main St, City, ST 12345",
+    "google_place_id": "ChIJ...",
+    "is_route_anchor": false,
     "reason": "Explanation of the correction or improvement.",
     "notification": {
       "title": "Short Title (<=30 chars)",
@@ -236,9 +267,43 @@ export function separateThoughtAndReply(text: string): { thought?: string; reply
 }
 
 /**
+ * Deterministically validates a Google Place ID returned by Route Scout or external AI.
+ * Strips invalid or unverified place IDs.
+ * Rules:
+ * 1. Must be a string matching Google Place ID format: ^ChIJ[A-Za-z0-9_-]{10,60}$
+ * 2. If knownPlaceIds is provided, the placeId must match a known verified Place ID already on the route.
+ *    Any unverified / newly hallucinated Place ID is stripped (returns undefined).
+ * "No Place ID is always better than a wrong Place ID."
+ */
+export function validateScoutPlaceId(
+  placeId: unknown,
+  knownPlaceIds?: Set<string>
+): string | undefined {
+  if (typeof placeId !== 'string') return undefined;
+  const trimmed = placeId.trim();
+  if (!trimmed) return undefined;
+
+  // 1. Google Place ID pattern: starts with 'ChIJ', 10 to 60 characters, url-safe base64 characters
+  const placeIdRegex = /^ChIJ[A-Za-z0-9_-]{10,60}$/;
+  if (!placeIdRegex.test(trimmed)) {
+    return undefined;
+  }
+
+  // 2. Known / Verified check: If knownPlaceIds whitelist is provided, ensure place ID is known
+  if (knownPlaceIds && !knownPlaceIds.has(trimmed)) {
+    return undefined;
+  }
+
+  return trimmed;
+}
+
+/**
  * Parses Route Scout output, extracting markdown conversation and structured suggestion actions.
  */
-export function parseScoutResponse(rawOutput: string): { reply: string; suggestions: ScoutSuggestion[]; thought?: string } {
+export function parseScoutResponse(
+  rawOutput: string,
+  options?: { knownPlaceIds?: Set<string> }
+): { reply: string; suggestions: ScoutSuggestion[]; thought?: string } {
   if (!rawOutput) {
     return { reply: 'No response received from Route Scout.', suggestions: [] };
   }
@@ -271,6 +336,33 @@ export function parseScoutResponse(rawOutput: string): { reply: string; suggesti
                 ? item.new_id.trim()
                 : undefined;
 
+            const rawPlaceId =
+              typeof item.google_place_id === 'string' && item.google_place_id.trim().length > 0
+                ? item.google_place_id.trim()
+                : typeof item.placeId === 'string' && item.placeId.trim().length > 0
+                ? item.placeId.trim()
+                : undefined;
+
+            const validatedPlaceId = validateScoutPlaceId(rawPlaceId, options?.knownPlaceIds);
+
+            const rawIsAnchor =
+              typeof item.is_route_anchor === 'boolean'
+                ? item.is_route_anchor
+                : typeof item.isRouteAnchor === 'boolean'
+                ? item.isRouteAnchor
+                : undefined;
+
+            // Physical stops (lodging, meal, fuel, origin, destination, or dwell > 0) are NEVER pass-through anchors
+            const isPhysical =
+              item.type === 'lodging' ||
+              item.type === 'meal' ||
+              item.type === 'fuel' ||
+              item.type === 'origin' ||
+              item.type === 'destination' ||
+              (typeof item.dwell_minutes === 'number' && item.dwell_minutes > 0);
+
+            const is_route_anchor = isPhysical ? false : rawIsAnchor;
+
             suggestions.push({
               id: `scout_sug_${Date.now()}_${index}`,
               action: item.action,
@@ -284,6 +376,12 @@ export function parseScoutResponse(rawOutput: string): { reply: string; suggesti
               insertAfterWaypointId: typeof item.insertAfterWaypointId === 'string' ? item.insertAfterWaypointId : undefined,
               targetWaypointId: typeof item.targetWaypointId === 'string' ? item.targetWaypointId : undefined,
               newId,
+              address:
+                typeof item.address === 'string' && item.address.trim().length > 0
+                  ? item.address.trim()
+                  : undefined,
+              google_place_id: validatedPlaceId,
+              is_route_anchor,
               notification:
                 typeof item.notification === 'object' && item.notification !== null
                   ? {
@@ -321,252 +419,118 @@ export function generateTemplateScoutResponse(request: ScoutChatRequest): { repl
   if (scope.type === 'waypoint') {
     const focused = tripContext.focusedWaypoint || tripContext.waypoints.find((w) => w.id === scope.waypointId);
     const name = focused?.name || 'this waypoint';
+    const type = focused?.type || 'scenic_pull_off';
+    const dwell = focused?.dwell_minutes ?? 0;
+    const hasAddress = !!(focused?.address || focused?.google_place_id);
 
-    // 1. Red Rock Park / Gallup ID and notification mismatch check
+    // 1. Google Maps navigation / address audit
     if (
-      focused?.id === 'gallup_fuel' ||
-      (focused &&
-        focused.name.toLowerCase().includes('red rock') &&
-        (focused.id.toLowerCase().includes('fuel') ||
-          (focused.notification && focused.notification.speech.toLowerCase().includes('fuel')))) ||
-      (focused?.type === 'meal' &&
-        (focused.id.includes('fuel') ||
-          (focused.notification && focused.notification.speech.toLowerCase().includes('fuel')))) ||
-      lastMessage.includes('red rock') ||
-      (lastMessage.includes('gallup') && (lastMessage.includes('park') || lastMessage.includes('picnic') || lastMessage.includes('lunch')))
+      lastMessage.includes('google maps') ||
+      lastMessage.includes('address') ||
+      lastMessage.includes('entrance') ||
+      lastMessage.includes('place id')
     ) {
+      if (!hasAddress && (type === 'lodging' || type === 'meal' || type === 'fuel' || dwell > 0)) {
+        return {
+          reply: `### Google Maps Navigation Audit: ${name}\n\nThis physical stop (${type}) currently relies solely on raw latitude/longitude coordinates without a verified street address or Google Place ID.\n\nIn consumer Google Maps and Android Auto, raw coordinates for commercial venues or lodging can cause navigation to snap to rear service alleys, loading docks, or neighboring parcels. Providing a verified street address or Google Place ID ensures the in-car navigation routes directly to the main guest entrance or parking facility.`,
+          suggestions: [
+            {
+              id: `scout_fallback_addr_${Date.now()}`,
+              action: 'update_waypoint',
+              targetWaypointId: focused?.id || 'wp_focus',
+              name,
+              type,
+              lat: focused?.lat ?? 0,
+              lng: focused?.lng ?? 0,
+              dwell_minutes: dwell,
+              trigger_radius_miles: focused?.trigger_radius_miles ?? 2.0,
+              address: `${name}, Main Entrance`,
+              reason: 'Adds street address hint to ensure accurate Google Maps entrance routing.',
+            },
+          ],
+        };
+      }
+
       return {
-        reply: `### Waypoint Copy & ID Synchronization: ${name}\n\nUpon auditing **${name}**, there is a mismatch between the current stop purpose and its saved properties:\n\n- **Waypoint ID:** The ID is currently \`${focused?.id}\`, still referencing an obsolete fuel stop.\n- **Heads-Up Alert & Voice:** The alert title is currently *"${focused?.notification?.title || ''}"* and the spoken audio announces a *fuel stop*, even though this stop has been designated as a **${focused?.type || 'meal'}** stop at Red Rock Park.\n\nI have generated an update card below to synchronize the ID to \`gallup_red_rock_park\` and replace the notification text and voice alert with clean audio describing your 30-minute picnic break and scenic stretch before turning north on US-491.`,
+        reply: `### Google Maps Navigation: ${name}\n\n- **Category:** ${type}\n- **Address / Place:** ${focused?.address || 'Using verified coordinates'}\n- **Route Anchor:** ${focused?.is_route_anchor ? 'Yes (locks highway corridor in Google Maps)' : 'No (commentary or destination stop)'}\n\nThis waypoint is configured for navigation. If adjusting its alignment, ensure the coordinate sits at the road entrance rather than a pedestrian trail or back alley.`,
+        suggestions: [],
+      };
+    }
+
+    // 2. Alert copy / ID synchronization mismatch check
+    const hasFuelInText =
+      (focused?.id.toLowerCase().includes('fuel') ?? false) ||
+      (focused?.notification?.speech?.toLowerCase().includes('fuel') ?? false) ||
+      (focused?.notification?.title?.toLowerCase().includes('fuel') ?? false);
+    const isFuelType = type === 'fuel';
+
+    if (
+      (!isFuelType && hasFuelInText) ||
+      lastMessage.includes('mismatch') ||
+      lastMessage.includes('alert') ||
+      lastMessage.includes('speech') ||
+      lastMessage.includes('sync')
+    ) {
+      if (!isFuelType && hasFuelInText) {
+        const cleanId = (focused?.id || 'waypoint').replace(/_fuel/g, `_${type}`);
+        return {
+          reply: `### Waypoint Copy & ID Synchronization: ${name}\n\nUpon auditing **${name}**, there is a mismatch between the current stop category (**${type}**) and its saved properties:\n\n- **Waypoint ID:** The ID is currently \`${focused?.id}\`, which references a fuel stop.\n- **Heads-Up Alert & Voice:** The alert or speech copy mentions fuel, which conflicts with this **${type}** stop.\n\nI have generated an update card below to synchronize the ID and refresh the heads-up notification and voice copy.`,
+          suggestions: [
+            {
+              id: `scout_fallback_sync_${Date.now()}`,
+              action: 'update_waypoint',
+              targetWaypointId: focused?.id || 'wp_sync',
+              newId: cleanId,
+              name,
+              type,
+              lat: focused?.lat ?? 0,
+              lng: focused?.lng ?? 0,
+              dwell_minutes: dwell,
+              trigger_radius_miles: focused?.trigger_radius_miles ?? 2.0,
+              reason: `Synchronizes waypoint ID and notification copy with the ${type} category.`,
+              notification: {
+                title: name.slice(0, 30),
+                message: `Arriving at ${name}. Recommended ${dwell > 0 ? `${dwell}-minute ` : ''}stop.`,
+                speech: `Arriving at ${name}. ${dwell > 0 ? `Recommended ${dwell} minute stop.` : 'Enjoy the scenery.'}`,
+              },
+            },
+          ],
+        };
+      }
+    }
+
+    // 3. Drive-by dwell time check
+    if (type === 'scenic_drive_by' && dwell > 0) {
+      return {
+        reply: `### In-Transit Drive-By Configuration: ${name}\n\nThis waypoint is marked as a **scenic drive-by**, but has a scheduled dwell time of **${dwell} minutes**.\n\nIn-transit drive-by waypoints exist purely to trigger in-car spoken announcements as you drive past at highway speed. A non-zero dwell time causes the schedule cascade to allocate stopping time on the shoulder. Setting dwell to **0 minutes** keeps your timeline accurate.`,
         suggestions: [
           {
-            id: `scout_fallback_gallup_${Date.now()}`,
+            id: `scout_fallback_dwell_${Date.now()}`,
             action: 'update_waypoint',
-            targetWaypointId: focused?.id || 'gallup_fuel',
-            newId: 'gallup_red_rock_park',
-            name: 'Red Rock Park (Picnic & Stretch)',
-            type: 'meal',
-            lat: focused?.lat ?? 35.5458,
-            lng: focused?.lng ?? -108.6255,
-            dwell_minutes: 30,
-            trigger_radius_miles: 3.0,
-            reason: "Synchronizes waypoint ID to 'gallup_red_rock_park' and replaces outdated fuel alert text with updated picnic, lunch, and red rock park audio.",
-            notification: {
-              title: 'Red Rock Park Picnic & Stretch',
-              message: 'Target 11:30 AM MDT. 30-min picnic break & stretch among red rock cliffs before US-491.',
-              speech: 'Arriving at Red Rock Park outside Gallup. Note the one-hour time change to Mountain Daylight Time. Recommended thirty-minute picnic break and stretch before heading north on Highway 491.',
-            },
+            targetWaypointId: focused?.id || 'wp_dwell',
+            name,
+            type: 'scenic_drive_by',
+            lat: focused?.lat ?? 0,
+            lng: focused?.lng ?? 0,
+            dwell_minutes: 0,
+            trigger_radius_miles: focused?.trigger_radius_miles ?? 2.0,
+            reason: 'Resets in-transit drive-by dwell to 0 minutes for audio-only highway trigger.',
           },
         ],
       };
     }
 
-    // 2. Fuel stop verification / commercial amenities audit
-    if (
-      focused?.type === 'fuel' ||
-      focused?.name.toLowerCase().includes('maverik') ||
-      lastMessage.includes('fuel') ||
-      lastMessage.includes('gas') ||
-      lastMessage.includes('trailer') ||
-      lastMessage.includes('restroom') ||
-      lastMessage.includes('pump')
-    ) {
-      if (
-        focused?.id === 'wp_1789354019621_9s3w' ||
-        (focused && focused.lat > 36.70 && focused.lat < 36.76 && focused.lng > -108.30 && focused.lng < -108.20)
-      ) {
-        return {
-          reply: `### Commercial Fuel Stop Audit: ${name}\n\nUpon auditing the coordinates for **${name}**, the current pin (\`36.7465, -108.2675\`) sits in a residential mobile home park on Finch Ave off North Dustin, lacking commercial fuel bays or traveler amenities.\n\nThe genuine **Maverik Adventure's First Stop** in Farmington is located at **2710 W Main St** directly on the **US-64** commercial corridor (\`36.7328, -108.2443\`). It offers 16 high-flow fuel bays, clean public restrooms, hot prepared food, and easy highway re-entry with zero residential detours.`,
-          suggestions: [
-            {
-              id: `scout_fallback_maverik_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused?.id || 'wp_1789354019621_9s3w',
-              newId: 'maverik_farmington',
-              name: "Maverik Adventure's First Stop (Farmington)",
-              type: 'fuel',
-              lat: 36.7328,
-              lng: -108.2443,
-              dwell_minutes: 15,
-              trigger_radius_miles: 1.5,
-              reason: 'Relocated from residential mobile home park to the authentic Maverik commercial station at 2710 W Main St on US-64 with fuel pumps and clean restrooms.',
-              notification: {
-                title: 'Maverik Fuel & Food Stop',
-                message: '2710 W Main St on US-64. Fuel pumps, clean restrooms, and refreshments.',
-                speech: 'Approaching Maverik Adventure Stop on West Main Street. Recommended 15 minute fuel and rest break before heading into the mountains.',
-              },
-            },
-          ],
-        };
-      }
-    }
-
-    // 3. Scenic repositioning / timing audit for in-transit triggers (e.g. westward scenery adjustment)
-    if (
-      lastMessage.includes('farther west') ||
-      lastMessage.includes('further west') ||
-      lastMessage.includes('west') ||
-      lastMessage.includes('scenery') ||
-      lastMessage.includes('passed') ||
-      lastMessage.includes('earlier')
-    ) {
-      if (
-        focused?.id === 'dulce_foothills' ||
-        focused?.name.toLowerCase().includes('dulce') ||
-        focused?.notification?.title.toLowerCase().includes('pine') ||
-        lastMessage.includes('pine') ||
-        lastMessage.includes('dulce')
-      ) {
-        return {
-          reply: `### Scenic Trigger Repositioning: ${name}\n\nYou are spot on. By the time you reach Dulce, you are already through the primary ascent out of the San Juan Basin and only about 25 miles from Chama—meaning most of the dramatic elevation gain and pine forest transition has already passed.\n\nBecause an **in-transit scenic drive-by trigger** is meant to alert you as the landscape transforms, shifting this point ~28 miles west along US-64 places the trigger near the Carson National Forest / Gobernador transition zone (\`36.7625, -107.2018\`). This fires the audio alert right as the highway begins its steady climb into the ponderosa pines and foothills.\n\nI have prepared an update card below to reposition the trigger to the US-64 highway corridor, synchronize the title to **Climbing into Pine Country (US-64)**, and update the spoken audio for the ascent.`,
-          suggestions: [
-            {
-              id: `scout_fallback_dulce_reposition_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused?.id || 'dulce_foothills',
-              name: 'Climbing into Pine Country (US-64)',
-              type: 'scenic_drive_by',
-              lat: 36.7625,
-              lng: -107.2018,
-              dwell_minutes: 0,
-              trigger_radius_miles: 3.0,
-              reason: 'Relocated ~28 miles west on US-64 to fire audio commentary at the start of the pine foothills ascent rather than near the end of the corridor.',
-              notification: {
-                title: 'Climbing into Pine Country',
-                message: 'US-64 climbing into Carson National Forest foothills toward Chama.',
-                speech: 'Climbing east along US-64 into the Carson National Forest foothills. Watch for the transition into ponderosa pines and early autumn color as we gain elevation.',
-              },
-            },
-          ],
-        };
-      }
-    }
-
-    // 4. Highway alignment / coordinate audit for drive-by waypoints
-    if (
-      lastMessage.includes('coord') ||
-      lastMessage.includes('wrong') ||
-      lastMessage.includes('fix') ||
-      lastMessage.includes('shift') ||
-      lastMessage.includes('highway') ||
-      lastMessage.includes('drive by') ||
-      lastMessage.includes('drive-by') ||
-      lastMessage.includes('detour')
-    ) {
-      if (focused?.id === 'painted_desert_view' || focused?.name.toLowerCase().includes('painted desert')) {
-        return {
-          reply: `### Highway Alignment Audit: ${name}\n\nThe previous coordinate (\`34.9810, -110.0545\`) was placed south of Interstate 40 on unpaved Goodwater Rd / Quartzsite St, which forces navigation engines to route you off the freeway onto dirt tracks. For a drive-by waypoint with 0-minute dwell, the coordinate must remain directly on the **I-40 East** centerline (\`34.9809, -110.0525\`) to fire the audio announcement seamlessly without leaving the highway.`,
-          suggestions: [
-            {
-              id: `scout_fallback_pd_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused.id,
-              name: 'Painted Desert Badlands',
-              type: 'scenic_pull_off',
-              lat: 34.9809,
-              lng: -110.0525,
-              dwell_minutes: 0,
-              trigger_radius_miles: 4.0,
-              reason: 'Snaps coordinate to I-40 East centerline to eliminate the off-highway dirt road detour.',
-              notification: {
-                title: 'Painted Desert Scenery',
-                message: 'Look north of I-40 near Holbrook for vivid badlands views.',
-                speech: 'Scenic alert: Passing the Painted Desert badlands to the north of Interstate 40.',
-              },
-            },
-          ],
-        };
-      }
-
-      if (focused?.id === 'shiprock_peak' || focused?.name.toLowerCase().includes('shiprock')) {
-        return {
-          reply: `### Highway Alignment Audit: ${name}\n\nThe previous coordinate (\`36.6872, -108.6875\`) sat over a mile east into desert scrub on sacred Navajo tribal land, forcing an unpaved 2.3-mile off-road detour. For a drive-by waypoint with 0-minute dwell, the coordinate should be positioned on **US-491 North** (\`36.6878, -108.7078\`) directly abreast of the peak, triggering the in-car heads-up card and spoken overview without leaving the paved highway.`,
-          suggestions: [
-            {
-              id: `scout_fallback_sr_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused.id,
-              name: 'Shiprock Peak (US-491)',
-              type: 'scenic_pull_off',
-              lat: 36.6878,
-              lng: -108.7078,
-              dwell_minutes: 0,
-              trigger_radius_miles: 6.0,
-              reason: 'Aligns pin with US-491 North abreast of the peak, eliminating the off-road detour onto tribal land.',
-              notification: {
-                title: 'Shiprock Landmark Ahead',
-                message: '1,583-ft volcanic peak visible for miles. View from highway only (sacred tribal land).',
-                speech: 'Upcoming sight on your left: Shiprock Peak, rising fifteen hundred feet from the desert floor. Highway viewing only as this is sacred Navajo land.',
-              },
-            },
-          ],
-        };
-      }
-
-      if (focused?.id === 'dulce_foothills' || focused?.name.toLowerCase().includes('dulce')) {
-        return {
-          reply: `### Highway Alignment Audit: ${name}\n\nThe previous coordinate (\`36.9325, -106.9998\`) drifted 1.5 miles north into residential Apache Dr. To keep in-transit audio triggers clean without leaving the highway, the coordinate is snapped to **US-64 East** (\`36.9107, -106.9996\`).`,
-          suggestions: [
-            {
-              id: `scout_fallback_dulce_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused.id,
-              name: 'Jicarilla Apache Nation / Dulce',
-              type: 'scenic_pull_off',
-              lat: 36.9107,
-              lng: -106.9996,
-              dwell_minutes: 0,
-              trigger_radius_miles: 3.0,
-              reason: 'Snaps coordinate to US-64 East highway corridor, eliminating residential side-street detour.',
-              notification: {
-                title: 'Climbing into Pine & Aspen Country',
-                message: 'US-64 climbing toward Chama. Early autumn foliage.',
-                speech: 'Climbing through the Jicarilla Apache Nation on US-64. Watch for early autumn aspen color as we enter the foothills.',
-              },
-            },
-          ],
-        };
-      }
-
-      if (focused?.id === 'chama_arrival' || focused?.name.toLowerCase().includes('chama')) {
-        return {
-          reply: `### Arrival Location Audit: ${name}\n\nUpdating destination coordinate to the verified location of **Vista Del Rio Lodge** at 2595 US-64 in Chama (\`36.8748, -106.5835\`).`,
-          suggestions: [
-            {
-              id: `scout_fallback_chama_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused.id,
-              name: 'Chama / Vista Del Rio Lodge',
-              type: 'lodging',
-              lat: 36.8748,
-              lng: -106.5835,
-              dwell_minutes: 0,
-              trigger_radius_miles: 1.0,
-              reason: 'Positions arrival at the genuine lodge property on US-64 in Chama.',
-              notification: {
-                title: 'Arrival in Chama',
-                message: 'Target 5:00-5:30 PM. Check-in at Vista Del Rio Lodge. Dinner at Local.',
-                speech: 'Welcome to Chama. Vista Del Rio Lodge is on the right. Dinner tonight is at Local on Terrace Avenue.',
-              },
-            },
-          ],
-        };
-      }
-
-      return {
-        reply: `### Coordinate Verification: ${name}\n\nWhen verifying a waypoint along a highway corridor, ensure the pin is placed directly on the paved roadway or an authorized pull-off rather than on backcountry dirt tracks. You can drag the marker directly on the map canvas or use the search bar to lock to a street address.`,
-        suggestions: [],
-      };
-    }
-
+    // 4. Accessibility & parking
     if (lastMessage.includes('park') || lastMessage.includes('access') || lastMessage.includes('road')) {
       return {
-        reply: `### Waypoint Accessibility: ${name}\n\nBased on regional road attributes, highway pull-offs typically have designated paved shoulders or roadside gravel aprons. If traveling with a standard passenger car or rental SUV, exercise caution with unpaved road shoulders after rain.\n\nYou can click **Preview on Map** to zoom in and check satellite imagery against the road alignment.`,
+        reply: `### Waypoint Accessibility: ${name}\n\n- **Category:** ${type}\n- **Coordinates:** \`${(focused?.lat ?? 0).toFixed(4)}, ${(focused?.lng ?? 0).toFixed(4)}\`\n- **Dwell Time:** ${dwell} minutes\n\nFor highway pull-offs and commercial stops, ensure the pin is located on paved road access or authorized parking aprons rather than on hiking trails or dirt service tracks.`,
         suggestions: [],
       };
     }
 
+    // 5. Default generic waypoint overview
     return {
-      reply: `### Route Scout Audit: ${name}\n\n- **Target Arrival:** ${focused?.target_time || 'Dynamic schedule'}\n- **Dwell:** ${focused?.dwell_minutes ?? 15} minutes\n- **Trigger Distance:** ${focused?.trigger_radius_miles ?? 2.0} miles\n\nThis waypoint is positioned on your active driving leg. To adjust alert parameters, use the **Edit Alert & Voice** button in the timeline.`,
+      reply: `### Route Scout Audit: ${name}\n\n- **Category:** ${type}\n- **Target Arrival:** ${focused?.target_time || 'Dynamic schedule'}\n- **Dwell:** ${dwell} minutes\n- **Trigger Distance:** ${focused?.trigger_radius_miles ?? 2.0} miles\n${focused?.address ? `- **Address:** ${focused.address}\n` : ''}${focused?.is_route_anchor ? '- **Route Anchor:** Yes (forces scenic highway routing)\n' : ''}\nThis waypoint is positioned on your active driving leg. To adjust alert parameters, use the **Edit Alert & Voice** button in the timeline.`,
       suggestions: [],
     };
   }
@@ -575,202 +539,110 @@ export function generateTemplateScoutResponse(request: ScoutChatRequest): { repl
   const origin = tripContext.origin || 'Start';
   const dest = tripContext.destination || 'End';
 
-  // Audit / coordinate verification / off-highway detours / fuel stop checks / copy sync
+  // Audit / coordinate verification / off-highway detours / fuel stop checks / copy sync / google maps
   if (
     lastMessage.includes('audit') ||
+    lastMessage.includes('google maps') ||
+    lastMessage.includes('navigation') ||
     lastMessage.includes('highway') ||
-    lastMessage.includes('off the highway') ||
-    lastMessage.includes('fuel') ||
-    lastMessage.includes('gas') ||
-    lastMessage.includes('trailer') ||
-    lastMessage.includes('broken') ||
-    lastMessage.includes('coord') ||
     lastMessage.includes('detour') ||
-    lastMessage.includes('drive by') ||
-    lastMessage.includes('drive-by') ||
-    lastMessage.includes('wrong') ||
-    lastMessage.includes('rule') ||
-    lastMessage.includes('fix') ||
+    lastMessage.includes('fuel') ||
+    lastMessage.includes('mismatch') ||
     lastMessage.includes('alert') ||
     lastMessage.includes('voice') ||
-    lastMessage.includes('mismatch')
+    lastMessage.includes('rule') ||
+    lastMessage.includes('fix')
   ) {
     const auditSuggestions: ScoutSuggestion[] = [];
     const auditNotes: string[] = [];
 
-    // Check Painted Desert
-    const pdWp = tripContext.waypoints.find(
-      (w) => w.id === 'painted_desert_view' || (w.lat > 34.97 && w.lat < 34.99 && w.lng < -110.05)
-    );
-    if (pdWp && (Math.abs(pdWp.lat - 34.9809) > 0.0005 || Math.abs(pdWp.lng - (-110.0525)) > 0.0005)) {
-      auditSuggestions.push({
-        id: `scout_audit_pd_${Date.now()}`,
-        action: 'update_waypoint',
-        targetWaypointId: pdWp.id,
-        name: 'Painted Desert Badlands',
-        type: 'scenic_pull_off',
-        lat: 34.9809,
-        lng: -110.0525,
-        dwell_minutes: 0,
-        trigger_radius_miles: 4.0,
-        reason: 'Snaps coordinate from Goodwater Rd dirt track back to I-40 East centerline to eliminate off-highway detour.',
-        notification: {
-          title: 'Painted Desert Scenery',
-          message: 'Look north of I-40 near Holbrook for vivid badlands views.',
-          speech: 'Scenic alert: Passing the Painted Desert badlands to the north of Interstate 40.',
-        },
-      });
-      auditNotes.push('**Painted Desert Badlands**: Relocated from a dirt road south of I-40 directly onto the I-40 East centerline.');
-    }
+    tripContext.waypoints.forEach((w) => {
+      const dwell = w.dwell_minutes ?? 0;
 
-    // Check Gallup / Red Rock Park mismatch (ID is still gallup_fuel or speech/card still mentions fuel stop)
-    const gallupWp = tripContext.waypoints.find(
-      (w) =>
-        w.id === 'gallup_fuel' ||
-        (w.name.toLowerCase().includes('red rock') &&
-          (w.id.toLowerCase().includes('fuel') ||
-            (w.notification && w.notification.speech.toLowerCase().includes('fuel')))) ||
-        (w.type === 'meal' &&
-          (w.id.toLowerCase().includes('fuel') ||
-            (w.notification && w.notification.speech.toLowerCase().includes('fuel'))))
-    );
-    if (gallupWp) {
-      auditSuggestions.push({
-        id: `scout_audit_gallup_${Date.now()}`,
-        action: 'update_waypoint',
-        targetWaypointId: gallupWp.id,
-        newId: 'gallup_red_rock_park',
-        name: 'Red Rock Park (Picnic & Stretch)',
-        type: 'meal',
-        lat: gallupWp.lat,
-        lng: gallupWp.lng,
-        dwell_minutes: 30,
-        trigger_radius_miles: 3.0,
-        reason: "Synchronizes waypoint ID to 'gallup_red_rock_park' and updates heads-up alert & voice notification from obsolete fuel text to picnic, lunch, and red rock park audio.",
-        notification: {
-          title: 'Red Rock Park Picnic & Stretch',
-          message: 'Target 11:30 AM MDT. 30-min picnic break & stretch among red rock cliffs before US-491.',
-          speech: 'Arriving at Red Rock Park outside Gallup. Note the one-hour time change to Mountain Daylight Time. Recommended thirty-minute picnic break and stretch before heading north on Highway 491.',
-        },
-      });
-      auditNotes.push('**Red Rock Park (Picnic & Stretch)**: Synchronized waypoint ID to `gallup_red_rock_park` and replaced obsolete fuel stop card title and voice alert with updated picnic and park copy.');
-    }
+      // Check 1: Category vs notification copy / ID mismatch
+      const hasFuelText =
+        w.id.toLowerCase().includes('fuel') ||
+        (w.notification?.speech?.toLowerCase().includes('fuel') ?? false) ||
+        (w.notification?.title?.toLowerCase().includes('fuel') ?? false);
+      if (w.type !== 'fuel' && hasFuelText) {
+        const cleanId = w.id.replace(/_fuel/g, `_${w.type}`);
+        auditSuggestions.push({
+          id: `scout_audit_sync_${w.id}_${Date.now()}`,
+          action: 'update_waypoint',
+          targetWaypointId: w.id,
+          newId: cleanId,
+          name: w.name,
+          type: w.type,
+          lat: w.lat,
+          lng: w.lng,
+          dwell_minutes: dwell,
+          trigger_radius_miles: w.trigger_radius_miles,
+          reason: `Synchronizes waypoint ID and replaces obsolete fuel alert copy with text matching ${w.type} category.`,
+          notification: {
+            title: w.name.slice(0, 30),
+            message: `Arriving at ${w.name}. Recommended ${dwell > 0 ? `${dwell}-min ` : ''}stop.`,
+            speech: `Arriving at ${w.name}. ${dwell > 0 ? `Recommended ${dwell} minute break.` : 'Enjoy the view.'}`,
+          },
+        });
+        auditNotes.push(`**${w.name}**: Synchronized waypoint ID and updated notification copy to remove outdated fuel references.`);
+      }
 
-    // Check Shiprock Peak
-    const srWp = tripContext.waypoints.find(
-      (w) => w.id === 'shiprock_peak' || (w.lat > 36.67 && w.lat < 36.70 && w.lng > -108.70 && w.lng < -108.67)
-    );
-    if (srWp && (Math.abs(srWp.lat - 36.6878) > 0.0005 || Math.abs(srWp.lng - (-108.7078)) > 0.0005)) {
-      auditSuggestions.push({
-        id: `scout_audit_sr_${Date.now()}`,
-        action: 'update_waypoint',
-        targetWaypointId: srWp.id,
-        name: 'Shiprock Peak (US-491)',
-        type: 'scenic_pull_off',
-        lat: 36.6878,
-        lng: -108.7078,
-        dwell_minutes: 0,
-        trigger_radius_miles: 6.0,
-        reason: 'Aligns pin directly on US-491 North abreast of the peak, eliminating a 2.3-mile off-road detour onto tribal land.',
-        notification: {
-          title: 'Shiprock Landmark Ahead',
-          message: '1,583-ft volcanic peak visible for miles. View from highway only (sacred tribal land).',
-          speech: 'Upcoming sight on your left: Shiprock Peak, rising fifteen hundred feet from the desert floor. Highway viewing only as this is sacred Navajo land.',
-        },
-      });
-      auditNotes.push('**Shiprock Peak**: Moved from desert scrub back to US-491 North for highway viewing without leaving the route.');
-    }
+      // Check 2: Scenic drive-by with non-zero dwell
+      if (w.type === 'scenic_drive_by' && dwell > 0) {
+        auditSuggestions.push({
+          id: `scout_audit_dwell_${w.id}_${Date.now()}`,
+          action: 'update_waypoint',
+          targetWaypointId: w.id,
+          name: w.name,
+          type: 'scenic_drive_by',
+          lat: w.lat,
+          lng: w.lng,
+          dwell_minutes: 0,
+          trigger_radius_miles: w.trigger_radius_miles,
+          reason: 'Resets in-transit drive-by dwell time to 0 minutes for audio-only highway announcement.',
+        });
+        auditNotes.push(`**${w.name}**: Reset in-transit scenic drive-by dwell from ${dwell}m to 0m.`);
+      }
 
-    // Check Farmington Fuel Stop
-    const fuelWp = tripContext.waypoints.find(
-      (w) =>
-        w.id === 'wp_1789354019621_9s3w' ||
-        w.name.toLowerCase().includes('maverik') ||
-        (w.type === 'fuel' && w.lat > 36.73 && w.lat < 36.76)
-    );
-    if (fuelWp && (Math.abs(fuelWp.lat - 36.7328) > 0.005 || Math.abs(fuelWp.lng - (-108.2443)) > 0.005)) {
-      auditSuggestions.push({
-        id: `scout_audit_fuel_${Date.now()}`,
-        action: 'update_waypoint',
-        targetWaypointId: fuelWp.id,
-        newId: 'maverik_farmington',
-        name: "Maverik Adventure's First Stop (Farmington)",
-        type: 'fuel',
-        lat: 36.7328,
-        lng: -108.2443,
-        dwell_minutes: 15,
-        trigger_radius_miles: 1.5,
-        reason: 'Relocated from residential mobile home park to the authentic Maverik commercial station at 2710 W Main St on US-64 with multiple pumps and clean restrooms.',
-        notification: {
-          title: 'Maverik Fuel & Food Stop',
-          message: '2710 W Main St on US-64. Fuel pumps, clean restrooms, and refreshments.',
-          speech: 'Approaching Maverik Adventure Stop on West Main Street. Recommended 15 minute fuel and rest break before heading into the mountains.',
-        },
-      });
-      auditNotes.push("**Farmington Fuel Stop**: Corrected from a residential mobile home park on Finch Ave to the genuine Maverik commercial station at 2710 W Main St on US-64.");
-    }
-
-    // Check Dulce Foothills
-    const dulceWp = tripContext.waypoints.find(
-      (w) => w.id === 'dulce_foothills' || (w.lat > 36.92 && w.lng < -106.99)
-    );
-    if (dulceWp && (Math.abs(dulceWp.lat - 36.9107) > 0.001 || Math.abs(dulceWp.lng - (-106.9996)) > 0.001)) {
-      auditSuggestions.push({
-        id: `scout_audit_dulce_${Date.now()}`,
-        action: 'update_waypoint',
-        targetWaypointId: dulceWp.id,
-        name: 'Jicarilla Apache Nation / Dulce',
-        type: 'scenic_pull_off',
-        lat: 36.9107,
-        lng: -106.9996,
-        dwell_minutes: 0,
-        trigger_radius_miles: 3.0,
-        reason: 'Snaps coordinate to US-64 East highway corridor, eliminating residential side-street detour.',
-        notification: {
-          title: 'Climbing into Pine & Aspen Country',
-          message: 'US-64 climbing toward Chama. Early autumn foliage.',
-          speech: 'Climbing through the Jicarilla Apache Nation on US-64. Watch for early autumn aspen color as we enter the foothills.',
-        },
-      });
-      auditNotes.push('**Jicarilla Apache Nation / Dulce**: Snapped to US-64 East centerline to remove the 1.5-mile residential spur.');
-    }
-
-    // Check Chama Arrival
-    const chamaWp = tripContext.waypoints.find(
-      (w) => w.id === 'chama_arrival' || (w.lat > 36.87 && w.lat < 36.89 && w.lng > -106.59 && w.lng < -106.57)
-    );
-    if (chamaWp && Math.abs(chamaWp.lat - 36.8748) > 0.002) {
-      auditSuggestions.push({
-        id: `scout_audit_chama_${Date.now()}`,
-        action: 'update_waypoint',
-        targetWaypointId: chamaWp.id,
-        name: 'Chama / Vista Del Rio Lodge',
-        type: 'lodging',
-        lat: 36.8748,
-        lng: -106.5835,
-        dwell_minutes: 0,
-        trigger_radius_miles: 1.0,
-        reason: 'Positions arrival at the genuine lodge property on US-64 in Chama.',
-        notification: {
-          title: 'Arrival in Chama',
-          message: 'Target 5:00-5:30 PM. Check-in at Vista Del Rio Lodge. Dinner at Local.',
-          speech: 'Welcome to Chama. Vista Del Rio Lodge is on the right. Dinner tonight is at Local on Terrace Avenue.',
-        },
-      });
-      auditNotes.push('**Chama Arrival**: Positioned directly at Vista Del Rio Lodge on US-64.');
-    }
+      // Check 3: Physical stops missing street address / Place ID
+      if (
+        (w.type === 'lodging' || w.type === 'meal' || (w.type === 'fuel' && !w.address)) &&
+        !w.address &&
+        !w.google_place_id
+      ) {
+        auditSuggestions.push({
+          id: `scout_audit_nav_${w.id}_${Date.now()}`,
+          action: 'update_waypoint',
+          targetWaypointId: w.id,
+          name: w.name,
+          type: w.type,
+          lat: w.lat,
+          lng: w.lng,
+          dwell_minutes: dwell,
+          trigger_radius_miles: w.trigger_radius_miles,
+          address: `${w.name}`,
+          reason: 'Adds entity name as address query to prevent Google Maps from snapping to back alleys or adjacent lots.',
+        });
+        auditNotes.push(`**${w.name}**: Configured entity name address query to ensure precise Google Maps entrance navigation.`);
+      }
+    });
 
     if (auditSuggestions.length > 0) {
       return {
-        reply: `### Route Audit & Highway Alignment Report\n\nI have reviewed the waypoints along the **${origin} → ${dest}** corridor. Here are the issues identified and corrected:\n\n${auditNotes.map((n) => `- ${n}`).join('\n')}\n\nDrive-by waypoints (0m dwell) are now strictly pinned to the highway centerline, preventing routing detours onto unpaved tracks or neighborhood side streets. Commercial stops and meal breaks have synchronized waypoint IDs, realistic highway access, and fully updated heads-up and spoken voice alerts. You can click **Preview** on each card below or **Update** to apply the fixes directly to your timeline.`,
+        reply: `### Route Audit & Navigation Report\n\nI have reviewed the waypoints along the **${origin} → ${dest}** corridor. Here are the issues identified and corrected:\n\n${auditNotes.map((n) => `- ${n}`).join('\n')}\n\nYou can click **Preview** on each card below or **Update** to apply the fixes directly to your timeline.`,
         suggestions: auditSuggestions,
       };
     }
+
+    return {
+      reply: `### Route Audit & Navigation Report\n\nI have audited the ${tripContext.waypoints.length} waypoints along the **${origin} → ${dest}** corridor:\n\n- **Google Maps Navigation:** Physical stops have valid target locations, and in-transit triggers are configured for highway travel.\n- **Highway Alignment:** All scenic drive-by waypoints have 0m dwell for seamless audio announcements without off-highway detours.\n- **Notification Synchronization:** Waypoint IDs, heads-up cards, and voice audio match their assigned categories.\n\nYour route is clean and ready for navigation.`,
+      suggestions: [],
+    };
   }
 
   if (lastMessage.includes('lunch') || lastMessage.includes('food') || lastMessage.includes('eat') || lastMessage.includes('dine')) {
-    const midwayLat = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lat + tripContext.waypoints[tripContext.waypoints.length - 1].lat) / 2 : 35.5;
-    const midwayLng = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lng + tripContext.waypoints[tripContext.waypoints.length - 1].lng) / 2 : -109.5;
+    const midwayLat = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lat + tripContext.waypoints[tripContext.waypoints.length - 1].lat) / 2 : 35.0;
+    const midwayLng = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lng + tripContext.waypoints[tripContext.waypoints.length - 1].lng) / 2 : -110.0;
 
     return {
       reply: `### Mid-Route Dining Recommendations\n\nAlong the drive from **${origin}** to **${dest}**, timing lunch approximately halfway into your drive keeps driver fatigue low. Consider established highway trading posts or downtown plazas for reliable dining and clean restrooms.`,
@@ -803,6 +675,7 @@ export function getQuickPrompts(scope: ScoutScope): string[] {
   if (scope.type === 'waypoint') {
     const name = scope.waypointName || 'this stop';
     return [
+      `Check Google Maps navigation & address for ${name}`,
       `Is the coordinate for ${name} directly on the highway?`,
       `Check if alert notification and speech match ${name}`,
       `Check parking and road accessibility for ${name}`,
@@ -813,9 +686,7 @@ export function getQuickPrompts(scope: ScoutScope): string[] {
 
   return [
     'Where should we stop for lunch along this leg?',
-    'Audit route coordinates for off-highway detours',
-    'Audit waypoints for outdated alerts, IDs, or fuel/meal mismatches',
-    'Verify fuel stops have commercial amenities & clean restrooms',
+    'Audit route for Google Maps navigation, detours & stop accuracy',
     'What scenic pull-offs exist on this corridor?',
     'Check for long fuel deserts or remote stretches',
     'How is our overall driving pace today?',
@@ -847,6 +718,12 @@ export class ScoutService {
     const domainPrompt = buildScoutDomainPrompt(request);
     let lastError: string | null = null;
 
+    const knownPlaceIds = new Set<string>(
+      (request.tripContext?.waypoints || [])
+        .map((w) => w.google_place_id)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    );
+
     // 1. Try Primary: agy adapter
     if (preferredEngine !== 'cloud') {
       const agy = this.aiService.getAdapter('agy');
@@ -855,12 +732,12 @@ export class ScoutService {
           const prompt = agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
           const rawOutput = await agy.generate(prompt);
           const sanitized = agy.sanitizeResponse ? agy.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized);
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
           return { reply, suggestions, sessionId, engine: 'agy', thought };
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           lastError = msg;
-          console.warn(`[RouteScout] agy adapter generation failed (${msg}), attempting cloud fallback...`);
+          console.warn(`[RouteScout] agy adapter generation failed (${msg})`);
         }
       }
     }
@@ -874,7 +751,7 @@ export class ScoutService {
           const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
           const rawOutput = await cloud.generate(prompt, apiKey);
           const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized);
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
           return { reply, suggestions, sessionId, engine: 'cloud', thought };
         }
       } catch (err: unknown) {
@@ -916,6 +793,12 @@ export class ScoutService {
     const domainPrompt = buildScoutDomainPrompt(request);
     let lastError: string | null = null;
 
+    const knownPlaceIds = new Set<string>(
+      (request.tripContext?.waypoints || [])
+        .map((w) => w.google_place_id)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    );
+
     // 1. Try Primary: agy adapter streaming
     if (preferredEngine !== 'cloud') {
       const agy = this.aiService.getAdapter('agy') as (AgyHarnessAdapter | undefined);
@@ -940,7 +823,7 @@ export class ScoutService {
           });
 
           const sanitized = agy.sanitizeResponse ? agy.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized);
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
           if (suggestions.length > 0) {
             onEvent({ event: 'suggestions', data: { suggestions } });
           }
@@ -970,7 +853,7 @@ export class ScoutService {
         const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
         const rawOutput = await cloud.generate(prompt, apiKey);
         const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
-        const { reply, suggestions, thought } = parseScoutResponse(sanitized);
+        const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
         onEvent({ event: 'delta', data: { text: reply } });
         if (suggestions.length > 0) {
           onEvent({ event: 'suggestions', data: { suggestions } });

@@ -505,5 +505,52 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
       const duration = estimateDriveDurationSeconds(100, 50);
       expect(duration).toBe(7200);
     });
+
+    it('ensures final lodging stop has 0 dwell minutes and does not add dwell to totalTripSeconds', () => {
+      const waypoints: TimelineCascadeWaypoint[] = [
+        {
+          id: 'w1',
+          name: 'Origin',
+          lat: 33.4357,
+          lng: -112.0152,
+          dwell_minutes: 0,
+          type: 'origin',
+        },
+        {
+          id: 'w2',
+          name: 'Intermediate Scenic Overlook',
+          lat: 34.801,
+          lng: -111.7645,
+          dwell_minutes: 30,
+          type: 'scenic_pull_off',
+        },
+        {
+          id: 'w3',
+          name: 'Overnight Hotel',
+          lat: 35.1901,
+          lng: -111.6207,
+          dwell_minutes: 60, // Should be clamped to 0 because it's the final lodging stop
+          type: 'lodging',
+        },
+      ];
+
+      const result = calculateTimelineCascade({
+        baseDate: '2026-10-09',
+        departureTime: '09:00:00',
+        waypoints,
+        driveDurationsSeconds: [3600, 1800], // 1 hour + 30 mins = 5400s total drive
+      });
+
+      expect(result.stops).toHaveLength(3);
+      expect(result.stops[0].dwell_minutes).toBe(0);
+      expect(result.stops[1].dwell_minutes).toBe(30);
+      expect(result.stops[2].dwell_minutes).toBe(0); // Clamped to 0
+      expect(result.totalDwellMinutes).toBe(30); // Only intermediate dwell (30 min)
+      // Total trip duration = 5400s drive (90 min) + 30 min intermediate dwell = 120 min = 7200s
+      expect(result.totalDriveSeconds).toBe(5400);
+      expect(result.totalTripSeconds).toBe(7200);
+      // Arrival and departure time at the overnight hotel should match
+      expect(result.stops[2].arrivalTime).toBe(result.stops[2].departureTime);
+    });
   });
 });

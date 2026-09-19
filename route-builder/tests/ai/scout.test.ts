@@ -7,6 +7,7 @@ import {
   getQuickPrompts,
   ScoutService,
   sanitizeScoutReply,
+  validateScoutPlaceId,
 } from '../../server/services/scoutService.js';
 import { AgyHarnessAdapter, GeminiStudioHarnessAdapter } from '../../server/services/aiService.js';
 import { createApp } from '../../server/app.js';
@@ -105,6 +106,37 @@ describe('Route Scout Service & Prompts', () => {
       expect(domainPrompt).toContain('SYNCHRONIZE WAYPOINT ID, HEADS-UP NOTIFICATION & VOICE ALERT COPY');
       expect(domainPrompt).toContain('newId');
       expect(domainPrompt).toContain('CRITICAL NOTIFICATION CONSISTENCY');
+    });
+
+    it('domain prompt includes Google Maps navigation auditing and route anchor guidelines', () => {
+      const scope: ScoutScope = { type: 'day', dayNumber: 1 };
+      const request: ScoutChatRequest = {
+        scope,
+        messages: [{ role: 'user', content: 'Audit my route waypoints for Google Maps' }],
+        tripContext: {
+          ...sampleTripContext,
+          waypoints: [
+            {
+              id: 'wp_sedona',
+              name: 'Sedona Red Rocks Vista',
+              type: 'scenic_drive_by',
+              lat: 34.775,
+              lng: -111.7635,
+              address: 'AZ-179 at Bell Rock Blvd, Sedona, AZ',
+              google_place_id: 'ChIJ_sedona',
+              is_route_anchor: true,
+            },
+          ],
+        },
+      };
+
+      const domainPrompt = buildScoutDomainPrompt(request);
+      expect(domainPrompt).toContain('GOOGLE MAPS NAVIGATION AUDITING & ROUTE ANCHORS');
+      expect(domainPrompt).toContain('DIVIDED HIGHWAY HAZARDS');
+      expect(domainPrompt).toContain('AUTHENTIC ENTRANCES FOR PHYSICAL STOPS');
+      expect(domainPrompt).toContain('Address: "AZ-179 at Bell Rock Blvd, Sedona, AZ"');
+      expect(domainPrompt).toContain('PlaceID: "ChIJ_sedona"');
+      expect(domainPrompt).toContain('[Route Anchor]');
     });
 
     it('AgyHarnessAdapter decorates domain prompt with green tool permissions and guardrails', () => {
@@ -288,6 +320,123 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions[0].notification?.speech).toContain('Approaching Maverik Adventure Stop');
     });
 
+    it('extracts address, google_place_id, and is_route_anchor from suggestion card', () => {
+      const rawModelOutput = `I have audited your Flagstaff hotel stop and added the official Place ID and address.
+
+\`\`\`json:suggestions
+[
+  {
+    "action": "update_waypoint",
+    "targetWaypointId": "flagstaff_little_america",
+    "name": "Little America Hotel Flagstaff",
+    "type": "lodging",
+    "lat": 35.1901,
+    "lng": -111.6207,
+    "dwell_minutes": 0,
+    "trigger_radius_miles": 2.0,
+    "address": "2515 E Butler Ave, Flagstaff, AZ 86004",
+    "google_place_id": "ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q",
+    "is_route_anchor": false,
+    "reason": "Authentic hotel lobby address and verified Google Place ID.",
+    "notification": {
+      "title": "Little America Check-in",
+      "message": "Turn into main lodge driveway off Butler Ave.",
+      "speech": "Arriving at Little America Hotel on Butler Avenue."
+    }
+  }
+]
+\`\`\``;
+
+      const { reply, suggestions } = parseScoutResponse(rawModelOutput);
+      expect(reply).toContain('I have audited your Flagstaff hotel stop');
+      expect(suggestions).toHaveLength(1);
+      expect(suggestions[0].address).toBe('2515 E Butler Ave, Flagstaff, AZ 86004');
+      expect(suggestions[0].google_place_id).toBe('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
+      expect(suggestions[0].is_route_anchor).toBe(false);
+    });
+
+    it('deterministically strips hallucinated or unverified Google Place IDs unless present in knownPlaceIds', () => {
+      const rawModelOutput = `Audited stop.
+\`\`\`json:suggestions
+[
+  {
+    "action": "update_waypoint",
+    "targetWaypointId": "wp_sedona",
+    "name": "Sedona Red Rocks Vista",
+    "type": "scenic_drive_by",
+    "lat": 34.7865,
+    "lng": -111.7612,
+    "dwell_minutes": 0,
+    "google_place_id": "ChIJfake_hallucinated_place_id_12345",
+    "is_route_anchor": true
+  }
+]
+\`\`\``;
+
+      // With an empty knownPlaceIds set (no verified place IDs on the route yet), the newly invented ID is stripped
+      const { suggestions: stripped } = parseScoutResponse(rawModelOutput, {
+        knownPlaceIds: new Set(['ChIJverified_other_id_1234567890']),
+      });
+      expect(stripped[0].google_place_id).toBeUndefined();
+      expect(stripped[0].is_route_anchor).toBe(true);
+
+      // When the ID is in knownPlaceIds, it is retained
+      const { suggestions: retained } = parseScoutResponse(rawModelOutput, {
+        knownPlaceIds: new Set(['ChIJfake_hallucinated_place_id_12345']),
+      });
+      expect(retained[0].google_place_id).toBe('ChIJfake_hallucinated_place_id_12345');
+    });
+
+    it('validates Google Place ID formatting with validateScoutPlaceId', () => {
+      expect(validateScoutPlaceId('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q')).toBe('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
+      // Must start with ChIJ
+      expect(validateScoutPlaceId('invalid_place_id_12345')).toBeUndefined();
+      // Too short
+      expect(validateScoutPlaceId('ChIJshort')).toBeUndefined();
+      // Non-string
+      expect(validateScoutPlaceId(null)).toBeUndefined();
+      expect(validateScoutPlaceId(12345)).toBeUndefined();
+      expect(validateScoutPlaceId('')).toBeUndefined();
+
+      // Whitelist check
+      const whitelist = new Set(['ChIJvalid_and_known_123456789']);
+      expect(validateScoutPlaceId('ChIJvalid_and_known_123456789', whitelist)).toBe('ChIJvalid_and_known_123456789');
+      expect(validateScoutPlaceId('ChIJvalid_but_unknown_12345678', whitelist)).toBeUndefined();
+    });
+
+    it('strictly forces is_route_anchor = false on physical stops even if AI flags them as anchors', () => {
+      const rawModelOutput = `I recommend adding a dinner stop with route anchor.
+\`\`\`json:suggestions
+[
+  {
+    "action": "add_waypoint",
+    "name": "Sedona Grill",
+    "type": "meal",
+    "lat": 34.8697,
+    "lng": -111.7609,
+    "dwell_minutes": 45,
+    "is_route_anchor": true
+  },
+  {
+    "action": "add_waypoint",
+    "name": "Oak Creek Highway Anchor",
+    "type": "scenic_drive_by",
+    "lat": 34.9876,
+    "lng": -111.7543,
+    "dwell_minutes": 0,
+    "is_route_anchor": true
+  }
+]
+\`\`\``;
+
+      const { suggestions } = parseScoutResponse(rawModelOutput);
+      expect(suggestions).toHaveLength(2);
+      // Meal stop with 45m dwell: must NOT be an anchor
+      expect(suggestions[0].is_route_anchor).toBe(false);
+      // Scenic drive-by with 0m dwell: allowed to be an anchor
+      expect(suggestions[1].is_route_anchor).toBe(true);
+    });
+
     it('separates agent tool preamble from substantive answer', () => {
       const rawWithPreamble = `I have launched a query to inspect the exact road geometry and satellite imagery around exit 294 on I-40. I will analyze the results as soon as they return.
 
@@ -396,112 +545,92 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(result.reply).toContain('Waypoint Accessibility: Shiprock Peak');
     });
 
-    it('provides multi-stop route audit fallback for day scope detecting off-highway detours and trailer park fuel stop', () => {
+    it('provides multi-stop route audit fallback for day scope detecting missing addresses, copy mismatches, and drive-by dwell', () => {
       const problematicTripContext: ScoutTripContext = {
-        tripName: 'Phoenix to Albuquerque Road Trip',
-        origin: 'Flagstaff, AZ',
-        destination: 'Chama, NM',
+        tripName: 'Summer Road Trip',
+        origin: 'Origin City',
+        destination: 'Destination City',
         waypoints: [
           {
-            id: 'painted_desert_view',
-            name: 'Painted Desert Badlands',
-            type: 'scenic_pull_off',
+            id: 'scenic_overlook_driveby',
+            name: 'Scenic Mountain Overlook',
+            type: 'scenic_drive_by',
             lat: 34.981,
-            lng: -110.0545, // on dirt Goodwater Rd
-            dwell_minutes: 0,
+            lng: -110.0545,
+            dwell_minutes: 15, // error: drive-by should have 0 dwell
           },
           {
-            id: 'gallup_fuel',
-            name: 'Red Rock Park (Picnic & Stretch)',
+            id: 'park_fuel',
+            name: 'State Park Picnic Area',
             type: 'meal',
             lat: 35.5458,
             lng: -108.6255,
             dwell_minutes: 30,
+            address: '100 State Park Rd',
             notification: {
-              title: 'Gallup, NM - Fuel & Stretch',
-              message: 'Target 11:30 AM MDT. Turn north on US-491 next.',
-              speech: 'Arriving in Gallup, New Mexico. Fuel stop recommended before heading north on US-491.',
+              title: 'Park Fuel Stop',
+              message: 'Target 11:30 AM. Fuel stop.',
+              speech: 'Arriving at Park. Fuel stop recommended.',
             },
           },
           {
-            id: 'shiprock_peak',
-            name: 'Shiprock Peak (US-491)',
-            type: 'scenic_pull_off',
-            lat: 36.6872,
-            lng: -108.6875, // 1.1 mi into desert scrub
+            id: 'lodge_arrival',
+            name: 'Valley Mountain Lodge',
+            type: 'lodging',
+            lat: 36.8748,
+            lng: -106.5835,
             dwell_minutes: 0,
-          },
-          {
-            id: 'wp_1789354019621_9s3w',
-            name: "Maverik Adventure's First Stop (Farmington)",
-            type: 'fuel',
-            lat: 36.7465,
-            lng: -108.2675, // residential trailer park on Finch Ave
-            dwell_minutes: 15,
+            // error: physical stop without address or google_place_id
           },
         ],
       };
 
       const request: ScoutChatRequest = {
-        scope: { type: 'day', dayNumber: 2 },
-        messages: [{ role: 'user', content: 'Look carefully at some of the drive by waypoints and the fuel stop. They each take me off the highway. Can you audit and fix these?' }],
+        scope: { type: 'day', dayNumber: 1 },
+        messages: [{ role: 'user', content: 'Audit route for Google Maps navigation, detours & stop accuracy' }],
         tripContext: problematicTripContext,
       };
 
       const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Route Audit & Highway Alignment Report');
-      expect(result.suggestions.length).toBe(4);
+      expect(result.reply).toContain('Route Audit & Navigation Report');
+      expect(result.suggestions.length).toBe(3);
 
-      const pdSug = result.suggestions.find((s) => s.targetWaypointId === 'painted_desert_view');
-      expect(pdSug).toBeDefined();
-      expect(pdSug?.lat).toBe(34.9809);
-      expect(pdSug?.lng).toBe(-110.0525);
-      expect(pdSug?.dwell_minutes).toBe(0);
+      const dwellSug = result.suggestions.find((s) => s.targetWaypointId === 'scenic_overlook_driveby');
+      expect(dwellSug).toBeDefined();
+      expect(dwellSug?.dwell_minutes).toBe(0);
 
-      const gallupSug = result.suggestions.find((s) => s.targetWaypointId === 'gallup_fuel');
-      expect(gallupSug).toBeDefined();
-      expect(gallupSug?.newId).toBe('gallup_red_rock_park');
-      expect(gallupSug?.type).toBe('meal');
-      expect(gallupSug?.notification?.title).toBe('Red Rock Park Picnic & Stretch');
-      expect(gallupSug?.notification?.speech).toContain('picnic');
-      expect(gallupSug?.notification?.speech).not.toContain('Fuel stop');
+      const syncSug = result.suggestions.find((s) => s.targetWaypointId === 'park_fuel');
+      expect(syncSug).toBeDefined();
+      expect(syncSug?.newId).toBe('park_meal');
+      expect(syncSug?.type).toBe('meal');
+      expect(syncSug?.notification?.speech).not.toContain('Fuel stop');
 
-      const srSug = result.suggestions.find((s) => s.targetWaypointId === 'shiprock_peak');
-      expect(srSug).toBeDefined();
-      expect(srSug?.lat).toBe(36.6878);
-      expect(srSug?.lng).toBe(-108.7078);
-      expect(srSug?.dwell_minutes).toBe(0);
-
-      const fuelSug = result.suggestions.find((s) => s.targetWaypointId === 'wp_1789354019621_9s3w');
-      expect(fuelSug).toBeDefined();
-      expect(fuelSug?.newId).toBe('maverik_farmington');
-      expect(fuelSug?.lat).toBe(36.7328);
-      expect(fuelSug?.lng).toBe(-108.2443);
-      expect(fuelSug?.type).toBe('fuel');
-      expect(fuelSug?.notification?.title).toContain('Maverik');
+      const navSug = result.suggestions.find((s) => s.targetWaypointId === 'lodge_arrival');
+      expect(navSug).toBeDefined();
+      expect(navSug?.address).toBe('Valley Mountain Lodge');
     });
 
     it('provides waypoint copy and ID synchronization fallback when meal stop has fuel ID and speech', () => {
-      const gallupWaypoint = {
-        id: 'gallup_fuel',
-        name: 'Red Rock Park (Picnic & Stretch)',
+      const mealWaypoint = {
+        id: 'picnic_fuel',
+        name: 'Valley Park (Picnic & Stretch)',
         type: 'meal',
         lat: 35.5458,
         lng: -108.6255,
         dwell_minutes: 30,
         notification: {
-          title: 'Gallup, NM - Fuel & Stretch',
-          message: 'Target 11:30 AM MDT. Turn north on US-491 next.',
-          speech: 'Arriving in Gallup, New Mexico. Fuel stop recommended before heading north on US-491.',
+          title: 'Valley Park - Fuel & Stretch',
+          message: 'Target 11:30 AM. Turn north next.',
+          speech: 'Arriving in Valley Park. Fuel stop recommended before heading north.',
         },
       };
       const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: gallupWaypoint.id, waypointName: gallupWaypoint.name },
+        scope: { type: 'waypoint', waypointId: mealWaypoint.id, waypointName: mealWaypoint.name },
         messages: [{ role: 'user', content: 'Why does the alert and voice say fuel stop when this is a picnic lunch stop at a park?' }],
         tripContext: {
           tripName: 'Test Trip',
-          waypoints: [gallupWaypoint],
-          focusedWaypoint: gallupWaypoint,
+          waypoints: [mealWaypoint],
+          focusedWaypoint: mealWaypoint,
         },
       };
 
@@ -509,89 +638,80 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(result.reply).toContain('Waypoint Copy & ID Synchronization');
       expect(result.suggestions).toHaveLength(1);
       expect(result.suggestions[0].action).toBe('update_waypoint');
-      expect(result.suggestions[0].targetWaypointId).toBe('gallup_fuel');
-      expect(result.suggestions[0].newId).toBe('gallup_red_rock_park');
+      expect(result.suggestions[0].targetWaypointId).toBe('picnic_fuel');
+      expect(result.suggestions[0].newId).toBe('picnic_meal');
       expect(result.suggestions[0].type).toBe('meal');
-      expect(result.suggestions[0].notification?.title).toBe('Red Rock Park Picnic & Stretch');
-      expect(result.suggestions[0].notification?.speech).toContain('picnic');
+      expect(result.suggestions[0].notification?.title).toBe('Valley Park (Picnic & Stretch)');
       expect(result.suggestions[0].notification?.speech).not.toContain('Fuel stop');
     });
 
-    it('provides fuel stop audit fallback for waypoint scope relocating trailer park pin to commercial Maverik', () => {
-      const fuelWaypoint = {
-        id: 'wp_1789354019621_9s3w',
-        name: "Maverik Adventure's First Stop (Farmington)",
-        type: 'fuel',
-        lat: 36.7465,
-        lng: -108.2675,
-        dwell_minutes: 15,
+    it('provides Google Maps navigation audit fallback for waypoint scope missing street address', () => {
+      const lodgingWaypoint = {
+        id: 'hotel_downtown',
+        name: 'Historic Grand Hotel',
+        type: 'lodging',
+        lat: 35.1901,
+        lng: -111.6207,
+        dwell_minutes: 0,
       };
       const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: fuelWaypoint.id, waypointName: fuelWaypoint.name },
-        messages: [{ role: 'user', content: 'This fuel stop is in a residential trailer park. Where is the real gas station?' }],
+        scope: { type: 'waypoint', waypointId: lodgingWaypoint.id, waypointName: lodgingWaypoint.name },
+        messages: [{ role: 'user', content: 'Check Google Maps navigation & address for Historic Grand Hotel' }],
         tripContext: {
           tripName: 'Test Trip',
-          waypoints: [fuelWaypoint],
-          focusedWaypoint: fuelWaypoint,
+          waypoints: [lodgingWaypoint],
+          focusedWaypoint: lodgingWaypoint,
         },
       };
 
       const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Commercial Fuel Stop Audit');
-      expect(result.reply).toContain('2710 W Main St');
+      expect(result.reply).toContain('Google Maps Navigation Audit');
       expect(result.suggestions).toHaveLength(1);
       expect(result.suggestions[0].action).toBe('update_waypoint');
-      expect(result.suggestions[0].lat).toBe(36.7328);
-      expect(result.suggestions[0].lng).toBe(-108.2443);
-      expect(result.suggestions[0].notification?.title).toBe('Maverik Fuel & Food Stop');
+      expect(result.suggestions[0].address).toBe('Historic Grand Hotel, Main Entrance');
     });
 
-    it('provides scenic trigger repositioning fallback when driver asks if drive-by should be farther west', () => {
-      const dulceWaypoint = {
-        id: 'dulce_foothills',
-        name: 'Jicarilla Apache Nation / Dulce',
+    it('provides in-transit drive-by dwell correction fallback for waypoint scope', () => {
+      const driveByWaypoint = {
+        id: 'mountain_pass',
+        name: 'High Mountain Pass',
         type: 'scenic_drive_by',
         lat: 36.9335,
         lng: -106.9919,
-        dwell_minutes: 0,
+        dwell_minutes: 20, // non-zero dwell on drive-by
         notification: {
-          title: 'Climbing into Pine Country',
-          message: 'Target 3:30 PM. Watch for autumn foliage.',
-          speech: 'Climbing through the Jicarilla Apache Nation on US-64. Watch for early autumn aspen color as we enter the foothills.',
+          title: 'High Mountain Pass',
+          message: 'Approaching the summit.',
+          speech: 'Approaching the mountain pass summit on the highway.',
         },
       };
       const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: dulceWaypoint.id, waypointName: dulceWaypoint.name },
-        messages: [{ role: 'user', content: "Is this accurate? It's pretty close to my final destination for the day and it looks most of scenery will have already passed by this point. Perhaps this should be a little farther west?" }],
+        scope: { type: 'waypoint', waypointId: driveByWaypoint.id, waypointName: driveByWaypoint.name },
+        messages: [{ role: 'user', content: 'Is our planned dwell time appropriate for High Mountain Pass?' }],
         tripContext: {
           tripName: 'Test Trip',
-          waypoints: [dulceWaypoint],
-          focusedWaypoint: dulceWaypoint,
+          waypoints: [driveByWaypoint],
+          focusedWaypoint: driveByWaypoint,
         },
       };
 
       const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Scenic Trigger Repositioning');
-      expect(result.reply).toContain('~28 miles west');
+      expect(result.reply).toContain('In-Transit Drive-By Configuration');
       expect(result.suggestions).toHaveLength(1);
       expect(result.suggestions[0].action).toBe('update_waypoint');
-      expect(result.suggestions[0].name).toBe('Climbing into Pine Country (US-64)');
       expect(result.suggestions[0].type).toBe('scenic_drive_by');
-      expect(result.suggestions[0].lat).toBe(36.7625);
-      expect(result.suggestions[0].lng).toBe(-107.2018);
       expect(result.suggestions[0].dwell_minutes).toBe(0);
-      expect(result.suggestions[0].notification?.title).toBe('Climbing into Pine Country');
-      expect(result.suggestions[0].notification?.speech).toContain('Carson National Forest');
     });
 
     it('returns quick prompts appropriate to the scope', () => {
       const dayPrompts = getQuickPrompts({ type: 'day', dayNumber: 1 });
-      expect(dayPrompts.length).toBeGreaterThan(2);
+      expect(dayPrompts).toHaveLength(5);
       expect(dayPrompts[0]).toContain('lunch');
+      expect(dayPrompts).toContain('Audit route for Google Maps navigation, detours & stop accuracy');
 
-      const wpPrompts = getQuickPrompts({ type: 'waypoint', waypointId: 'wp_1' });
+      const wpPrompts = getQuickPrompts({ type: 'waypoint', waypointId: 'wp_1', waypointName: 'Grand Hotel' });
       expect(wpPrompts.length).toBeGreaterThan(2);
-      expect(wpPrompts[0]).toContain('coordinate');
+      expect(wpPrompts[0]).toBe('Check Google Maps navigation & address for Grand Hotel');
     });
   });
 

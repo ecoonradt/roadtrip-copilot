@@ -18,6 +18,11 @@ export interface CheckpointV2 {
   dwell_minutes?: number;
   trigger_radius_miles: number;
   notification?: ItineraryNotificationV2;
+  address?: string;
+  google_place_id?: string;
+  is_route_anchor?: boolean;
+  approachHighway?: string;
+  notes?: string;
 }
 
 export interface DayV2 {
@@ -150,6 +155,26 @@ export function formatCheckpointV2(
       message: item.notification.message || '',
       speech: item.notification.speech || '',
     };
+  }
+
+  if (item.address) {
+    checkpoint.address = item.address;
+  }
+
+  if (item.google_place_id) {
+    checkpoint.google_place_id = item.google_place_id;
+  }
+
+  if (item.is_route_anchor !== undefined) {
+    checkpoint.is_route_anchor = item.is_route_anchor;
+  }
+
+  if (item.approachHighway) {
+    checkpoint.approachHighway = item.approachHighway;
+  }
+
+  if (item.notes) {
+    checkpoint.notes = item.notes;
   }
 
   return checkpoint;

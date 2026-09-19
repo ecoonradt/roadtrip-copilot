@@ -92,6 +92,26 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       const cp = formatCheckpointV2(sampleWaypoints[2]);
       expect(cp.notification).toBeUndefined();
     });
+
+    it('serializes address, google_place_id, and is_route_anchor when present', () => {
+      const richWaypoint: Waypoint = {
+        id: 'wp_little_america',
+        name: 'Little America Hotel Flagstaff',
+        type: 'lodging',
+        lat: 35.1901,
+        lng: -111.6207,
+        dwell_minutes: 0,
+        trigger_radius_miles: 2.0,
+        address: '2515 E Butler Ave, Flagstaff, AZ 86004',
+        google_place_id: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+        is_route_anchor: true,
+      };
+
+      const cp = formatCheckpointV2(richWaypoint);
+      expect(cp.address).toBe('2515 E Butler Ave, Flagstaff, AZ 86004');
+      expect(cp.google_place_id).toBe('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
+      expect(cp.is_route_anchor).toBe(true);
+    });
   });
 
   describe('Multi-Day Itinerary Export (Schema v2.0.0)', () => {

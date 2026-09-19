@@ -13,6 +13,11 @@ export interface TimelineCascadeWaypoint {
   trigger_radius_miles?: number;
   notification?: WaypointNotification;
   timezone?: string; // Optional explicit IANA timezone (e.g. "America/Phoenix", "America/Denver")
+  address?: string;
+  google_place_id?: string;
+  is_route_anchor?: boolean;
+  approachHighway?: string;
+  notes?: string;
 }
 
 /**
@@ -27,6 +32,11 @@ export interface ScheduledStop {
   dwell_minutes: number;
   trigger_radius_miles: number;
   notification?: WaypointNotification;
+  address?: string;
+  google_place_id?: string;
+  is_route_anchor?: boolean;
+  approachHighway?: string;
+  notes?: string;
 
   // Timezone metadata
   timezone: string; // IANA timezone identifier
@@ -116,6 +126,11 @@ export interface CoordinateLocation {
   lat: number;
   lng: number;
   name?: string;
+  address?: string;
+  placeId?: string;
+  type?: WaypointType;
+  dwellMinutes?: number;
+  isRouteAnchor?: boolean;
 }
 
 /**
@@ -147,4 +162,5 @@ export interface GoogleMapsRouteResult {
 export interface GoogleMapsUrlOptions {
   customLegTitles?: string[];
   maxIntermediateWaypoints?: number; // Defaults to 9 (Google Maps limit)
+  skipNavFiltering?: boolean;
 }

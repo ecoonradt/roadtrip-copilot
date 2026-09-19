@@ -18,10 +18,10 @@ import {
 } from 'lucide-react';
 
 import type { Waypoint, WaypointType, GeocodeResult } from '../types/routing';
-import type { WaypointContext, CopilotAlert } from '../types/ai';
+import type { WaypointContext } from '../types/ai';
 import type { TimelineCascadeResult, ScheduledStop } from '../engine/types';
 import { SearchBar } from './SearchBar';
-import { AiAlertModal } from './AiAlertModal';
+import { EditWaypointModal } from './EditWaypointModal';
 import { generateBatchCopilotAlerts } from '../services/api';
 
 interface TimelineSidebarProps {
@@ -49,9 +49,6 @@ const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
   { value: 'lodging', label: 'Hotel / Lodging' },
   { value: 'destination', label: 'Destination' },
 ];
-
-const DWELL_PRESETS = [0, 15, 30, 45, 60, 90];
-const RADIUS_PRESETS = [0.5, 1.0, 2.0, 3.0, 5.0];
 
 const DEFAULT_WIDTH = 440;
 const MIN_WIDTH = 320;
@@ -123,8 +120,13 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     }
   }, [selectedWaypointId]);
 
-  // AI Co-Pilot Alert Modal state
-  const [selectedWaypointForAi, setSelectedWaypointForAi] = useState<Waypoint | null>(null);
+  // Edit Waypoint / AI Co-Pilot Alert Modal state
+  const [selectedModal, setSelectedModal] = useState<{
+    waypoint: Waypoint;
+    initialTab: 'details' | 'alert';
+    isFirst: boolean;
+    isLast: boolean;
+  } | null>(null);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
 
@@ -173,17 +175,6 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     const minutes = Math.floor((seconds % 3600) / 60);
     if (hours === 0) return `${minutes}m`;
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
-  };
-
-  const handleApplyAiAlert = (waypointId: string, alert: CopilotAlert) => {
-    onUpdateWaypoint(waypointId, {
-      notification: {
-        title: alert.title,
-        message: alert.message,
-        speech: alert.speech,
-      },
-      trigger_radius_miles: alert.recommended_trigger_radius_miles,
-    });
   };
 
   const handleBatchGenerateAll = async () => {
@@ -409,6 +400,12 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
             const isLast = idx === cascadeResult.stops.length - 1;
             const isEditing = editingWaypointId === stop.id;
             const originalWp = waypoints.find((w) => w.id === stop.id);
+            const isOvernight = isLast && (stop.type === 'lodging' || stop.type === 'destination');
+            const modalWp: Waypoint = {
+              ...(originalWp || stop),
+              target_time: stop.arrivalTime,
+              dwell_minutes: isOvernight ? 0 : (originalWp?.dwell_minutes ?? stop.dwell_minutes),
+            };
 
             return (
               <React.Fragment key={stop.id}>
@@ -450,6 +447,14 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             <span className="text-xs font-bold text-white truncate">
                               {stop.name}
                             </span>
+                            {!isFirst && !isLast && originalWp?.is_route_anchor && (originalWp.dwell_minutes === 0 || originalWp.type === 'scenic_drive_by') && (
+                              <span
+                                className="text-[10px] text-amber-300 bg-amber-950/70 border border-amber-800/80 px-1 py-0.2 rounded font-semibold shrink-0"
+                                title="Route-Forcing Anchor in Google Maps (Forces scenic highway corridor)"
+                              >
+                                ⚓ Anchor
+                              </span>
+                            )}
                             <span className="text-[10px] text-slate-400 capitalize bg-slate-900/60 px-1.5 py-0.2 rounded border border-slate-800 shrink-0">
                               {stop.type.replace(/_/g, ' ')}
                             </span>
@@ -460,15 +465,20 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             <div className="flex items-center gap-1 font-mono font-semibold text-slate-200">
                               <Clock className="w-3 h-3 text-sky-400" />
                               <span>{stop.arrivalShortTime}</span>
-                              {stop.dwell_minutes > 0 && (
+                              {isLast ? (
+                                <>
+                                  <span className="text-slate-500">&bull;</span>
+                                  <span className="text-amber-300 font-normal">🌙 Overnight Stay</span>
+                                </>
+                              ) : stop.dwell_minutes > 0 ? (
                                 <>
                                   <span className="text-slate-500">&rarr;</span>
                                   <span>{stop.departureShortTime}</span>
                                 </>
-                              )}
+                              ) : null}
                             </div>
 
-                            {stop.dwell_minutes > 0 && (
+                            {!isLast && stop.dwell_minutes > 0 && (
                               <>
                                 <span className="text-slate-600">&bull;</span>
                                 <span className="text-[11px] text-slate-400 font-mono">
@@ -482,8 +492,12 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           {stop.notification && !isEditing && (
                             <div
                               onClick={() => {
-                                setEditingWaypointId(stop.id);
-                                onSelectWaypoint?.(stop.id);
+                                setSelectedModal({
+                                  waypoint: modalWp,
+                                  initialTab: 'alert',
+                                  isFirst,
+                                  isLast,
+                                });
                               }}
                               className="mt-1.5 flex items-center gap-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-2 py-0.5 cursor-pointer hover:bg-emerald-950/70 transition-colors w-fit"
                               title="Click to view or edit AI Co-Pilot announcement"
@@ -545,37 +559,41 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                     </div>
                   </div>
 
-                  {/* Inline Expanded Editor */}
+                  {/* Inline Expanded Editor (Streamlined for quick scannability) */}
                   {isEditing && (
-                    <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-700/70 bg-slate-900/60 rounded-b-xl space-y-3">
-                      {/* Name & Type Fields */}
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                            Stop Name
-                          </label>
-                          <input
-                            type="text"
-                            value={stop.name}
-                            onChange={(e) =>
-                              onUpdateWaypoint(stop.id, { name: e.target.value })
-                            }
-                            placeholder="Waypoint name"
-                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
-                          />
-                        </div>
+                    <div className="px-3.5 pb-3 pt-2.5 border-t border-slate-700/70 bg-slate-900/60 rounded-b-xl space-y-2.5">
+                      {/* Name Field */}
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                          Stop Name
+                        </label>
+                        <input
+                          type="text"
+                          value={stop.name}
+                          onChange={(e) =>
+                            onUpdateWaypoint(stop.id, { name: e.target.value })
+                          }
+                          placeholder="Waypoint name"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
 
+                      {/* Category & Quick Dwell Row */}
+                      <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-300 mb-1">
                             Stop Category
                           </label>
                           <select
                             value={stop.type}
-                            onChange={(e) =>
-                              onUpdateWaypoint(stop.id, {
-                                type: e.target.value as WaypointType,
-                              })
-                            }
+                            onChange={(e) => {
+                              const newType = e.target.value as WaypointType;
+                              const updates: Partial<Waypoint> = { type: newType };
+                              if (isLast && (newType === 'lodging' || newType === 'destination')) {
+                                updates.dwell_minutes = 0;
+                              }
+                              onUpdateWaypoint(stop.id, updates);
+                            }}
                             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
                           >
                             {STOP_TYPE_OPTIONS.map((opt) => (
@@ -585,159 +603,183 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             ))}
                           </select>
                         </div>
-                      </div>
 
-                      {/* Dwell Duration Editor */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="text-[11px] font-semibold text-slate-300">
-                            Dwell / Stop Duration
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Dwell Duration
                           </label>
-                          <span className="text-xs font-mono font-bold text-sky-400">
-                            {stop.dwell_minutes} minutes
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {DWELL_PRESETS.map((minutes) => (
-                            <button
-                              key={minutes}
-                              onClick={() =>
-                                onUpdateWaypoint(stop.id, { dwell_minutes: minutes })
-                              }
-                              className={`px-2 py-1 rounded-md text-xs font-mono transition-all ${
-                                stop.dwell_minutes === minutes
-                                  ? 'bg-sky-600 text-white font-bold'
-                                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                              }`}
-                            >
-                              {minutes === 0 ? '0m' : `${minutes}m`}
-                            </button>
-                          ))}
-                          <div className="flex items-center gap-1 ml-auto">
-                            <input
-                              type="number"
-                              min="0"
-                              max="480"
-                              step="5"
+                          {isLast ? (
+                            <div className="px-2 py-1.5 bg-amber-950/40 border border-amber-800/60 rounded-lg text-xs text-amber-300 font-mono flex items-center justify-between">
+                              <span>🌙 Overnight</span>
+                              <span className="text-[10px] text-amber-400/80">0m</span>
+                            </div>
+                          ) : (
+                            <select
                               value={stop.dwell_minutes}
                               onChange={(e) =>
                                 onUpdateWaypoint(stop.id, {
-                                  dwell_minutes: Math.max(0, parseInt(e.target.value, 10) || 0),
+                                  dwell_minutes: parseInt(e.target.value, 10) || 0,
                                 })
                               }
-                              className="w-14 bg-slate-800 border border-slate-700 rounded-md px-1.5 py-0.5 text-center text-xs font-mono text-white focus:outline-none focus:border-sky-500"
-                            />
-                            <span className="text-[11px] text-slate-400">min</span>
-                          </div>
+                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
+                            >
+                              {[0, 15, 30, 45, 60, 90, 120].map((m) => (
+                                <option key={m} value={m}>
+                                  {m === 0 ? '0 min (Pass-through)' : `${m} minutes`}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       </div>
 
-                      {/* AI Co-Pilot Alert Configuration */}
-                      <div className="pt-2 border-t border-slate-800 space-y-2">
-                        <div className="text-[11px] font-semibold text-slate-300">
-                          Co-Pilot In-Car Announcement
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {onOpenScoutForWaypoint && (
-                            <button
-                              onClick={() => {
-                                const currentWp = originalWp
-                                  ? { ...originalWp, target_time: stop.arrivalTime }
-                                  : {
-                                      ...stop,
-                                      target_time: stop.arrivalTime,
-                                    };
-                                onOpenScoutForWaypoint(currentWp);
-                              }}
-                              className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-all border border-slate-700/80 cursor-pointer whitespace-nowrap shadow-sm"
-                              title="Ask Route Scout about this stop (accessibility, tribal land, photo spots)"
-                            >
-                              <Compass className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                              <span>Ask Scout</span>
-                            </button>
-                          )}
-                          <button
+                      {/* Status Chips Row */}
+                      <div className="flex flex-wrap items-center gap-1.5 py-0.5 text-[11px]">
+                        {originalWp?.address ? (
+                          <span
                             onClick={() => {
-                              const currentWp = originalWp
-                                ? { ...originalWp, target_time: stop.arrivalTime }
-                                : {
-                                    ...stop,
-                                    target_time: stop.arrivalTime,
-                                  };
-                              setSelectedWaypointForAi(currentWp);
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
                             }}
-                            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-lg text-xs font-medium transition-all shadow-sm cursor-pointer whitespace-nowrap ${
-                              !onOpenScoutForWaypoint ? 'col-span-2' : ''
-                            }`}
+                            className="px-2 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/80 truncate max-w-[200px] cursor-pointer hover:bg-slate-750 transition-colors"
+                            title={`Click to edit address: ${originalWp.address}`}
                           >
-                            <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                            <span>{stop.notification ? 'Edit Alert & Voice' : 'Generate Alert'}</span>
-                          </button>
-                        </div>
+                            📍 {originalWp.address}
+                          </span>
+                        ) : (
+                          <span
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-800/50 text-slate-500 border border-slate-800 cursor-pointer hover:text-slate-300 transition-colors"
+                            title="Click to set physical street address"
+                          >
+                            + Add address
+                          </span>
+                        )}
+
+                        {originalWp?.google_place_id ? (
+                          <span
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono text-[10px] cursor-pointer hover:bg-emerald-900/80 transition-colors"
+                            title={`Google Place ID: ${originalWp.google_place_id}. Click to view or clear.`}
+                          >
+                            ✓ Place ID
+                          </span>
+                        ) : (
+                          <span
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-amber-950/40 text-amber-400/80 border border-amber-900/50 text-[10px] cursor-pointer hover:bg-amber-900/60 transition-colors"
+                            title="No Google Place ID configured. Click to add or verify."
+                          >
+                            No Place ID
+                          </span>
+                        )}
+
+                        {!isFirst && !isLast && originalWp?.is_route_anchor && (originalWp.dwell_minutes === 0 || originalWp.type === 'scenic_drive_by') && (
+                          <span
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/70 text-[10px] font-semibold cursor-pointer hover:bg-amber-900/80 transition-colors"
+                            title="Route-forcing pass-through anchor. Click to configure."
+                          >
+                            ⚓ Route Anchor
+                          </span>
+                        )}
 
                         {stop.notification ? (
-                          <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1">
-                            <div className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
-                              <span>Heads-Up Card:</span>
-                              <span className="text-white font-normal truncate">
-                                &ldquo;{stop.notification.title}&rdquo;
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-400 italic line-clamp-2">
-                              TTS: &ldquo;{stop.notification.speech}&rdquo;
-                            </div>
-                            <div className="pt-1 flex items-center justify-between text-[10px] text-slate-400">
-                              <span>Trigger Distance:</span>
-                              <span className="font-mono text-sky-400 font-semibold">
-                                {stop.trigger_radius_miles} miles before stop
-                              </span>
-                            </div>
-                          </div>
+                          <span
+                            className="px-2 py-0.5 rounded bg-sky-950/70 text-sky-300 border border-sky-800/60 truncate max-w-[180px] cursor-pointer hover:bg-sky-900/80"
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'alert',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            title="Click to view or edit AI Co-Pilot announcement"
+                          >
+                            🔔 {stop.notification.title}
+                          </span>
                         ) : (
-                          <p className="text-[11px] text-slate-400 italic">
-                            No audio announcement configured yet. Click generate above to create one.
-                          </p>
+                          <span className="px-2 py-0.5 rounded bg-slate-800/50 text-slate-500 border border-slate-800 text-[10px]">
+                            No audio alert
+                          </span>
                         )}
                       </div>
 
-                      {/* Alert Trigger Radius Selector */}
-                      <div className="pt-2 border-t border-slate-800">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="text-[11px] font-semibold text-slate-300">
-                            Heads-Up Alert Distance
-                          </label>
-                          <span className="text-xs font-mono font-bold text-sky-400">
-                            {stop.trigger_radius_miles} miles before
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1">
-                          {RADIUS_PRESETS.map((r) => (
+                      {/* Action Buttons Row */}
+                      <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          {onOpenScoutForWaypoint && (
                             <button
-                              key={r}
                               type="button"
-                              onClick={() =>
-                                onUpdateWaypoint(stop.id, { trigger_radius_miles: r })
-                              }
-                              className={`px-2 py-1 rounded-md text-xs font-mono transition-all ${
-                                (stop.trigger_radius_miles || 2.0) === r
-                                  ? 'bg-sky-600 text-white font-bold'
-                                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                              }`}
+                              onClick={() => {
+                                onOpenScoutForWaypoint(modalWp);
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/80 cursor-pointer"
+                              title="Ask Route Scout about this stop"
                             >
-                              {r} mi
+                              <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>Ask Scout</span>
                             </button>
-                          ))}
-                        </div>
-                      </div>
+                          )}
 
-                      {/* Done Button */}
-                      <div className="pt-1 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm cursor-pointer"
+                            title="Open comprehensive edit dialog for address, place ID, audio alert and trigger distance"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Edit Full Details & Audio</span>
+                          </button>
+                        </div>
+
                         <button
+                          type="button"
                           onClick={() => {
                             setEditingWaypointId(null);
                             onSelectWaypoint?.(null);
                           }}
-                          className="flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
                         >
                           <Check className="w-3 h-3 text-emerald-400" />
                           <span>Done</span>
@@ -776,13 +818,18 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
         title="Drag to resize panel, double-click to reset"
       />
 
-      {/* AI Co-Pilot Alert Modal */}
-      <AiAlertModal
-        isOpen={!!selectedWaypointForAi}
-        waypoint={selectedWaypointForAi}
-        onClose={() => setSelectedWaypointForAi(null)}
-        onApply={handleApplyAiAlert}
-      />
+      {/* Edit Waypoint / AI Co-Pilot Alert Modal */}
+      {selectedModal && (
+        <EditWaypointModal
+          isOpen={Boolean(selectedModal)}
+          waypoint={selectedModal.waypoint}
+          initialTab={selectedModal.initialTab}
+          isFirst={selectedModal.isFirst}
+          isLast={selectedModal.isLast}
+          onClose={() => setSelectedModal(null)}
+          onSave={(waypointId, updates) => onUpdateWaypoint(waypointId, updates)}
+        />
+      )}
     </aside>
   );
 };

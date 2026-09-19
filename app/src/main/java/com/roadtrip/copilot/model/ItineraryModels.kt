@@ -23,6 +23,12 @@ data class Checkpoint(
     val type: String? = null,
     @SerializedName("dwell_minutes")
     val dwellMinutes: Int? = null,
+    @SerializedName("google_place_id")
+    val googlePlaceId: String? = null,
+    @SerializedName("address")
+    val address: String? = null,
+    @SerializedName("is_route_anchor")
+    val isRouteAnchor: Boolean? = null,
     var targetEpochMillis: Long? = null,
     var formattedTargetTime: String? = null
 )

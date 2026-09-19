@@ -343,7 +343,16 @@ export function App() {
   // Generate Google Maps Navigation URLs with automated chunking
   const googleMapsRoute = useMemo(() => {
     return generateGoogleMapsUrls(
-      waypoints.map((w) => ({ lat: w.lat, lng: w.lng, name: w.name }))
+      waypoints.map((w) => ({
+        lat: w.lat,
+        lng: w.lng,
+        name: w.name,
+        address: w.address,
+        placeId: w.google_place_id,
+        isRouteAnchor: w.is_route_anchor,
+        type: w.type,
+        dwellMinutes: w.dwell_minutes,
+      }))
     );
   }, [waypoints]);
 
@@ -483,6 +492,9 @@ export function App() {
         trigger_radius_miles: suggestion.trigger_radius_miles ?? 1.5,
         target_time: '12:00:00',
         notes: suggestion.reason,
+        address: suggestion.address,
+        google_place_id: suggestion.google_place_id,
+        is_route_anchor: suggestion.is_route_anchor,
         notification: suggestion.notification,
       };
 
@@ -647,10 +659,26 @@ export function App() {
   const handleSaveTrip = useCallback(async () => {
     setIsSaving(true);
     try {
-      const serialized = serializeTripToItineraryJson(trip);
+      // Synchronize the active day's live cascaded arrival times into waypoints before saving
+      const updatedDays = trip.days.map((d, dIdx) => {
+        if (dIdx === activeDayIndex && cascadeResult?.stops?.length === d.waypoints.length) {
+          return {
+            ...d,
+            waypoints: d.waypoints.map((w, wIdx) => ({
+              ...w,
+              target_time: cascadeResult.stops[wIdx]?.arrivalTime || w.target_time,
+            })),
+          };
+        }
+        return d;
+      });
+
+      const updatedTrip = { ...trip, days: updatedDays };
+      const serialized = serializeTripToItineraryJson(updatedTrip);
       const fileName = trip.fileName || `${trip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
       await saveItinerary(fileName, serialized);
-      setLastSavedTripJson(JSON.stringify(trip));
+      setTrip(updatedTrip);
+      setLastSavedTripJson(JSON.stringify(updatedTrip));
       setSaveSuccess(true);
       localStorage.setItem('copilot_active_file', fileName);
       const url = new URL(window.location.href);
@@ -663,7 +691,7 @@ export function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [trip]);
+  }, [trip, activeDayIndex, cascadeResult]);
 
   // Dirty state tracking (indicates unsaved changes)
   const isDirty = useMemo(() => {

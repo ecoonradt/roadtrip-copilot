@@ -216,4 +216,205 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       expect(result.legs[0].intermediateWaypoints).toHaveLength(0);
     });
   });
+
+  describe('Smart Schema & Place ID Binding with Navigation Filtering', () => {
+    it('binds origin_place_id and destination_place_id when placeId is provided', () => {
+      const origin: CoordinateLocation = {
+        lat: 33.4308,
+        lng: -112.0444,
+        name: 'PHX Rental Car Center',
+        address: '1805 E Sky Harbor Cir S, Phoenix, AZ',
+        placeId: 'ChIJ-Tj-S_AKK4cR2G-y91c-b-I',
+      };
+      const dest: CoordinateLocation = {
+        lat: 35.1901,
+        lng: -111.6207,
+        name: 'Little America Hotel Flagstaff',
+        address: '2515 E Butler Ave, Flagstaff, AZ 86004',
+        placeId: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+      };
+
+      const url = buildSingleGoogleMapsUrl(origin, dest, []);
+
+      expect(url).toContain('origin_place_id=ChIJ-Tj-S_AKK4cR2G-y91c-b-I');
+      expect(url).toContain('destination_place_id=ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
+      expect(url).toContain(encodeURIComponent('1805 E Sky Harbor Cir S, Phoenix, AZ'));
+      expect(url).toContain(encodeURIComponent('2515 E Butler Ave, Flagstaff, AZ 86004'));
+      expect(url).not.toContain('35.1901,-111.6207'); // Address preferred over bare coordinate
+    });
+
+    it('binds waypoint_place_ids when all intermediate waypoints have placeId', () => {
+      const origin: CoordinateLocation = { lat: 33.43, lng: -112.04, name: 'Start' };
+      const dest: CoordinateLocation = { lat: 35.19, lng: -111.62, name: 'End' };
+      const intermediate: CoordinateLocation[] = [
+        { lat: 34.79, lng: -111.76, name: 'Bell Rock Vista', placeId: 'ChIJ_bell_rock' },
+        { lat: 35.03, lng: -111.73, name: 'Oak Creek Vista', placeId: 'ChIJ_oak_creek' },
+      ];
+
+      const url = buildSingleGoogleMapsUrl(origin, dest, intermediate);
+
+      expect(url).toContain('&waypoint_place_ids=ChIJ_bell_rock|ChIJ_oak_creek');
+    });
+
+    it('filters out redundant in-transit audio cues on Day 1 while preserving route-forcing anchor', () => {
+      const day1Waypoints: CoordinateLocation[] = [
+        {
+          lat: 33.4308,
+          lng: -112.0444,
+          name: 'PHX Rental Car Center',
+          type: 'origin',
+          dwellMinutes: 0,
+        },
+        {
+          lat: 34.775,
+          lng: -111.7635,
+          name: 'Sedona Red Rocks Vista',
+          type: 'scenic_drive_by',
+          dwellMinutes: 0, // In-transit drive-by
+        },
+        {
+          lat: 35.002,
+          lng: -111.7375,
+          name: 'Oak Creek Canyon Switchbacks',
+          type: 'scenic_drive_by',
+          dwellMinutes: 0, // Redundant drive-by along same canyon corridor
+        },
+        {
+          lat: 35.028,
+          lng: -111.7341,
+          name: 'Oak Creek Vista Overlook',
+          type: 'scenic_pull_off',
+          dwellMinutes: 15, // Physical stop
+        },
+        {
+          lat: 35.1901,
+          lng: -111.6207,
+          name: 'Flagstaff / Little America Hotel',
+          type: 'lodging',
+          dwellMinutes: 0,
+        },
+      ];
+
+      const result = generateGoogleMapsUrls(day1Waypoints);
+
+      expect(result.totalLegs).toBe(1);
+      const leg = result.legs[0];
+
+      // Origin, Sedona anchor, Oak Creek Vista, Little America Destination = 4 total points (2 intermediate)
+      expect(leg.waypointCount).toBe(4);
+      expect(leg.origin.name).toBe('PHX Rental Car Center');
+      expect(leg.destination.name).toBe('Flagstaff / Little America Hotel');
+      expect(leg.intermediateWaypoints).toHaveLength(2);
+      expect(leg.intermediateWaypoints[0].name).toBe('Sedona Red Rocks Vista');
+      expect(leg.intermediateWaypoints[1].name).toBe('Oak Creek Vista Overlook');
+
+      // Oak Creek Switchbacks was excluded from Google Maps navigation
+      const names = leg.intermediateWaypoints.map((w) => w.name);
+      expect(names).not.toContain('Oak Creek Canyon Switchbacks');
+    });
+
+    it('honors explicit isRouteAnchor: true to force inclusion and isRouteAnchor: false to force exclusion', () => {
+      const waypoints: CoordinateLocation[] = [
+        { lat: 33.0, lng: -112.0, name: 'Start', type: 'origin' },
+        {
+          lat: 34.0,
+          lng: -111.5,
+          name: 'Scenic Pass 1',
+          type: 'scenic_drive_by',
+          dwellMinutes: 0,
+          isRouteAnchor: false, // Explicitly excluded from Google Maps navigation
+        },
+        {
+          lat: 34.5,
+          lng: -111.2,
+          name: 'Scenic Pass 2 (Highway Anchor)',
+          type: 'scenic_drive_by',
+          dwellMinutes: 0,
+          isRouteAnchor: true, // Explicitly included in Google Maps navigation
+        },
+        { lat: 35.0, lng: -111.0, name: 'End', type: 'destination' },
+      ];
+
+      const result = generateGoogleMapsUrls(waypoints);
+
+      expect(result.legs[0].intermediateWaypoints).toHaveLength(1);
+      expect(result.legs[0].intermediateWaypoints[0].name).toBe('Scenic Pass 2 (Highway Anchor)');
+    });
+
+    it('formats destination with clean place name combined with address for rich navigation labeling', () => {
+      const origin: CoordinateLocation = {
+        lat: 33.4308,
+        lng: -112.0444,
+        name: 'PHX Rental Car Center',
+        address: '1805 E Sky Harbor Cir S, Phoenix, AZ',
+        placeId: 'ChIJ-Tj-S_AKK4cR2G-y91c-b-I',
+      };
+      const dest: CoordinateLocation = {
+        lat: 35.1901,
+        lng: -111.6207,
+        name: 'Flagstaff / Little America Hotel',
+        address: '2515 E Butler Ave, Flagstaff, AZ 86004',
+        placeId: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+      };
+
+      const url = buildSingleGoogleMapsUrl(origin, dest, []);
+
+      // Destination query should combine clean establishment name ("Little America Hotel") and address
+      expect(url).toContain(encodeURIComponent('Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ 86004'));
+      expect(url).toContain('destination_place_id=ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
+    });
+
+    it('formats in-transit scenic drive-bys and 0-dwell anchors as exact coordinates to prevent Airbnb/side-street detours', () => {
+      // Simulates the Sedona Red Rocks Vista issue where an address ("AZ-179, Village of Oak Creek...")
+      // previously caused Google Maps to route to a vacation rental Airbnb instead of staying on the highway.
+      const origin: CoordinateLocation = {
+        lat: 33.4308,
+        lng: -112.0444,
+        name: 'PHX Rental Car Center',
+        address: '1805 E Sky Harbor Cir S, Phoenix, AZ 85034',
+        type: 'origin',
+      };
+      const sedonaAnchor: CoordinateLocation = {
+        lat: 34.7865,
+        lng: -111.7612,
+        name: 'Sedona Red Rocks Vista',
+        address: 'AZ-179, Village of Oak Creek, AZ 86351',
+        type: 'scenic_drive_by',
+        dwellMinutes: 0,
+        isRouteAnchor: true,
+      };
+      const oakCreekVista: CoordinateLocation = {
+        lat: 35.0345,
+        lng: -111.733,
+        name: 'Oak Creek Vista',
+        address: 'State, AZ-89A, Flagstaff, AZ 86001',
+        type: 'scenic_viewpoint',
+        dwellMinutes: 20,
+        isRouteAnchor: false,
+      };
+      const dest: CoordinateLocation = {
+        lat: 35.1901,
+        lng: -111.6207,
+        name: 'Little America Hotel',
+        address: '2515 E Butler Ave, Flagstaff, AZ 86004',
+        type: 'lodging',
+        dwellMinutes: 0,
+      };
+
+      const result = generateGoogleMapsUrls([origin, sedonaAnchor, oakCreekVista, dest]);
+      expect(result.legs).toHaveLength(1);
+      const url = result.legs[0].url;
+
+      // Sedona Red Rocks Vista MUST be formatted as exact coordinates to stay on AZ-179
+      expect(url).toContain('34.7865,-111.7612');
+      expect(url).not.toContain('Sedona+Red+Rocks+Vista');
+      expect(url).not.toContain('Village+of+Oak+Creek');
+
+      // Oak Creek Vista is a physical stop (20m dwell) and SHOULD include its name and address
+      expect(url).toContain(encodeURIComponent('Oak Creek Vista, State, AZ-89A, Flagstaff, AZ 86001'));
+
+      // Destination lodging (even with 0m dwell) SHOULD include its name and address
+      expect(url).toContain(encodeURIComponent('Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ 86004'));
+    });
+  });
 });

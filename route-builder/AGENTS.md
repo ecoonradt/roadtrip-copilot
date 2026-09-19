@@ -82,9 +82,10 @@ route-builder/
 │   │   ├── DayTabBar.tsx       # Multi-day leg switcher tabs
 │   │   ├── MapCanvas.tsx       # Leaflet map with custom waypoint markers & OSRM polyline
 │   │   ├── SearchBar.tsx       # Debounced address search via Nominatim proxy
-│   │   ├── TimelineSidebar.tsx # Timeline stops, dwell editor, cascade telemetry, Google Maps links
+│   │   ├── TimelineSidebar.tsx # Timeline stops, streamlined quick editor, cascade telemetry, Google Maps links
 │   │   ├── RouteSelectorModal.tsx # Workspace route discovery and selection modal
-│   │   ├── AiAlertModal.tsx    # Live Android Auto card preview & browser TTS speech preview
+│   │   ├── EditWaypointModal.tsx # Full waypoint details, place entity precision & AI in-car alert modal
+│   │   ├── AiAlertModal.tsx    # Backward-compatible re-export of EditWaypointModal
 │   │   ├── ExportModal.tsx     # 1-click ADB push, Wi-Fi QR code, Google Maps leg QR codes
 │   │   └── RouteScoutDrawer.tsx # Right-side conversational AI assistant & suggestion cards
 │   ├── engine/
@@ -97,7 +98,7 @@ route-builder/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
 │   └── types/                  # Frontend data models (routing, ai, scout)
-└── tests/                      # Comprehensive Vitest test suites (139 tests)
+└── tests/                      # Comprehensive Vitest test suites (157 tests)
 ```
 
 ---

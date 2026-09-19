@@ -290,7 +290,9 @@ export function calculateTimelineCascade(
 
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
-    const dwellMinutes = Math.max(0, wp.dwell_minutes || 0);
+    const isLast = i === waypoints.length - 1;
+    const isOvernightOrFinalDest = isLast && (wp.type === 'lodging' || wp.type === 'destination');
+    const dwellMinutes = isOvernightOrFinalDest ? 0 : Math.max(0, wp.dwell_minutes || 0);
     totalDwellMinutes += dwellMinutes;
 
     let driveDurationSec = 0;
@@ -355,6 +357,11 @@ export function calculateTimelineCascade(
       dwell_minutes: dwellMinutes,
       trigger_radius_miles: wp.trigger_radius_miles ?? 1.0,
       notification: wp.notification,
+      address: wp.address,
+      google_place_id: wp.google_place_id,
+      is_route_anchor: wp.is_route_anchor,
+      approachHighway: wp.approachHighway,
+      notes: wp.notes,
       timezone: stopTz,
       timezoneAbbreviation: arrivalDetails.abbreviation,
       timezoneOffsetMinutes: arrivalDetails.offsetMinutes,
