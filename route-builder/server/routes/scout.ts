@@ -94,6 +94,7 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
     } finally {
       reply.raw.end();
     }
+    return reply;
   });
 
   // GET /api/ai/scout/quick-prompts

@@ -198,7 +198,7 @@ export function App() {
       departureTime: '09:00:00',
       waypoints: [],
     };
-  }, [trip.days, activeDayIndex]);
+  }, [trip.days, activeDayIndex, trip.tripName]);
 
   const waypoints = currentDay.waypoints || [];
   const baseDate = currentDay.date;
@@ -410,12 +410,14 @@ export function App() {
       if (selectedWaypointId === id) {
         setSelectedWaypointId(updates.id);
       }
+    }
+    if (updates.id || updates.name) {
       setScoutScope((prev) => {
         if (prev.type === 'waypoint' && prev.waypointId === id) {
           return {
             ...prev,
-            waypointId: updates.id,
-            waypointName: updates.name || prev.waypointName,
+            ...(updates.id ? { waypointId: updates.id } : {}),
+            ...(updates.name ? { waypointName: updates.name } : {}),
           };
         }
         return prev;
@@ -462,23 +464,21 @@ export function App() {
   }, []);
 
   const handleToggleScout = useCallback(() => {
-    setIsScoutOpen((prev) => {
-      const willOpen = !prev;
-      if (willOpen && scoutScope.type === 'waypoint') {
-        const waypointExists = (currentDay.waypoints || []).some(
-          (w) => w.id === scoutScope.waypointId
-        );
-        if (!waypointExists) {
-          setScoutScope({
-            type: 'day',
-            dayNumber: currentDay.dayNumber,
-            dayTitle: currentDay.title,
-          });
-        }
+    const willOpen = !isScoutOpen;
+    setIsScoutOpen(willOpen);
+    if (willOpen && scoutScope.type === 'waypoint') {
+      const waypointExists = (currentDay.waypoints || []).some(
+        (w) => w.id === scoutScope.waypointId
+      );
+      if (!waypointExists) {
+        setScoutScope({
+          type: 'day',
+          dayNumber: currentDay.dayNumber,
+          dayTitle: currentDay.title,
+        });
       }
-      return willOpen;
-    });
-  }, [currentDay.dayNumber, currentDay.title, currentDay.waypoints, scoutScope.type, scoutScope.waypointId]);
+    }
+  }, [isScoutOpen, currentDay.dayNumber, currentDay.title, currentDay.waypoints, scoutScope.type, scoutScope.waypointId]);
 
   const handleAddWaypointFromScout = useCallback(
     (suggestion: ScoutSuggestion) => {
@@ -564,22 +564,19 @@ export function App() {
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
     setActiveDayIndex(index);
-    setTrip((currentTrip) => {
-      const targetDay = currentTrip.days[index];
-      if (targetDay) {
-        setScoutScope({
-          type: 'day',
-          dayNumber: targetDay.dayNumber,
-          dayTitle: targetDay.title,
-        });
-      }
-      return currentTrip;
-    });
+    const targetDay = trip.days[index];
+    if (targetDay) {
+      setScoutScope({
+        type: 'day',
+        dayNumber: targetDay.dayNumber,
+        dayTitle: targetDay.title,
+      });
+    }
     localStorage.setItem('copilot_active_day', String(index));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(index));
     window.history.replaceState({}, '', url.toString());
-  }, []);
+  }, [trip.days]);
 
   const handleAddDay = useCallback(() => {
     setTrip((prev) => {
@@ -628,13 +625,16 @@ export function App() {
   }, [trip.days]);
 
   const handleDeleteDay = useCallback((index: number) => {
+    if (trip.days.length <= 1) return;
     setTrip((prev) => {
       if (prev.days.length <= 1) return prev;
       const filtered = prev.days.filter((_, i) => i !== index);
       const reindexed = filtered.map((d, i) => ({ ...d, dayNumber: i + 1 }));
       return { ...prev, days: reindexed };
     });
-    const nextIdx = Math.min(activeDayIndex, Math.max(0, trip.days.length - 2));
+    const nextIdx = index < activeDayIndex
+      ? activeDayIndex - 1
+      : Math.min(activeDayIndex, trip.days.length - 2);
     setActiveDayIndex(nextIdx);
     localStorage.setItem('copilot_active_day', String(nextIdx));
     const url = new URL(window.location.href);

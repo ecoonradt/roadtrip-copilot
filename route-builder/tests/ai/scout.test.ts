@@ -810,5 +810,20 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(body).toContain('event: done');
       expect(body).toContain('Mid-Route Dining Recommendations');
     });
+
+    it('POST /api/ai/scout/chat/stream returns 400 for missing scope or messages', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: null,
+          messages: [],
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.body);
+      expect(data.error).toContain('Invalid request payload');
+    });
   });
 });

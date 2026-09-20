@@ -552,5 +552,44 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
       // Arrival and departure time at the overnight hotel should match
       expect(result.stops[2].arrivalTime).toBe(result.stops[2].departureTime);
     });
+
+    it('accurately resolves local time to UTC epoch across DST boundaries in America/Denver', () => {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+
+      // Fall-back transition: 2026-11-01 at 03:30:00 MST (after 2am fall-back, UTC-7)
+      const postFallBackEpoch = parseLocalToUtcEpoch('2026-11-01', '03:30:00', 'America/Denver');
+      const fbParts: Record<string, string> = {};
+      for (const p of formatter.formatToParts(new Date(postFallBackEpoch))) {
+        fbParts[p.type] = p.value;
+      }
+      expect(fbParts.year).toBe('2026');
+      expect(fbParts.month).toBe('11');
+      expect(fbParts.day).toBe('01');
+      expect(fbParts.hour).toBe('03');
+      expect(fbParts.minute).toBe('30');
+      expect(fbParts.second).toBe('00');
+
+      // Spring-forward transition: 2026-03-08 at 03:30:00 MDT (after 2am spring-forward, UTC-6)
+      const postSpringForwardEpoch = parseLocalToUtcEpoch('2026-03-08', '03:30:00', 'America/Denver');
+      const sfParts: Record<string, string> = {};
+      for (const p of formatter.formatToParts(new Date(postSpringForwardEpoch))) {
+        sfParts[p.type] = p.value;
+      }
+      expect(sfParts.year).toBe('2026');
+      expect(sfParts.month).toBe('03');
+      expect(sfParts.day).toBe('08');
+      expect(sfParts.hour).toBe('03');
+      expect(sfParts.minute).toBe('30');
+      expect(sfParts.second).toBe('00');
+    });
   });
 });

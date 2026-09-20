@@ -246,8 +246,17 @@ class CopilotService : Service() {
             return START_NOT_STICKY
         }
 
-        val routeFile = intent?.getStringExtra(EXTRA_ROUTE_FILE) ?: "sample_itinerary.json"
-        val dayNumber = intent?.getIntExtra(EXTRA_DAY_NUMBER, 1) ?: 1
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val defaultRoute = prefs.getString(PREF_ROUTE_FILE, "sample_itinerary.json") ?: "sample_itinerary.json"
+        val defaultDay = prefs.getInt(PREF_DAY_NUMBER, 1)
+
+        val routeFile = intent?.getStringExtra(EXTRA_ROUTE_FILE) ?: defaultRoute
+        val dayNumber = intent?.getIntExtra(EXTRA_DAY_NUMBER, defaultDay) ?: defaultDay
+
+        prefs.edit()
+            .putString(PREF_ROUTE_FILE, routeFile)
+            .putInt(PREF_DAY_NUMBER, dayNumber)
+            .apply()
 
         startForegroundServiceWithNotification()
         loadItineraryAndStart(routeFile, dayNumber)
@@ -278,20 +287,22 @@ class CopilotService : Service() {
     }
 
     private fun loadItineraryAndStart(routeFile: String, dayNumber: Int) {
+        _activeRouteFile.value = routeFile
+        _activeDayNumber.value = dayNumber
         serviceScope.launch {
             try {
                 val repo = RouteRepository.getInstance(applicationContext)
-                val itinerary = withContext(Dispatchers.IO) {
-                    repo.loadItinerary(routeFile, dayNumber) ?: repo.loadItinerary(routeFile)
-                } ?: throw IllegalStateException("Failed to load itinerary: $routeFile (day $dayNumber)")
+                val (itinerary, checkpoints, startTime) = withContext(Dispatchers.IO) {
+                    val loaded = repo.loadItinerary(routeFile, dayNumber) ?: repo.loadItinerary(routeFile)
+                        ?: throw IllegalStateException("Failed to load itinerary: $routeFile (day $dayNumber)")
+                    val time = System.currentTimeMillis()
+                    val cps = loaded.resolveCheckpointsForDay(dayNumber, time)
+                    Triple(loaded, cps, time)
+                }
 
-                val startTime = System.currentTimeMillis()
-                val checkpoints = itinerary.resolveCheckpointsForDay(dayNumber, startTime)
                 locationTracker.setCheckpoints(checkpoints, startTime)
                 locationTracker.startTracking()
 
-                _activeRouteFile.value = routeFile
-                _activeDayNumber.value = dayNumber
                 val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
                 _activeRouteTitle.value = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
                 _activeCheckpoints.value = checkpoints

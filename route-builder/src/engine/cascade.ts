@@ -197,8 +197,6 @@ export function parseLocalToUtcEpoch(
   // Construct naive UTC timestamp first
   const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, second);
 
-  // Compute timezone offset at this instant using Intl
-  const probeDate = new Date(naiveUtc);
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -210,26 +208,36 @@ export function parseLocalToUtcEpoch(
     hour12: false,
   });
 
-  const partsMap: Record<string, string> = {};
-  for (const part of formatter.formatToParts(probeDate)) {
-    partsMap[part.type] = part.value;
-  }
+  const getOffset = (instantUtc: number): number => {
+    const partsMap: Record<string, string> = {};
+    for (const part of formatter.formatToParts(new Date(instantUtc))) {
+      partsMap[part.type] = part.value;
+    }
 
-  let localHour = Number(partsMap.hour || 0);
-  if (localHour === 24) localHour = 0;
+    let localHour = Number(partsMap.hour || 0);
+    if (localHour === 24) localHour = 0;
 
-  const localEpoch = Date.UTC(
-    Number(partsMap.year),
-    Number(partsMap.month) - 1,
-    Number(partsMap.day),
-    localHour,
-    Number(partsMap.minute || 0),
-    Number(partsMap.second || 0)
-  );
+    const localEpoch = Date.UTC(
+      Number(partsMap.year),
+      Number(partsMap.month) - 1,
+      Number(partsMap.day),
+      localHour,
+      Number(partsMap.minute || 0),
+      Number(partsMap.second || 0)
+    );
 
-  const offsetMs = localEpoch - naiveUtc;
-  // If localEpoch = naiveUtc + offsetMs, then to get target naiveUtc in local time, actual UTC is naiveUtc - offsetMs
-  return naiveUtc - offsetMs;
+    return localEpoch - instantUtc;
+  };
+
+  // 2-pass fixed-point probe to handle DST boundaries accurately:
+  // Pass 1: probe offset at naiveUtc
+  const offsetMs1 = getOffset(naiveUtc);
+  const candidateUtc = naiveUtc - offsetMs1;
+
+  // Pass 2: probe offset at the candidate UTC instant
+  const offsetMs2 = getOffset(candidateUtc);
+
+  return naiveUtc - offsetMs2;
 }
 
 /**

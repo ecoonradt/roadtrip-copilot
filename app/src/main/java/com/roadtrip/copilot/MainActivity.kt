@@ -20,7 +20,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.roadtrip.copilot.databinding.ActivityMainBinding
 import com.roadtrip.copilot.model.RouteOption
 import com.roadtrip.copilot.model.RouteRepository
@@ -378,78 +380,82 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeServiceState() {
         lifecycleScope.launch {
-            RouteRepository.getInstance(this@MainActivity).routes.collectLatest { options ->
-                routeOptions = options
-                routeAdapter?.apply {
-                    clear()
-                    addAll(options)
-                    notifyDataSetChanged()
-                }
-                val currentFile = CopilotService.activeRouteFile.value
-                val currentDay = CopilotService.activeDayNumber.value
-                val idx = options.indexOfFirst { it.routeFile == currentFile && it.dayNumber == currentDay }
-                if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
-                    binding.spinnerRoute.setSelection(idx)
-                }
-            }
-        }
-
-        lifecycleScope.launch {
-            CopilotService.isRunning.collectLatest { running ->
-                if (running) {
-                    binding.tvStatusBadge.text = getString(R.string.status_running)
-                    binding.tvStatusBadge.setBackgroundColor(getColor(R.color.success))
-                    binding.tvStatusBadge.setTextColor(getColor(R.color.bg_dark))
-                    binding.btnToggleService.text = getString(R.string.btn_stop)
-                    binding.btnToggleService.setBackgroundColor(getColor(R.color.danger))
-                } else {
-                    binding.tvStatusBadge.text = getString(R.string.status_idle)
-                    binding.tvStatusBadge.setBackgroundColor(0xFF334155.toInt())
-                    binding.tvStatusBadge.setTextColor(getColor(R.color.text_light))
-                    binding.btnToggleService.text = getString(R.string.btn_start)
-                    binding.btnToggleService.setBackgroundColor(getColor(R.color.accent))
-                }
-            }
-        }
-
-        lifecycleScope.launch {
-            CopilotService.telemetryFlow.collectLatest { result ->
-                if (result != null) {
-                    binding.tvSpeed.text = "%.0f mph".format(result.speedMph)
-                    if (result.nextCheckpoint != null && result.distanceToNextMiles != null) {
-                        binding.tvNextWaypoint.text = result.nextCheckpoint.name
-                        binding.tvDistanceNext.text = "%.1f mi away".format(result.distanceToNextMiles)
-                        val targetTime = result.nextCheckpoint.formattedTargetTime
-                        binding.tvTargetTime.text = if (!targetTime.isNullOrBlank()) "Target: $targetTime" else "Target: --"
-                    } else {
-                        binding.tvNextWaypoint.text = "All Checkpoints Visited"
-                        binding.tvDistanceNext.text = "--"
-                        binding.tvTargetTime.text = "Target: --"
-                    }
-
-                    if (result.scheduleDelta != null) {
-                        binding.tvScheduleDelta.text = result.scheduleDelta.statusText
-                        val color = if (result.scheduleDelta.isAhead) getColor(R.color.success) else getColor(R.color.danger)
-                        binding.tvScheduleDelta.setTextColor(color)
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    RouteRepository.getInstance(this@MainActivity).routes.collectLatest { options ->
+                        routeOptions = options
+                        routeAdapter?.apply {
+                            clear()
+                            addAll(options)
+                            notifyDataSetChanged()
+                        }
+                        val currentFile = CopilotService.activeRouteFile.value
+                        val currentDay = CopilotService.activeDayNumber.value
+                        val idx = options.indexOfFirst { it.routeFile == currentFile && it.dayNumber == currentDay }
+                        if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
+                            binding.spinnerRoute.setSelection(idx)
+                        }
                     }
                 }
-            }
-        }
 
-        lifecycleScope.launch {
-            CopilotService.eventLogFlow.collectLatest { logMsg ->
-                appendLog(logMsg)
-            }
-        }
+                launch {
+                    CopilotService.isRunning.collectLatest { running ->
+                        if (running) {
+                            binding.tvStatusBadge.text = getString(R.string.status_running)
+                            binding.tvStatusBadge.setBackgroundColor(getColor(R.color.success))
+                            binding.tvStatusBadge.setTextColor(getColor(R.color.bg_dark))
+                            binding.btnToggleService.text = getString(R.string.btn_stop)
+                            binding.btnToggleService.setBackgroundColor(getColor(R.color.danger))
+                        } else {
+                            binding.tvStatusBadge.text = getString(R.string.status_idle)
+                            binding.tvStatusBadge.setBackgroundColor(0xFF334155.toInt())
+                            binding.tvStatusBadge.setTextColor(getColor(R.color.text_light))
+                            binding.btnToggleService.text = getString(R.string.btn_start)
+                            binding.btnToggleService.setBackgroundColor(getColor(R.color.accent))
+                        }
+                    }
+                }
 
-        lifecycleScope.launch {
-            kotlinx.coroutines.flow.combine(
-                CopilotService.activeRouteFile,
-                CopilotService.activeDayNumber
-            ) { file, day -> Pair(file, day) }.collectLatest { (file, day) ->
-                val idx = routeOptions.indexOfFirst { it.routeFile == file && it.dayNumber == day }
-                if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
-                    binding.spinnerRoute.setSelection(idx)
+                launch {
+                    CopilotService.telemetryFlow.collectLatest { result ->
+                        if (result != null) {
+                            binding.tvSpeed.text = "%.0f mph".format(result.speedMph)
+                            if (result.nextCheckpoint != null && result.distanceToNextMiles != null) {
+                                binding.tvNextWaypoint.text = result.nextCheckpoint.name
+                                binding.tvDistanceNext.text = "%.1f mi away".format(result.distanceToNextMiles)
+                                val targetTime = result.nextCheckpoint.formattedTargetTime
+                                binding.tvTargetTime.text = if (!targetTime.isNullOrBlank()) "Target: $targetTime" else "Target: --"
+                            } else {
+                                binding.tvNextWaypoint.text = "All Checkpoints Visited"
+                                binding.tvDistanceNext.text = "--"
+                                binding.tvTargetTime.text = "Target: --"
+                            }
+
+                            if (result.scheduleDelta != null) {
+                                binding.tvScheduleDelta.text = result.scheduleDelta.statusText
+                                val color = if (result.scheduleDelta.isAhead) getColor(R.color.success) else getColor(R.color.danger)
+                                binding.tvScheduleDelta.setTextColor(color)
+                            }
+                        }
+                    }
+                }
+
+                launch {
+                    CopilotService.eventLogFlow.collectLatest { logMsg ->
+                        appendLog(logMsg)
+                    }
+                }
+
+                launch {
+                    kotlinx.coroutines.flow.combine(
+                        CopilotService.activeRouteFile,
+                        CopilotService.activeDayNumber
+                    ) { file, day -> Pair(file, day) }.collectLatest { (file, day) ->
+                        val idx = routeOptions.indexOfFirst { it.routeFile == file && it.dayNumber == day }
+                        if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
+                            binding.spinnerRoute.setSelection(idx)
+                        }
+                    }
                 }
             }
         }

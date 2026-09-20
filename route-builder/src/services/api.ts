@@ -315,6 +315,9 @@ export async function chatWithScoutStream(
     if (buffer.trim()) {
       processFrame(buffer.trim());
     }
+  } catch (err: unknown) {
+    await reader.cancel().catch(() => {});
+    throw err;
   } finally {
     reader.releaseLock();
   }
