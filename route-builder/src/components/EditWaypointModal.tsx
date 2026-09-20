@@ -16,6 +16,7 @@ import {
   MapPin,
   Clock,
   Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 import type { Waypoint, WaypointType } from '../types/routing';
 import type { WaypointContext, CopilotAlert, AiEngineType } from '../types/ai';
@@ -46,6 +47,7 @@ export interface EditWaypointModalProps {
   onClose: () => void;
   onSave: (waypointId: string, updates: Partial<Waypoint>) => void;
   onApply?: (waypointId: string, alert: CopilotAlert) => void;
+  aiAvailable?: boolean;
 }
 
 /**
@@ -112,6 +114,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   onClose,
   onSave,
   onApply,
+  aiAvailable = true,
 }) => {
   const [activeTab, setActiveTab] = useState<'details' | 'alert'>(initialTab);
 
@@ -611,6 +614,18 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
           ) : (
             /* TAB 2: In-Car Alert & Audio Configuration */
             <div className="space-y-4">
+              {!aiAvailable && (
+                <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-white">AI Co-Pilot Script Generator Unavailable</span>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      An active AI engine or API key is required to automatically generate alerts. You can still manually author or edit heads-up card text and spoken phonetic audio scripts below.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* AI Generation Control */}
               <div className="flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
                 <div className="flex items-center gap-2">
@@ -626,20 +641,16 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                         className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${
                           engine === 'saved'
                             ? 'bg-sky-950/80 text-sky-300 border-sky-700/60'
-                            : engine === 'agy'
-                            ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
-                            : engine === 'cloud'
-                            ? 'bg-purple-950 text-purple-300 border-purple-700/60'
-                            : 'bg-slate-800 text-slate-300 border-slate-700'
+                            : !aiAvailable
+                            ? 'bg-slate-800 text-slate-400 border-slate-700'
+                            : 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
                         }`}
                       >
                         {engine === 'saved'
                           ? 'Saved Itinerary Alert'
-                          : engine === 'agy'
-                          ? 'agy CLI (Local)'
-                          : engine === 'cloud'
-                          ? 'Gemini API'
-                          : 'Deterministic Fallback'}
+                          : !aiAvailable
+                          ? 'Manual Alert'
+                          : 'AI Generated'}
                       </span>
                     </div>
                   </div>
@@ -647,9 +658,20 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleGenerateAlert}
-                  disabled={isLoading}
-                  className="px-3.5 py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  onClick={aiAvailable ? handleGenerateAlert : undefined}
+                  disabled={!aiAvailable || isLoading}
+                  title={
+                    !aiAvailable
+                      ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                      : title
+                      ? 'Regenerate script with AI'
+                      : 'Generate script with AI'
+                  }
+                  className={`px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm ${
+                    !aiAvailable
+                      ? 'bg-slate-850 border border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                      : 'bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white cursor-pointer'
+                  }`}
                 >
                   {isLoading ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />

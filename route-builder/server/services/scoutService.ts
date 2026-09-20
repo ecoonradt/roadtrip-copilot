@@ -798,7 +798,7 @@ export class ScoutService {
     throw new Error(
       lastError?.includes('timed out')
         ? 'Route Scout timed out while analyzing your request. Please click Retry.'
-        : `Route Scout error: ${lastError || 'unable to connect to an AI model. Please verify your local agy CLI or AI Studio API key.'}`
+        : `Route Scout error: ${lastError || 'unable to connect to an AI engine. Please verify your AI engine configuration or API key.'}`
     );
   }
 

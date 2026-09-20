@@ -6,7 +6,7 @@ import { DayTabBar } from './components/DayTabBar';
 import { RouteSelectorModal } from './components/RouteSelectorModal';
 import { ExportModal } from './components/ExportModal';
 import { RouteScoutDrawer } from './components/RouteScoutDrawer';
-import { fetchRoute, fetchItinerary, saveItinerary } from './services/api';
+import { fetchRoute, fetchItinerary, saveItinerary, fetchAiStatus } from './services/api';
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
 import type { ScoutScope, ScoutSuggestion } from './types/scout';
 import {
@@ -132,6 +132,27 @@ export function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [lastSavedTripJson, setLastSavedTripJson] = useState<string>('');
+
+  // AI availability readiness state
+  const [aiAvailable, setAiAvailable] = useState<boolean>(true);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    fetchAiStatus()
+      .then((status) => {
+        if (isSubscribed) {
+          setAiAvailable(status.available);
+        }
+      })
+      .catch(() => {
+        if (isSubscribed) {
+          setAiAvailable(false);
+        }
+      });
+    return () => {
+      isSubscribed = false;
+    };
+  }, []);
 
   // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
   useEffect(() => {
@@ -739,6 +760,7 @@ export function App() {
         isDirty={isDirty}
         onToggleScout={handleToggleScout}
         isScoutOpen={isScoutOpen}
+        aiAvailable={aiAvailable}
       />
 
       {/* Multi-Day Leg Switcher Bar (Visible for multi-day itineraries) */}
@@ -767,6 +789,7 @@ export function App() {
           onOpenScoutForWaypoint={handleOpenScoutForWaypoint}
           selectedWaypointId={selectedWaypointId}
           onSelectWaypoint={setSelectedWaypointId}
+          aiAvailable={aiAvailable}
         />
 
         {/* Interactive Map Area */}
@@ -790,6 +813,7 @@ export function App() {
             scoutPreviewPin={scoutPreviewPin}
             onClearScoutPreviewPin={() => setScoutPreviewPin(null)}
             isScoutOpen={isScoutOpen}
+            aiAvailable={aiAvailable}
           />
         </main>
 
@@ -807,6 +831,7 @@ export function App() {
           onUpdateWaypoint={handleUpdateWaypoint}
           onPreviewCoordinate={setScoutPreviewPin}
           activePreviewPin={scoutPreviewPin}
+          aiAvailable={aiAvailable}
         />
       </div>
 

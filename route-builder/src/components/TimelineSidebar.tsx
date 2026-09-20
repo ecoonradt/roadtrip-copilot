@@ -38,6 +38,7 @@ interface TimelineSidebarProps {
   onOpenScoutForWaypoint?: (waypoint: Waypoint) => void;
   selectedWaypointId?: string | null;
   onSelectWaypoint?: (id: string | null) => void;
+  aiAvailable?: boolean;
 }
 
 const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
@@ -68,6 +69,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   onOpenScoutForWaypoint,
   selectedWaypointId,
   onSelectWaypoint,
+  aiAvailable = true,
 }) => {
   // Resizable sidebar width with localStorage persistence
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -308,11 +310,24 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
           {onOpenScoutForDay ? (
             <button
-              onClick={onOpenScoutForDay}
-              className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer whitespace-nowrap"
-              title="Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
+              onClick={aiAvailable ? onOpenScoutForDay : undefined}
+              disabled={!aiAvailable}
+              className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-colors border whitespace-nowrap ${
+                !aiAvailable
+                  ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                  : 'bg-slate-800 hover:bg-slate-750 text-cyan-300 border-slate-700/70 cursor-pointer'
+              }`}
+              title={
+                !aiAvailable
+                  ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                  : "Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
+              }
             >
-              <Compass className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <Compass
+                className={`w-3.5 h-3.5 shrink-0 ${
+                  !aiAvailable ? 'text-slate-500' : 'text-cyan-400'
+                }`}
+              />
               <span>Scout Leg</span>
             </button>
           ) : (
@@ -321,15 +336,27 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
           {waypoints.length > 0 ? (
             <button
-              onClick={handleBatchGenerateAll}
-              disabled={isBatchGenerating}
-              className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-amber-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/70 cursor-pointer disabled:opacity-50 whitespace-nowrap"
-              title="Generate Co-Pilot audio alerts for all stops"
+              onClick={aiAvailable ? handleBatchGenerateAll : undefined}
+              disabled={!aiAvailable || isBatchGenerating}
+              className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-colors border whitespace-nowrap ${
+                !aiAvailable
+                  ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                  : 'bg-slate-800 hover:bg-slate-750 text-amber-300 border-slate-700/70 cursor-pointer disabled:opacity-50'
+              }`}
+              title={
+                !aiAvailable
+                  ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                  : 'Generate Co-Pilot audio alerts for all stops'
+              }
             >
               {isBatchGenerating ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
               ) : (
-                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <Sparkles
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    !aiAvailable ? 'text-slate-500' : 'text-amber-400'
+                  }`}
+                />
               )}
               <span>AI Alerts</span>
             </button>
@@ -744,13 +771,30 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           {onOpenScoutForWaypoint && (
                             <button
                               type="button"
-                              onClick={() => {
-                                onOpenScoutForWaypoint(modalWp);
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-cyan-300 rounded-lg text-xs font-medium transition-colors border border-slate-700/80 cursor-pointer"
-                              title="Ask Route Scout about this stop"
+                              onClick={
+                                aiAvailable
+                                  ? () => {
+                                      onOpenScoutForWaypoint(modalWp);
+                                    }
+                                  : undefined
+                              }
+                              disabled={!aiAvailable}
+                              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                                !aiAvailable
+                                  ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                                  : 'bg-slate-800 hover:bg-slate-750 text-cyan-300 border-slate-700/80 cursor-pointer'
+                              }`}
+                              title={
+                                !aiAvailable
+                                  ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                                  : 'Ask Route Scout about this stop'
+                              }
                             >
-                              <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                              <Compass
+                                className={`w-3.5 h-3.5 ${
+                                  !aiAvailable ? 'text-slate-500' : 'text-cyan-400'
+                                }`}
+                              />
                               <span>Ask Scout</span>
                             </button>
                           )}
@@ -828,6 +872,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
           isLast={selectedModal.isLast}
           onClose={() => setSelectedModal(null)}
           onSave={(waypointId, updates) => onUpdateWaypoint(waypointId, updates)}
+          aiAvailable={aiAvailable}
         />
       )}
     </aside>

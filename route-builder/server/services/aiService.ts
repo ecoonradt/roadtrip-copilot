@@ -34,6 +34,11 @@ export interface AiHarnessAdapter {
   sanitizeResponse?(rawText: string): string;
 }
 
+export interface AiStatusResult {
+  available: boolean;
+  message?: string;
+}
+
 export interface AiServiceOptions {
   adapters?: AiHarnessAdapter[];
   execAgyFn?: (prompt: string) => Promise<string>;
@@ -496,6 +501,37 @@ export class AiService {
 
   getAdapter(id: string): AiHarnessAdapter | undefined {
     return this.adapters.get(id);
+  }
+
+  /**
+   * Checks if any registered AI harness adapter is available and ready for generation.
+   * Purely polymorphic: iterates through all adapters without vendor-specific logic.
+   */
+  async checkAvailability(apiKey?: string): Promise<boolean> {
+    const effectiveApiKey = apiKey || this.defaultApiKey;
+    for (const adapter of this.adapters.values()) {
+      try {
+        if (await adapter.isAvailable(effectiveApiKey)) {
+          return true;
+        }
+      } catch {
+        // Ignore adapter check error and check remaining adapters
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Returns a generic status object for AI feature readiness.
+   */
+  async getStatus(apiKey?: string): Promise<AiStatusResult> {
+    const available = await this.checkAvailability(apiKey);
+    return {
+      available,
+      message: available
+        ? undefined
+        : 'AI features are currently unavailable. An active AI engine or API key is required.',
+    };
   }
 
   /**

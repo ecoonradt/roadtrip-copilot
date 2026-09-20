@@ -27,7 +27,7 @@
 * AI generation adheres to the `AiHarnessAdapter` interface (`server/services/aiService.ts`):
   * `AgyHarnessAdapter`: Local Antigravity CLI dynamically resolving the latest Flash model.
   * `GeminiStudioHarnessAdapter`: Cloud API defaulting to `gemini-3.8-flash`.
-  * `TemplateHarnessAdapter`: Deterministic offline fallback.
+  * Graceful UI Disabling: AI features (alert copywriting and Route Scout) require an active AI engine or API key; when unavailable, the studio gracefully disables all AI buttons with informative tooltips.
 * Enforces constraints: titles $\le 30$ chars, spoken messages 15–25 words ($\le 2$ lines), trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
 
 ### E. Route Scout Conversational Co-Pilot & Adapter Seam
@@ -60,7 +60,7 @@ route-builder/
 │   ├── index.ts                # Server entrypoint (:3001)
 │   ├── routes/
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
-│   │   ├── ai.ts               # /api/copilot/generate (single & batch)
+│   │   ├── ai.ts               # /api/copilot/generate & /api/ai/status
 │   │   ├── device.ts           # /api/device (status, push, download, staging)
 │   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
 │   │   └── scout.ts            # /api/ai/scout (conversational assistant & quick prompts)
@@ -70,10 +70,10 @@ route-builder/
 │   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
 │   │   ├── promptBuilder.ts    # Prompt contract generator
 │   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
-│   │   ├── aiService.ts        # Pluggable AI adapters (Agy, Gemini API, template fallback)
+│   │   ├── aiService.ts        # Pluggable AI adapters (Agy, Gemini API) & availability status
 │   │   ├── deviceService.ts    # ADB subprocess management and local IP Wi-Fi discovery
 │   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
-│   │   └── scoutService.ts     # Route Scout prompt builder, parser, and fallbacks
+│   │   └── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
 │   └── types/                  # Strict server TypeScript types (routing, ai, scout)
 ├── src/
 │   ├── App.tsx                 # Main layout & interactive map state coordinator

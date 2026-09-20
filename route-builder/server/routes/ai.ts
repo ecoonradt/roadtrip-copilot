@@ -57,4 +57,27 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
       }
     }
   );
+
+  // GET /api/ai/status
+  fastify.get<{ Querystring: { apiKey?: string } }>(
+    '/api/ai/status',
+    async (request, reply) => {
+      const { apiKey } = request.query || {};
+      const status = await aiService.getStatus(apiKey);
+      return reply.status(200).send(status);
+    }
+  );
+
+  // GET /api/ai/health (alias)
+  fastify.get<{ Querystring: { apiKey?: string } }>(
+    '/api/ai/health',
+    async (request, reply) => {
+      const { apiKey } = request.query || {};
+      const status = await aiService.getStatus(apiKey);
+      return reply.status(200).send({
+        status: status.available ? 'ok' : 'unavailable',
+        ...status,
+      });
+    }
+  );
 };

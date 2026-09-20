@@ -45,6 +45,7 @@ interface AppHeaderProps {
   isDirty?: boolean;
   onToggleScout?: () => void;
   isScoutOpen?: boolean;
+  aiAvailable?: boolean;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -71,6 +72,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   isDirty = false,
   onToggleScout,
   isScoutOpen = false,
+  aiAvailable = true,
 }) => {
   const [isSchedulePopoverOpen, setIsSchedulePopoverOpen] = useState(false);
   const [isMapsDropdownOpen, setIsMapsDropdownOpen] = useState(false);
@@ -395,17 +397,30 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {/* Route Scout Assistant Toggle */}
         {onToggleScout && (
           <button
-            onClick={onToggleScout}
-            className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-              isScoutOpen
-                ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-sm shadow-cyan-950/50'
-                : 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700/80 hover:text-cyan-300'
+            onClick={aiAvailable ? onToggleScout : undefined}
+            disabled={!aiAvailable}
+            className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
+              !aiAvailable
+                ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                : isScoutOpen
+                ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-sm shadow-cyan-950/50 cursor-pointer'
+                : 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700/80 hover:text-cyan-300 cursor-pointer'
             }`}
-            title={isScoutOpen ? 'Close Route Scout assistant' : 'Open Route Scout assistant'}
+            title={
+              !aiAvailable
+                ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                : isScoutOpen
+                ? 'Close Route Scout assistant'
+                : 'Open Route Scout assistant'
+            }
           >
             <Compass
               className={`w-3.5 h-3.5 ${
-                isScoutOpen ? 'text-cyan-400 animate-pulse' : 'text-cyan-400'
+                !aiAvailable
+                  ? 'text-slate-500'
+                  : isScoutOpen
+                  ? 'text-cyan-400 animate-pulse'
+                  : 'text-cyan-400'
               }`}
             />
             <span>Route Scout</span>

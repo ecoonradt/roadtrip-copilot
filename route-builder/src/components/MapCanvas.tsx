@@ -28,6 +28,7 @@ export interface MapCanvasProps {
   scoutPreviewPin?: ScoutPreviewPin | null;
   onClearScoutPreviewPin?: () => void;
   isScoutOpen?: boolean;
+  aiAvailable?: boolean;
 }
 
 // Custom DivIcon generator with sequence number and type color
@@ -145,6 +146,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   scoutPreviewPin,
   onClearScoutPreviewPin,
   isScoutOpen,
+  aiAvailable = true,
 }) => {
   // Convert GeoJSON [lon, lat] pairs to Leaflet [lat, lon]
   const polylineCoords = useMemo<[number, number][]>(() => {
@@ -262,11 +264,24 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
                 <div className="flex items-center gap-1.5 pt-1">
                   {onOpenScoutForWaypoint && (
                     <button
-                      onClick={() => onOpenScoutForWaypoint(waypoint)}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold bg-gradient-to-tr from-cyan-600 to-sky-500 hover:from-cyan-500 hover:to-sky-400 text-white shadow-md shadow-cyan-950/40 transition-all cursor-pointer"
-                      title="Open Route Scout for this stop"
+                      onClick={aiAvailable ? () => onOpenScoutForWaypoint(waypoint) : undefined}
+                      disabled={!aiAvailable}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold shadow-md transition-all ${
+                        !aiAvailable
+                          ? 'bg-slate-850 text-slate-500 cursor-not-allowed border border-slate-700/60 opacity-60 shadow-none'
+                          : 'bg-gradient-to-tr from-cyan-600 to-sky-500 hover:from-cyan-500 hover:to-sky-400 text-white shadow-cyan-950/40 cursor-pointer'
+                      }`}
+                      title={
+                        !aiAvailable
+                          ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                          : 'Open Route Scout for this stop'
+                      }
                     >
-                      <Compass className="w-3.5 h-3.5" />
+                      <Compass
+                        className={`w-3.5 h-3.5 ${
+                          !aiAvailable ? 'text-slate-500' : 'text-white'
+                        }`}
+                      />
                       <span>Ask Scout</span>
                     </button>
                   )}

@@ -49,6 +49,7 @@ export interface RouteScoutDrawerProps {
   onUpdateWaypoint: (targetWaypointId: string, updates: Partial<Waypoint>) => void;
   onPreviewCoordinate: (pin: ScoutPreviewPin | null) => void;
   activePreviewPin?: ScoutPreviewPin | null;
+  aiAvailable?: boolean;
 }
 
 const DEFAULT_DRAWER_WIDTH = 400;
@@ -262,6 +263,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   onUpdateWaypoint,
   onPreviewCoordinate,
   activePreviewPin,
+  aiAvailable = true,
 }) => {
   // Drawer width with localStorage persistence
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
@@ -938,6 +940,18 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {!aiAvailable && (
+          <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-2xl text-xs text-slate-300 flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold text-white">Route Scout Unavailable</span>
+              <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                An active AI engine or API key is required to use Route Scout. Timeline cascading, manual waypoint editing, and device sync remain fully functional.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Empty state & Quick Prompts */}
         {currentMessages.length === 0 && (
           <div className="space-y-4 py-2">
@@ -971,8 +985,18 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                   {quickPrompts.map((prompt, i) => (
                     <button
                       key={i}
-                      onClick={() => handleSendMessage(prompt)}
-                      className="w-full text-left p-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 hover:border-cyan-500/50 text-xs text-cyan-200 transition-all cursor-pointer flex items-center justify-between group"
+                      onClick={aiAvailable ? () => handleSendMessage(prompt) : undefined}
+                      disabled={!aiAvailable}
+                      className={`w-full text-left p-2 rounded-xl border text-xs transition-all flex items-center justify-between group ${
+                        !aiAvailable
+                          ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                          : 'bg-slate-800/70 hover:bg-slate-800 border-slate-700/60 hover:border-cyan-500/50 text-cyan-200 cursor-pointer'
+                      }`}
+                      title={
+                        !aiAvailable
+                          ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                          : undefined
+                      }
                     >
                       <span>{prompt}</span>
                       <Send className="w-3 h-3 text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2" />
@@ -1008,20 +1032,8 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                         Route Scout
                       </span>
                       {msg.engine && (
-                        <span
-                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
-                            msg.engine === 'agy'
-                              ? 'bg-cyan-950/70 text-cyan-300 border-cyan-800/60'
-                              : msg.engine === 'cloud'
-                              ? 'bg-purple-950/70 text-purple-300 border-purple-800/60'
-                              : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
-                          }`}
-                        >
-                          {msg.engine === 'agy'
-                            ? 'Gemini Flash'
-                            : msg.engine === 'cloud'
-                            ? 'Gemini Cloud'
-                            : 'Offline Fallback'}
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded border bg-slate-800 text-slate-300 border-slate-700">
+                          {msg.engine === 'template' ? 'Offline' : 'AI Assistant'}
                         </span>
                       )}
                     </div>
@@ -1309,6 +1321,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               ref={inputRef}
               rows={1}
               value={inputText}
+              disabled={!aiAvailable || isLoading}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -1317,21 +1330,35 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                 }
               }}
               placeholder={
-                scope.type === 'day'
+                !aiAvailable
+                  ? 'AI features unavailable (no AI engine or API key configured)'
+                  : scope.type === 'day'
                   ? 'Ask about stops, food, fuel, or pacing along this leg...'
                   : `Ask about accessibility, photo spots, or dwell time for ${
                       scope.waypointName || 'this stop'
                     }...`
               }
               style={{ minHeight: '38px', maxHeight: '120px' }}
-              className="w-full resize-none overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+              className={`w-full resize-none overflow-y-auto border rounded-xl px-3 py-2 text-xs transition-colors focus:outline-none ${
+                !aiAvailable
+                  ? 'bg-slate-850 border-slate-800 text-slate-500 placeholder-slate-600 cursor-not-allowed'
+                  : 'bg-slate-800 border-slate-700 text-white placeholder-slate-500 focus:border-cyan-500'
+              }`}
             />
           </div>
           <button
             type="submit"
-            disabled={!inputText.trim() || isLoading}
-            className="p-2.5 bg-gradient-to-tr from-cyan-600 to-sky-500 hover:from-cyan-500 hover:to-sky-400 text-white rounded-xl shadow-md shadow-cyan-950/40 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-            title="Send message to Route Scout"
+            disabled={!aiAvailable || !inputText.trim() || isLoading}
+            className={`p-2.5 rounded-xl shadow-md transition-all shrink-0 ${
+              !aiAvailable
+                ? 'bg-slate-850 border border-slate-800 text-slate-600 cursor-not-allowed'
+                : 'bg-gradient-to-tr from-cyan-600 to-sky-500 hover:from-cyan-500 hover:to-sky-400 text-white shadow-cyan-950/40 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+            title={
+              !aiAvailable
+                ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                : 'Send message to Route Scout'
+            }
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />

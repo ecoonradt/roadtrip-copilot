@@ -1,36 +1,65 @@
 # Roadtrip Co-Pilot: Route Builder Web Studio
 
-A full-stack, desktop-first itinerary planning and authoring studio for **Roadtrip Co-Pilot**. It allows you to design custom road trip itineraries on an interactive OpenStreetMap canvas, compute road routing and timeline cascades, generate AI-enriched in-car alerts, and sync custom trips directly to your Android device.
+A full-stack, desktop-first itinerary planning and authoring studio for **Roadtrip Co-Pilot**. It allows you to design custom road trip itineraries on an interactive OpenStreetMap canvas, compute road routing and timeline cascades, scout scenic corridors with an AI assistant, and sync custom trips directly to your Android device.
 
 ---
 
-## Architecture Overview
+## Key Features
 
-* **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS + Leaflet (`react-leaflet`). Runs on `http://localhost:5173`.
-* **Backend:** Fastify 5 + TypeScript running on `http://localhost:3001` (Vite reverse-proxies `/api/*` requests).
-* **Road Routing & Geocoding:**
-  * `GET /api/routing/geocode`: Proxies OpenStreetMap Nominatim with a compliant custom `User-Agent`.
-  * `GET /api/routing/route`: Proxies the Open Source Routing Machine (OSRM) for real road driving geometry, distances, and durations, backed by an in-memory LRU cache.
-* **Timeline Schedule Engine (`src/engine/cascade.ts`):** Computes arrival and departure times across all stops, automatically rippling dwell time changes downstream and shifting local times at state/timezone boundaries while keeping UTC milestones chronological. Supports a backward "Catch-up" deadline solver.
-* **Pluggable AI Harness Adapters (`server/services/aiService.ts`):** 
-  * **Primary (Local Zero-Config):** Shells out locally to the Antigravity CLI (`AgyHarnessAdapter`), dynamically detecting and invoking the latest available Gemini Flash model from `agy models` (e.g. `gemini-3.8-flash-high`). **Zero API keys required.**
-  * **Cloud Fallback:** `GeminiStudioHarnessAdapter` connects directly to Google AI Studio REST API, defaulting to `gemini-3.8-flash`.
-  * **Deterministic Fallback:** `TemplateHarnessAdapter` provides offline template alerts if no AI provider is configured.
-  * **Copywriting Constraints:** Enforces titles $\le 30$ characters, notification messages $\le 2$ lines, natural spoken phonetic TTS scripts (15–25 words, spoken within 8–12 seconds), and trigger radii clamped to $0.3$–$6.0$ miles.
-  * **Future Adapters:** Pluggable interface ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See [docs/IDEAS.md](../docs/IDEAS.md).
-* **Route Scout Conversational Co-Pilot (`src/components/RouteScoutDrawer.tsx`, `server/services/scoutService.ts`):**
-  * **Interactive Road-Trip Advisor:** A sliding right drawer assistant that inspects your route in two context scopes:
-    * **Day Scope:** Evaluates overall daily driving pace, identifies scenic overlooks, and alerts drivers to upcoming meal and fuel deserts along remote corridors.
-    * **Waypoint Scope:** Audits specific stops for parking accessibility, paved vs. gravel access, sunrise/sunset lighting, and precise road-snapped GPS coordinates.
-  * **Actionable Suggestion Cards:** Generates structured candidate updates (`add_waypoint`, `update_waypoint`) that render in the chat as interactive cards with 1-click timeline insertion and on-map coordinate preview.
-  * **Harness Adapter Seam Architecture:** Keeps the domain prompt completely decoupled from underlying harness mechanics. Harness-specific tool permissions (such as granting native web search grounding to `agy` while strictly prohibiting background tasks and subagents) are encapsulated in the adapter layer.
-  * **SSE Streaming with Thought Process:** Real-time token streaming (`/api/ai/scout/chat-stream`) with an expandable thought process accordion capturing intermediate search grounding.
-* **Multi-Stop Google Maps Navigation Links (`src/engine/googleMapsUrl.ts`):** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are partitioned into continuous driving legs with dedicated QR codes.
-* **Device Sync & Handoff (`server/services/deviceService.ts`, `src/components/ExportModal.tsx`):**
-  * **1-Click ADB Push:** Directly pushes the itinerary `.json` to connected phones at `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
-  * **Local Wi-Fi QR Code:** Serves the file locally (`GET /api/device/download/:filename`) with an on-screen QR code for instant camera scanning and download over local Wi-Fi.
-  * **Google Maps Leg QR Codes:** Scannable on-screen QR codes to instantly launch Google Maps turn-by-turn navigation on your car display with route-shaping anchors intact.
-  * **In-App File Import (SAF):** Download the `.json` file in your browser and import it via the Android app's Storage Access Framework file picker.
+* **Interactive Map Canvas & Routing:** OpenStreetMap canvas powered by Leaflet and backend OSRM routing proxies with in-memory caching.
+* **Timeline Schedule Engine:** Computes arrival and departure times across all stops, automatically rippling dwell time changes downstream and shifting local times at state and timezone boundaries while keeping UTC milestones chronological. Includes a backward "Catch-up" deadline solver.
+* **Route Scout Conversational Co-Pilot:** An interactive route intelligence advisor in a slide-out drawer that audits daily driving pace, discovers scenic vistas, local food, and fuel stops along your driving corridor, and inserts verified waypoints directly into your timeline.
+* **AI Heads-Up Generation:** Instant generation of Android Auto heads-up cards (titles up to 30 characters, messages up to 2 lines) and natural spoken phonetic TTS scripts (15-25 words, spoken within 8-12 seconds) with trigger radii clamped between 0.3 and 6.0 miles.
+* **Multi-Stop Google Maps Navigation Links:** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are automatically partitioned into continuous driving legs with dedicated QR codes.
+* **1-Click Device Handoff:** Directly push itineraries to connected Android phones over ADB, download via local Wi-Fi QR codes, or export JSON files for Android Storage Access Framework (SAF) import.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+* **Node.js:** v18.0.0 or newer (v20+ LTS recommended)
+* **npm:** v9.0.0 or newer
+  * **Linux:** `sudo apt install -y nodejs npm` (or via NodeSource)
+  * **macOS:** `brew install node`
+  * **Windows:** `winget install OpenJS.NodeJS.LTS`
+* **Android Debug Bridge (Optional, for 1-Click ADB Push):** `adb` available in system PATH.
+
+### Installation
+
+```bash
+cd route-builder
+npm install
+```
+
+### Running in Development Mode
+
+```bash
+npm run dev
+```
+
+This runs both servers concurrently:
+1. **Fastify Backend:** `http://localhost:3001`
+2. **Vite Frontend:** `http://localhost:5173`
+
+Open `http://localhost:5173` in your browser.
+
+---
+
+## AI Configuration (Route Scout & Alert Generation)
+
+The core Route Builder (map planning, OSRM routing, timeline cascade calculations, and device sync) works 100% offline with zero configuration.
+
+To use the **AI Heads-Up Alert Copywriter** or the **Route Scout Conversational Co-Pilot**, configure an AI engine using one of the following methods:
+
+* **Local Zero-Config (Recommended):** If the Antigravity CLI (`agy`) is in your PATH (e.g. `~/.local/bin/agy`), the Route Builder automatically detects and invokes the active Gemini Flash model (e.g. `gemini-3.8-flash-high`) using your active session. **Zero API keys required.** Grounded web searches verify real-world coordinates and operating hours without headless lockups. (Optional model override: `export AGY_MODEL="model-name"`).
+* **Cloud API Fallback:** Supply a Google AI Studio developer API key in the UI settings modal or via environment variable:
+  ```bash
+  export GEMINI_API_KEY="your-google-ai-studio-api-key"
+  ```
+  *(Defaults to `gemini-3.8-flash`; override via `export GEMINI_MODEL="model-name"`).*
+* **Future Adapters:** Pluggable adapter architecture ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See [docs/IDEAS.md](../docs/IDEAS.md).
 
 ---
 
@@ -49,7 +78,7 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
    * Review the candidate cards (`add_waypoint` or `update_waypoint`) with their on-map pin previews, and click **Apply** to integrate them into your timeline cascade.
 
 2. **Verify on Google Maps ("Test on Google Maps"):**
-   * Open the **Edit Waypoint** modal (`pencil` icon) on any physical stop (fuel, meals, lodging, viewpoints).
+   * Open the **Edit Waypoint** modal (pencil icon) on any physical stop (fuel, meals, lodging, viewpoints).
    * Click the **"Test on Google Maps"** link button next to the establishment name or Place ID.
    * Verify that Google Maps resolves the exact intended entrance or parking area without prompting with ambiguous *"Did you mean:"* disambiguation pickers.
 
@@ -60,33 +89,14 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
 
 ---
 
-## Getting Started
+## Device Sync & Phone Handoff
 
-### Prerequisites & Cross-Platform Installation
+Once your itinerary is ready, transfer it to your Android device using any of three methods:
 
-* **Node.js:** v18.0.0 or newer (v20+ LTS recommended)
-* **npm:** v9.0.0 or newer
-  * **Linux:** `sudo apt install -y nodejs npm` (or via NodeSource)
-  * **macOS:** `brew install node`
-  * **Windows:** `winget install OpenJS.NodeJS.LTS`
-* **Android Debug Bridge (Optional for 1-Click ADB Push):** `adb` available in system PATH.
-* **Antigravity CLI (Optional for Zero-Config Local AI):** `agy` in your PATH (`~/.local/bin/agy`).
-
-### Installation
-```bash
-cd route-builder
-npm install
-```
-
-### Running in Development Mode
-```bash
-npm run dev
-```
-This runs `concurrently` to start both:
-1. **Fastify Backend:** `http://localhost:3001`
-2. **Vite Frontend:** `http://localhost:5173`
-
-Open `http://localhost:5173` in your browser.
+* **1-Click ADB Push:** Directly pushes the itinerary `.json` to connected phones at `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
+* **Local Wi-Fi QR Code:** Serves the file locally (`GET /api/device/download/:filename`) with an on-screen QR code for instant camera scanning and download over your local network.
+* **Google Maps Leg QR Codes:** Scannable on-screen QR codes to instantly launch Google Maps turn-by-turn navigation on your car display with route-shaping anchors intact.
+* **In-App File Import (SAF):** Download the `.json` file in your browser and import it via the Android app's Storage Access Framework file picker.
 
 ---
 
@@ -97,7 +107,7 @@ The application works with zero configuration by default in an Antigravity envir
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
 | `PORT` | `3001` | Fastify backend listening port. |
-| `GEMINI_API_KEY` | *(None)* | Optional Google AI Studio developer API key. Used as cloud fallback if `agy` CLI is not present. |
+| `GEMINI_API_KEY` | *(None)* | Optional Google AI Studio developer API key. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Explicit Gemini model ID for Google AI Studio cloud calls. |
 | `AGY_MODEL` | *(Auto-detected)* | Override the model passed to `agy` (by default auto-resolves the newest Flash model from `agy models`). |
 | `NODE_ENV` | `development` | Set to `production` for production builds. |
@@ -119,12 +129,12 @@ npm run build         # Production compile (client Vite bundle + backend tsc)
 
 ---
 
-## Project Architecture
+## How It Works (Architecture Summary)
 
 The Route Builder is architected as a decoupled client-server application:
+
 * **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, Route Scout chat drawer, and Google Maps URL chunking.
-* **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout service, and ADB device synchronization.
-* **Test Suites (`tests/`):** 162 automated Vitest unit and integration tests covering routing proxies, timeline cascade math, AI adapters, Route Scout adapter seams, and V2 schema exports.
+* **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout streaming SSE service, and ADB device synchronization.
+* **Testing (`tests/`):** Automated Vitest unit and integration tests validating routing proxies, timeline calculations, AI adapters, and V2 schema exports.
 
-For the detailed file layout, architecture pillars, and development guidelines, see [AGENTS.md](AGENTS.md) and the root [AGENTS.md](../AGENTS.md).
-
+For detailed developer specifications, directory layouts, and design contracts, see [AGENTS.md](AGENTS.md) and [docs/route_builder_research_and_architecture.md](../docs/route_builder_research_and_architecture.md).

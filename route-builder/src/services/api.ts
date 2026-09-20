@@ -17,6 +17,30 @@ export interface GenerateAlertRequestOptions {
   preferredEngine?: AiEngineType | 'auto';
 }
 
+export interface AiStatusResult {
+  available: boolean;
+  message?: string;
+}
+
+export async function fetchAiStatus(apiKey?: string): Promise<AiStatusResult> {
+  const url = apiKey ? `/api/ai/status?apiKey=${encodeURIComponent(apiKey)}` : '/api/ai/status';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      return {
+        available: false,
+        message: 'AI features are currently unavailable.',
+      };
+    }
+    return (await res.json()) as AiStatusResult;
+  } catch {
+    return {
+      available: false,
+      message: 'AI features are currently unavailable.',
+    };
+  }
+}
+
 export async function searchLocation(query: string): Promise<GeocodeResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];

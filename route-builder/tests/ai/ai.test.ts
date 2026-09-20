@@ -347,4 +347,96 @@ describe('AI Co-Pilot Enrichment & Resilience (/api/copilot/generate)', () => {
       expect(registered?.name).toBe('Custom Test Harness');
     });
   });
+
+  describe('AI Availability & Status Endpoint', () => {
+    it('returns available: true when an adapter is available', async () => {
+      const availableAdapter: AiHarnessAdapter = {
+        id: 'test-adapter',
+        name: 'Test Adapter',
+        isAvailable: async () => true,
+        generate: async () => 'test',
+      };
+      const aiService = new AiService({ adapters: [availableAdapter] });
+      const app = createApp({ logger: false, aiService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/ai/status',
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json<{ available: boolean; message?: string }>();
+      expect(data.available).toBe(true);
+      expect(data.message).toBeUndefined();
+    });
+
+    it('returns available: false with a generic message when no adapter is available', async () => {
+      const unavailableAdapter: AiHarnessAdapter = {
+        id: 'test-adapter',
+        name: 'Test Adapter',
+        isAvailable: async () => false,
+        generate: async () => 'test',
+      };
+      const aiService = new AiService({ adapters: [unavailableAdapter] });
+      const app = createApp({ logger: false, aiService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/ai/status',
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json<{ available: boolean; message?: string }>();
+      expect(data.available).toBe(false);
+      expect(data.message).toBeDefined();
+      // Verify message is generic and does not leak vendor names
+      expect(data.message).not.toContain('agy');
+      expect(data.message).not.toContain('gemini');
+      expect(data.message).not.toContain('google');
+    });
+
+    it('passes through apiKey query parameter to check availability', async () => {
+      const keyAdapter: AiHarnessAdapter = {
+        id: 'key-adapter',
+        name: 'Key Adapter',
+        isAvailable: async (key) => Boolean(key && key === 'valid-key'),
+        generate: async () => 'test',
+      };
+      const aiService = new AiService({ adapters: [keyAdapter] });
+      const app = createApp({ logger: false, aiService });
+
+      const resWithoutKey = await app.inject({
+        method: 'GET',
+        url: '/api/ai/status',
+      });
+      expect(resWithoutKey.json<{ available: boolean }>().available).toBe(false);
+
+      const resWithKey = await app.inject({
+        method: 'GET',
+        url: '/api/ai/status?apiKey=valid-key',
+      });
+      expect(resWithKey.json<{ available: boolean }>().available).toBe(true);
+    });
+
+    it('/api/ai/health returns health status format', async () => {
+      const unavailableAdapter: AiHarnessAdapter = {
+        id: 'test-adapter',
+        name: 'Test Adapter',
+        isAvailable: async () => false,
+        generate: async () => 'test',
+      };
+      const aiService = new AiService({ adapters: [unavailableAdapter] });
+      const app = createApp({ logger: false, aiService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/ai/health',
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = res.json<{ status: string; available: boolean }>();
+      expect(data.status).toBe('unavailable');
+      expect(data.available).toBe(false);
+    });
+  });
 });
