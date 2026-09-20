@@ -8,7 +8,7 @@ A background audio guide and heads-up alert companion that runs alongside Google
 
 When driving a multi-stop road trip with Android Auto:
 * Google Maps handles turn-by-turn directions, but doesn't know your planned itinerary, scenic pull-offs, or scheduled stop times.
-* Android Auto's dashboard only allows two active tiles (navigation on the left, media on the right). Running a dedicated third-party navigation app displaces your driving map or music.
+* Android Auto's dashboard only allows two active tiles (navigation on the left, media on the right). Running a dedicated third-party navigation app displaces your driving map or music. *(For a detailed breakdown of Android Auto's windowing model and slot constraints, see [docs/android_auto_multitasking_architecture.md](docs/android_auto_multitasking_architecture.md)).*
 
 **Roadtrip Co-Pilot runs as an unobtrusive background service.** It monitors your GPS location against a pre-planned route and delivers timed audio and visual heads-up alerts without displacing Google Maps:
 
@@ -185,5 +185,6 @@ For complete documentation on route authoring, AI model configuration, test suit
 
 * **[AGENTS.md](AGENTS.md):** Complete developer handbook, foreground service lifecycle, audio focus routing, distraction rules, and up-to-date repository directory layout.
 * **[route-builder/README.md](route-builder/README.md):** Web Studio guide, prerequisites, AI configuration, verification workflow, and test suites.
+* **[docs/android_auto_multitasking_architecture.md](docs/android_auto_multitasking_architecture.md):** Android Auto Coolwalk multitasking model, screen slot mechanics, and background co-pilot design rationale.
 * **[docs/IDEAS.md](docs/IDEAS.md):** Feature backlog and roadmap (multi-provider AI adapters, custom voice profiles, GPX import/export, weather radar).
 * **[docs/route_builder_research_and_architecture.md](docs/route_builder_research_and_architecture.md):** Technical specification for timeline cascading, routing proxies, and schema contracts.
