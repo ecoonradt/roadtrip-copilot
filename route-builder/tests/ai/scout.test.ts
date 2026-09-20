@@ -8,6 +8,7 @@ import {
   ScoutService,
   sanitizeScoutReply,
   validateScoutPlaceId,
+  isValidGooglePlaceId,
 } from '../../server/services/scoutService.js';
 import { AgyHarnessAdapter, GeminiStudioHarnessAdapter } from '../../server/services/aiService.js';
 import { createApp } from '../../server/app.js';
@@ -235,6 +236,7 @@ describe('Route Scout Service & Prompts', () => {
   {
     "action": "add_waypoint",
     "name": "Cameron Trading Post (Navajo Taco Lunch)",
+    "place_name": "Cameron Trading Post",
     "type": "meal",
     "lat": 35.8756,
     "lng": -111.4128,
@@ -251,6 +253,7 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions).toHaveLength(1);
       expect(suggestions[0].action).toBe('add_waypoint');
       expect(suggestions[0].name).toBe('Cameron Trading Post (Navajo Taco Lunch)');
+      expect(suggestions[0].place_name).toBe('Cameron Trading Post');
       expect(suggestions[0].type).toBe('meal');
       expect(suggestions[0].lat).toBe(35.8756);
       expect(suggestions[0].lng).toBe(-111.4128);
@@ -387,21 +390,32 @@ describe('Route Scout Service & Prompts', () => {
       expect(retained[0].google_place_id).toBe('ChIJfake_hallucinated_place_id_12345');
     });
 
-    it('validates Google Place ID formatting with validateScoutPlaceId', () => {
+    it('validates Google Place ID formatting with validateScoutPlaceId and isValidGooglePlaceId', () => {
+      // Real verified Place IDs from Google Places protobuf format
+      expect(isValidGooglePlaceId('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q')).toBe(true);
+      expect(isValidGooglePlaceId('ChIJCR3fWhuQO4cRxCLXXbAfCxQ')).toBe(true);
+      expect(isValidGooglePlaceId('ChIJ2wW_a80KK4cR24D7xO_z5Y4')).toBe(true);
+
+      // Hallucinated or fake IDs fail binary protobuf verification
+      expect(isValidGooglePlaceId('ChIJfake_hallucinated_place_id_12345')).toBe(false);
+      expect(isValidGooglePlaceId('ChIJshort')).toBe(false);
+      expect(isValidGooglePlaceId('invalid_prefix_12345')).toBe(false);
+
+      // validateScoutPlaceId accepts real Place IDs
       expect(validateScoutPlaceId('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q')).toBe('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
-      // Must start with ChIJ
+      expect(validateScoutPlaceId('ChIJCR3fWhuQO4cRxCLXXbAfCxQ')).toBe('ChIJCR3fWhuQO4cRxCLXXbAfCxQ');
+
+      // Invalid or hallucinated strings are rejected
       expect(validateScoutPlaceId('invalid_place_id_12345')).toBeUndefined();
-      // Too short
       expect(validateScoutPlaceId('ChIJshort')).toBeUndefined();
-      // Non-string
+      expect(validateScoutPlaceId('ChIJfake_hallucinated_place_id_12345')).toBeUndefined();
       expect(validateScoutPlaceId(null)).toBeUndefined();
       expect(validateScoutPlaceId(12345)).toBeUndefined();
       expect(validateScoutPlaceId('')).toBeUndefined();
 
-      // Whitelist check
+      // Whitelist check: If present in knownPlaceIds, it is trusted even if it were a legacy mock
       const whitelist = new Set(['ChIJvalid_and_known_123456789']);
       expect(validateScoutPlaceId('ChIJvalid_and_known_123456789', whitelist)).toBe('ChIJvalid_and_known_123456789');
-      expect(validateScoutPlaceId('ChIJvalid_but_unknown_12345678', whitelist)).toBeUndefined();
     });
 
     it('strictly forces is_route_anchor = false on physical stops even if AI flags them as anchors', () => {

@@ -6,6 +6,7 @@ import type { WaypointType, WaypointNotification } from '../types/routing';
 export interface TimelineCascadeWaypoint {
   id: string;
   name: string;
+  place_name?: string;
   type?: WaypointType;
   lat: number;
   lng: number;
@@ -26,6 +27,7 @@ export interface TimelineCascadeWaypoint {
 export interface ScheduledStop {
   id: string;
   name: string;
+  place_name?: string;
   type: WaypointType;
   lat: number;
   lng: number;
@@ -126,6 +128,7 @@ export interface CoordinateLocation {
   lat: number;
   lng: number;
   name?: string;
+  placeName?: string;
   address?: string;
   placeId?: string;
   type?: WaypointType;

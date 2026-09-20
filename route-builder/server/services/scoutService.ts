@@ -33,6 +33,7 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
         if (wp.target_time) contextBlock += ` | Target: ${wp.target_time}`;
         if (wp.dwell_minutes) contextBlock += ` | Dwell: ${wp.dwell_minutes}m`;
         if (wp.notes) contextBlock += ` | Notes: "${wp.notes}"`;
+        if (wp.place_name) contextBlock += ` | PlaceName: "${wp.place_name}"`;
         if (wp.address) contextBlock += ` | Address: "${wp.address}"`;
         if (wp.google_place_id) contextBlock += ` | PlaceID: "${wp.google_place_id}"`;
         if (wp.is_route_anchor) contextBlock += ` | [Route Anchor]`;
@@ -52,6 +53,7 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
       }
       contextBlock += `- ID: ${focused.id}\n`;
       contextBlock += `- Name: ${focused.name}\n`;
+      if (focused.place_name) contextBlock += `- Google Maps Place Name: ${focused.place_name}\n`;
       contextBlock += `- Category Type: ${focused.type}\n`;
       contextBlock += `- GPS Coordinates: ${focused.lat.toFixed(6)}, ${focused.lng.toFixed(6)}\n`;
       if (focused.address) contextBlock += `- Street Address / Location: ${focused.address}\n`;
@@ -156,8 +158,9 @@ GUIDELINES:
        - Divided highways with central medians will force Google Maps into unwanted U-turns at roundabouts if an in-transit coordinate is placed slightly closer to the opposing curb or opposite storefront.
        - To fix this, place the anchor coordinate directly at a neutral roundabout center node or major highway intersection where traffic naturally flows through without U-turns, and set "is_route_anchor": true if it serves as a corridor pass-through milestone.
      * AUTHENTIC ENTRANCES FOR PHYSICAL STOPS (HOTELS, MEALS, FUEL, OVERLOOKS):
-       - To prevent Google Maps from routing through back service alleys, neighbor workshops, or walking paths, ALWAYS provide the verified street address in "address" and the authentic commercial venue name in "name".
-       - ZERO PLACE ID HALLUCINATION: NEVER guess, invent, or hallucinate a Google Place ID ("google_place_id"). Omit "google_place_id" or leave it undefined unless an authentic, verified Place ID already exists on the stop. Google Maps resolves verified street addresses and business names with 100% reliability, whereas a wrong Place ID completely breaks navigation!
+       - ALWAYS provide clean establishment names in "place_name" for physical stops (lodging, meals, fuel, visitor centers) and POIs. While "name" is the human-facing display title (e.g. "Maverik (West Main St)", "Flagstaff / Little America Hotel"), "place_name" MUST be the clean, exact establishment title without parenthetical qualifiers or slash prefixes (e.g. "Maverik", "Little America Hotel", "Red Rock Park"). Google Maps navigation links rely on "place_name" to prevent ambiguous search prompts ("Did you mean:").
+       - ALWAYS provide the verified street address in "address".
+       - GOOGLE PLACE IDS: When researching via web search or official venue listings, if you discover an authentic Google Maps listing or URL containing a Place ID or 0x...:0x... entity, include the authentic "google_place_id". Never invent or guess arbitrary Place IDs from memory. The app automatically validates all Place IDs against Google's binary protobuf schema before accepting them.
        - For scenic overlooks with parking, place coordinates on the paved visitor parking lot / access drive, NOT out on a pedestrian cliff rim or hiking trail.
      * FINAL LODGING & DESTINATION OVERNIGHT STOPS:
        - The final stop of a day's driving route is the overnight destination. It does not have a departure time. Preserve dwell_minutes as 0 (overnight) for final lodging stops.
@@ -169,7 +172,8 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
 [
   {
     "action": "add_waypoint",
-    "name": "Stop Name",
+    "name": "Human-Friendly Stop Name",
+    "place_name": "Clean Establishment Name",
     "type": "scenic_pull_off",
     "lat": 35.1234,
     "lng": -111.5678,
@@ -190,7 +194,8 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
     "action": "update_waypoint",
     "targetWaypointId": "target_id",
     "newId": "updated_id_snake_case",
-    "name": "Updated Name",
+    "name": "Updated Human-Friendly Name",
+    "place_name": "Clean Establishment Name",
     "type": "meal",
     "lat": 35.5678,
     "lng": -111.1234,
@@ -267,12 +272,34 @@ export function separateThoughtAndReply(text: string): { thought?: string; reply
 }
 
 /**
+ * Structurally verifies a Google Place ID against Google's binary protobuf specification:
+ * - Starts with "ChIJ"
+ * - Base64url encoded
+ * - Decodes to exactly 20 bytes with tags: byte[0]=0x0a, byte[1]=0x12, byte[2]=0x09, byte[11]=0x11
+ */
+export function isValidGooglePlaceId(placeId: string): boolean {
+  if (typeof placeId !== 'string') return false;
+  const trimmed = placeId.trim();
+  if (!/^ChIJ[A-Za-z0-9_-]{20,45}$/.test(trimmed)) {
+    return false;
+  }
+  try {
+    let b64 = trimmed.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.length !== 20) return false;
+    return buf[0] === 0x0a && buf[1] === 0x12 && buf[2] === 0x09 && buf[11] === 0x11;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Deterministically validates a Google Place ID returned by Route Scout or external AI.
  * Strips invalid or unverified place IDs.
  * Rules:
- * 1. Must be a string matching Google Place ID format: ^ChIJ[A-Za-z0-9_-]{10,60}$
- * 2. If knownPlaceIds is provided, the placeId must match a known verified Place ID already on the route.
- *    Any unverified / newly hallucinated Place ID is stripped (returns undefined).
+ * 1. If knownPlaceIds is provided and contains the ID, it is trusted immediately.
+ * 2. Otherwise, newly returned Place IDs must pass the binary protobuf structural validation.
  * "No Place ID is always better than a wrong Place ID."
  */
 export function validateScoutPlaceId(
@@ -283,14 +310,13 @@ export function validateScoutPlaceId(
   const trimmed = placeId.trim();
   if (!trimmed) return undefined;
 
-  // 1. Google Place ID pattern: starts with 'ChIJ', 10 to 60 characters, url-safe base64 characters
-  const placeIdRegex = /^ChIJ[A-Za-z0-9_-]{10,60}$/;
-  if (!placeIdRegex.test(trimmed)) {
-    return undefined;
+  // 1. If in known verified IDs, accept directly
+  if (knownPlaceIds && knownPlaceIds.has(trimmed)) {
+    return trimmed;
   }
 
-  // 2. Known / Verified check: If knownPlaceIds whitelist is provided, ensure place ID is known
-  if (knownPlaceIds && !knownPlaceIds.has(trimmed)) {
+  // 2. Binary Protobuf structural validation
+  if (!isValidGooglePlaceId(trimmed)) {
     return undefined;
   }
 
@@ -336,6 +362,13 @@ export function parseScoutResponse(
                 ? item.new_id.trim()
                 : undefined;
 
+            const place_name =
+              typeof item.place_name === 'string' && item.place_name.trim().length > 0
+                ? item.place_name.trim()
+                : typeof item.placeName === 'string' && item.placeName.trim().length > 0
+                ? item.placeName.trim()
+                : undefined;
+
             const rawPlaceId =
               typeof item.google_place_id === 'string' && item.google_place_id.trim().length > 0
                 ? item.google_place_id.trim()
@@ -367,6 +400,7 @@ export function parseScoutResponse(
               id: `scout_sug_${Date.now()}_${index}`,
               action: item.action,
               name: typeof item.name === 'string' ? item.name : 'Suggested Stop',
+              place_name,
               type: typeof item.type === 'string' ? item.type : 'scenic_pull_off',
               lat: Number(item.lat.toFixed(6)),
               lng: Number(item.lng.toFixed(6)),

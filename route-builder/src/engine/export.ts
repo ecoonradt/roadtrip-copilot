@@ -18,6 +18,7 @@ export interface CheckpointV2 {
   dwell_minutes?: number;
   trigger_radius_miles: number;
   notification?: ItineraryNotificationV2;
+  place_name?: string;
   address?: string;
   google_place_id?: string;
   is_route_anchor?: boolean;
@@ -155,6 +156,10 @@ export function formatCheckpointV2(
       message: item.notification.message || '',
       speech: item.notification.speech || '',
     };
+  }
+
+  if (item.place_name) {
+    checkpoint.place_name = item.place_name;
   }
 
   if (item.address) {

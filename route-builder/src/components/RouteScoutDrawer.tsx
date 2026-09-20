@@ -572,6 +572,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           dwell_minutes: w.dwell_minutes,
           trigger_radius_miles: w.trigger_radius_miles,
           notes: w.notes,
+          place_name: w.place_name,
           notification: w.notification,
           address: w.address,
           google_place_id: w.google_place_id,
@@ -588,6 +589,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               dwell_minutes: focusedWp.dwell_minutes,
               trigger_radius_miles: focusedWp.trigger_radius_miles,
               notes: focusedWp.notes,
+              place_name: focusedWp.place_name,
               notification: focusedWp.notification,
               address: focusedWp.address,
               google_place_id: focusedWp.google_place_id,
@@ -756,6 +758,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       lng: suggestion.lng,
       dwell_minutes: suggestion.dwell_minutes,
       trigger_radius_miles: suggestion.trigger_radius_miles,
+      ...(suggestion.place_name ? { place_name: suggestion.place_name } : {}),
       ...(suggestion.address ? { address: suggestion.address } : {}),
       ...(suggestion.google_place_id ? { google_place_id: suggestion.google_place_id } : {}),
       ...(suggestion.is_route_anchor !== undefined ? { is_route_anchor: suggestion.is_route_anchor } : {}),
@@ -1140,8 +1143,13 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                           )}
 
                           {/* Navigation & Address Metadata Badges */}
-                          {(sug.is_route_anchor || sug.address || sug.google_place_id) && (
+                          {(sug.is_route_anchor || sug.address || sug.google_place_id || sug.place_name) && (
                             <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono px-0.5">
+                              {sug.place_name && sug.place_name !== sug.name && (
+                                <span className="inline-flex items-center gap-1 bg-teal-950/70 border border-teal-800/80 text-teal-300 px-1.5 py-0.5 rounded" title={`Google Maps Query: ${sug.place_name}`}>
+                                  🗺️ {sug.place_name}
+                                </span>
+                              )}
                               {sug.is_route_anchor && (sug.type === 'scenic_drive_by' || sug.dwell_minutes === 0) && (
                                 <span className="inline-flex items-center gap-1 bg-amber-950/70 border border-amber-800/80 text-amber-300 px-1.5 py-0.5 rounded font-semibold" title="Route-forcing pass-through pin on highway">
                                   ⚓ Route Anchor

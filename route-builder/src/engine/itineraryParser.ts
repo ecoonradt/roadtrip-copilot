@@ -252,6 +252,7 @@ function convertRawCheckpointToWaypoint(
         : defaultTz,
     approachHighway: typeof cp.approachHighway === 'string' ? cp.approachHighway : undefined,
     notes: typeof cp.notes === 'string' ? cp.notes : undefined,
+    place_name: typeof cp.place_name === 'string' ? cp.place_name : undefined,
     address: typeof cp.address === 'string' ? cp.address : undefined,
     google_place_id: typeof cp.google_place_id === 'string' ? cp.google_place_id : undefined,
     is_route_anchor: typeof cp.is_route_anchor === 'boolean' ? cp.is_route_anchor : undefined,
@@ -294,6 +295,10 @@ function serializeCheckpoint(w: Waypoint, idx?: number, total?: number): Record<
       message: w.notification.message,
       speech: w.notification.speech,
     };
+  }
+
+  if (w.place_name) {
+    cp.place_name = w.place_name;
   }
 
   if (w.address) {

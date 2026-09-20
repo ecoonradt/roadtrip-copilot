@@ -359,6 +359,7 @@ export function calculateTimelineCascade(
     stops.push({
       id: wp.id,
       name: wp.name,
+      place_name: wp.place_name,
       type: wp.type || 'scenic_pull_off',
       lat: wp.lat,
       lng: wp.lng,

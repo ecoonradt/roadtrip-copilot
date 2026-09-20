@@ -33,6 +33,7 @@ export interface Waypoint {
   timezone?: string;
   approachHighway?: string;
   notes?: string;
+  place_name?: string;
   google_place_id?: string;
   address?: string;
   is_route_anchor?: boolean;

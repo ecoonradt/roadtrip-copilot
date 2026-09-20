@@ -48,6 +48,61 @@ export interface EditWaypointModalProps {
   onApply?: (waypointId: string, alert: CopilotAlert) => void;
 }
 
+/**
+ * Parses Google Maps URL or Place ID inputs, extracting the Place ID and establishment name.
+ */
+export function parseGoogleMapsPlaceInput(input: string): { placeId?: string; placeName?: string } {
+  if (!input) return {};
+  const trimmed = input.trim();
+
+  // 1. Direct Place ID
+  if (/^ChIJ[A-Za-z0-9_-]{20,40}$/.test(trimmed)) {
+    return { placeId: trimmed };
+  }
+
+  let placeName: string | undefined;
+  const placeNameMatch = trimmed.match(/\/maps\/place\/([^/@?]+)/);
+  if (placeNameMatch && placeNameMatch[1]) {
+    try {
+      placeName = decodeURIComponent(placeNameMatch[1].replace(/\+/g, ' '));
+    } catch {
+      // Ignore decode failure
+    }
+  }
+
+  // 2. Google Maps URL with hex pair !1s0x...:0x... (take the last match, which is the POI entity)
+  const allHexMatches = [...trimmed.matchAll(/!1s(0x[0-9a-fA-F]+):(0x[0-9a-fA-F]+)/g)];
+  if (allHexMatches.length > 0) {
+    const lastMatch = allHexMatches[allHexMatches.length - 1];
+    try {
+      const b1 = BigInt(lastMatch[1]);
+      const b2 = BigInt(lastMatch[2]);
+      const buf = new Uint8Array(20);
+      buf[0] = 0x0a;
+      buf[1] = 0x12;
+      buf[2] = 0x09;
+      new DataView(buf.buffer).setBigUint64(3, b1, true);
+      buf[11] = 0x11;
+      new DataView(buf.buffer).setBigUint64(12, b2, true);
+      const pid = btoa(String.fromCharCode(...buf))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      return { placeId: pid, placeName };
+    } catch {
+      // Ignore conversion error
+    }
+  }
+
+  // 3. Google Maps URL with query param ?q=place_id:ChIJ... or &query_place_id=ChIJ...
+  const pidParamMatch = trimmed.match(/(?:place_id|query_place_id)[:=](ChIJ[A-Za-z0-9_-]{20,40})/);
+  if (pidParamMatch) {
+    return { placeId: pidParamMatch[1], placeName };
+  }
+
+  return { placeName };
+}
+
 export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   isOpen,
   waypoint,
@@ -62,6 +117,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
   // Stop Details State
   const [name, setName] = useState('');
+  const [placeName, setPlaceName] = useState('');
   const [type, setType] = useState<WaypointType>('scenic_pull_off');
   const [dwellMinutes, setDwellMinutes] = useState<number>(0);
   const [address, setAddress] = useState('');
@@ -84,6 +140,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
     setActiveTab(initialTab);
     setName(waypoint.name || '');
+    setPlaceName(waypoint.place_name || '');
     const currentType = waypoint.type || 'scenic_pull_off';
     setType(currentType);
     const isOvernightOrFinalDest = isLast && (currentType === 'lodging' || currentType === 'destination');
@@ -193,6 +250,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
     const updates: Partial<Waypoint> = {
       name: name.trim() || waypoint.name,
+      place_name: placeName.trim() || undefined,
       type,
       dwell_minutes: finalDwell,
       address: address.trim() || undefined,
@@ -425,6 +483,22 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                 <div className="space-y-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Google Maps Establishment Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={placeName}
+                      onChange={(e) => setPlaceName(e.target.value)}
+                      placeholder="e.g. Maverik (clean establishment name without notes)"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Clean establishment title used for Google Maps navigation. Allows keeping your custom waypoint title (e.g. &quot;Maverik (West Main St)&quot;) while preventing ambiguous search prompts in Google Maps.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
                       Physical Street Address / Search Query
                     </label>
                     <input
@@ -457,12 +531,23 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     <input
                       type="text"
                       value={googlePlaceId}
-                      onChange={(e) => setGooglePlaceId(e.target.value)}
-                      placeholder="e.g. ChIJc-2S2Vq0MIcR6yB0e4T3h1g"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const parsed = parseGoogleMapsPlaceInput(val);
+                        if (parsed.placeId) {
+                          setGooglePlaceId(parsed.placeId);
+                          if (parsed.placeName && !placeName) {
+                            setPlaceName(parsed.placeName);
+                          }
+                        } else {
+                          setGooglePlaceId(val);
+                        }
+                      }}
+                      placeholder="Paste Google Maps URL or enter Place ID (e.g. ChIJCR3fWhuQO4cRxCLXXbAfCxQ)"
                       className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
                     />
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Optional Google Maps place entity ID. When present, locks navigation directly to this place entity. Leave blank to rely on the street address and establishment name.
+                      Optional Google Maps Place ID. You can paste a full Google Maps place URL here to automatically extract the Place ID and establishment title.
                     </p>
                   </div>
 
@@ -471,7 +556,8 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const q = address.trim() || name.trim();
+                        const cleanPName = placeName.trim() || (name.includes('/') ? name.split('/').pop()!.trim() : name.trim());
+                        const q = address.trim() && cleanPName ? `${cleanPName}, ${address.trim()}` : (address.trim() || cleanPName);
                         if (!q) return;
                         const url = googlePlaceId.trim()
                           ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}&query_place_id=${encodeURIComponent(googlePlaceId.trim())}`

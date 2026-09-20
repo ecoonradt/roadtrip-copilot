@@ -23,6 +23,8 @@ data class Checkpoint(
     val type: String? = null,
     @SerializedName("dwell_minutes")
     val dwellMinutes: Int? = null,
+    @SerializedName("place_name")
+    val placeName: String? = null,
     @SerializedName("google_place_id")
     val googlePlaceId: String? = null,
     @SerializedName("address")

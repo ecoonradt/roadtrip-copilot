@@ -116,6 +116,10 @@ npm run dev
 * **Frontend:** `http://localhost:5173` (Vite + React + Leaflet map canvas)
 * **Backend:** `http://localhost:3001` (Fastify routing proxies, AI adapters, and ADB push)
 
+> [!TIP]
+> **Best Practice — The Human-in-the-Loop Verification Loop:**
+> Route Scout is an intelligent advisor for discovering scenic gems and fuel/meal intervals, but real-world geography (divided medians, new service stations, remote vistas without street numbers) requires human verification. Always preview proposed stops on the map, click **"Test on Google Maps"** in the Waypoint Edit modal to confirm the establishment resolves cleanly, and paste genuine Google Maps URLs to lock in verified Google Place IDs. See [route-builder/README.md](route-builder/README.md#best-practices-human-in-the-loop-route-verification) for the full workflow guide.
+
 For complete documentation on route authoring, timeline scheduling, AI model configuration, test suites, and phone handoff methods, see [route-builder/README.md](route-builder/README.md).
 
 ---

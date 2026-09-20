@@ -34,6 +34,32 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
 
 ---
 
+## Best Practices: Human-in-the-Loop Route Verification
+
+> [!TIP]
+> **Route Scout is a Powerful Advisor, Not an Autopilot.**
+> AI language models are exceptionally skilled at discovering scenic overlooks, recommending pacing strategies, finding hidden roadside diners, and identifying fuel deserts. However, real-world geography is intricate—divided highway medians, newly opened service stations, remote vista pull-offs without postal street addresses, and ambiguous multi-location commercial brands can easily mislead a zero-shot geocoder.
+> 
+> **The best practice for a flawless road trip is an interactive verification loop:** verify critical waypoints on Google Maps, and collaborate with Route Scout or the inline editor to lock them in.
+
+### The Recommended 3-Step Verification Workflow
+
+1. **Discover & Stage with Route Scout:**
+   * Ask Route Scout for advice (e.g. *"Where should we refuel before heading into the mountains?"* or *"Audit my day 2 waypoints for Google Maps issues"*).
+   * Review the candidate cards (`add_waypoint` or `update_waypoint`) with their on-map pin previews, and click **Apply** to integrate them into your timeline cascade.
+
+2. **Verify on Google Maps ("Test on Google Maps"):**
+   * Open the **Edit Waypoint** modal (`pencil` icon) on any physical stop (fuel, meals, lodging, viewpoints).
+   * Click the **"Test on Google Maps"** link button next to the establishment name or Place ID.
+   * Verify that Google Maps resolves the exact intended entrance or parking area without prompting with ambiguous *"Did you mean:"* disambiguation pickers.
+
+3. **Refine Interactively or Manually:**
+   * **Decoupled Names (`name` vs. `place_name`):** Keep your personalized, descriptive titles in **Name** (e.g. `"Maverik (West Main St)"` or `"Flagstaff / Little America Hotel"`). Store the clean, exact establishment title in **Place Name** (e.g. `"Maverik"` or `"Little America Hotel"`). The link engine automatically uses `place_name` for Google Maps queries to prevent search confusion.
+   * **1-Click Google Place ID Paste:** If you locate a place directly on Google Maps in your browser, copy its URL and paste it directly into the **Google Place ID** field in the Edit Waypoint modal. The studio automatically extracts the verified 20-byte base64url Place ID (`ChIJ...`) from the URL.
+   * **Collaborate in Chat:** You can also ask Route Scout to fix waypoints in natural language (e.g. *"Change the fuel stop to the Maverik on 2701 W Main St in Farmington"*), and it will emit an updated suggestion card with corrected coordinates and notification copy.
+
+---
+
 ## Getting Started
 
 ### Prerequisites & Cross-Platform Installation
@@ -80,10 +106,10 @@ The application works with zero configuration by default in an Antigravity envir
 
 ## Testing & Quality Gates
 
-The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 132 Vitest unit and integration tests:
+The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 162 Vitest unit and integration tests:
 
 ```bash
-npm test              # Run all 132 tests across all suites
+npm test              # Run all 162 tests across all suites
 npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache
 npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
 npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
@@ -98,7 +124,7 @@ npm run build         # Production compile (client Vite bundle + backend tsc)
 The Route Builder is architected as a decoupled client-server application:
 * **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, Route Scout chat drawer, and Google Maps URL chunking.
 * **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout service, and ADB device synchronization.
-* **Test Suites (`tests/`):** 132 automated Vitest unit and integration tests covering routing proxies, timeline cascade math, AI adapters, Route Scout adapter seams, and V2 schema exports.
+* **Test Suites (`tests/`):** 162 automated Vitest unit and integration tests covering routing proxies, timeline cascade math, AI adapters, Route Scout adapter seams, and V2 schema exports.
 
 For the detailed file layout, architecture pillars, and development guidelines, see [AGENTS.md](AGENTS.md) and the root [AGENTS.md](../AGENTS.md).
 

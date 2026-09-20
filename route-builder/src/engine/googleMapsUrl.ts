@@ -51,31 +51,41 @@ export function isPhysicalStop(loc: CoordinateLocation): boolean {
 }
 
 /**
- * Cleans a waypoint name for search queries by stripping leg prefixes (e.g. "Flagstaff / Little America Hotel" -> "Little America Hotel").
+ * Cleans a waypoint name for search queries by:
+ * 1. Stripping leg prefixes (e.g. "Flagstaff / Little America Hotel" -> "Little America Hotel").
+ * 2. Stripping trailing parenthetical notes (e.g. "Maverik (West Main St)" -> "Maverik", "Red Rock Park (Picnic & Stretch)" -> "Red Rock Park").
  */
 export function extractCleanPlaceName(name: string): string {
   if (!name) return '';
-  const trimmed = name.trim();
+  let trimmed = name.trim();
   if (trimmed.includes('/')) {
     const afterSlash = trimmed.split('/').pop()!.trim();
-    if (afterSlash.length > 0) return afterSlash;
+    if (afterSlash.length > 0) trimmed = afterSlash;
   }
+  // Strip trailing parenthetical qualifiers (e.g. "(West Main St)", "(US-491)")
+  trimmed = trimmed.replace(/\s*\([^)]*\)\s*$/g, '').trim();
   return trimmed;
 }
 
 /**
  * Formats a location as a query string parameter for Google Maps navigation.
- * When place name and address are both available, combines them (e.g. "Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ")
- * so Google Maps displays the establishment name as the destination title while locking to the exact place.
- * In-transit pass-through anchors and scenic drive-bys (dwell == 0) MUST ALWAYS format as exact coordinates (lat,lng)
- * to prevent Google Maps from searching for non-existent businesses or snapping to Airbnbs/side-streets.
+ * - Prioritizes explicit `loc.placeName` (clean establishment name) over `loc.name`.
+ * - When place name and address are both available, combines them (e.g. "Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ")
+ *   so Google Maps displays the establishment name as the destination title while locking to the exact place.
+ * - In-transit pass-through anchors and scenic drive-bys (dwell == 0) MUST ALWAYS format as exact coordinates (lat,lng)
+ *   to prevent Google Maps from searching for non-existent businesses or snapping to Airbnbs/side-streets.
  */
 export function formatLocationQuery(loc: CoordinateLocation): string {
   if (!isPhysicalStop(loc)) {
     return formatCoord(loc.lat, loc.lng);
   }
 
-  const cleanName = loc.name ? extractCleanPlaceName(loc.name) : '';
+  const cleanName =
+    loc.placeName && loc.placeName.trim().length > 0
+      ? loc.placeName.trim()
+      : loc.name
+      ? extractCleanPlaceName(loc.name)
+      : '';
 
   if (cleanName && loc.address && loc.address.trim().length > 0) {
     const addr = loc.address.trim();
@@ -179,12 +189,16 @@ export function buildSingleGoogleMapsUrl(
       .join('|');
     url += `&waypoints=${waypointsParam}`;
 
-    const allHavePlaceIds = intermediateWaypoints.every(
+    const hasAnyPlaceId = intermediateWaypoints.some(
       (w) => w.placeId && w.placeId.trim().length > 0
     );
-    if (allHavePlaceIds) {
+    if (hasAnyPlaceId) {
       const placeIdsParam = intermediateWaypoints
-        .map((w) => encodeURIComponent(w.placeId!.trim()))
+        .map((w) =>
+          w.placeId && w.placeId.trim().length > 0
+            ? encodeURIComponent(w.placeId.trim())
+            : ''
+        )
         .join('|');
       url += `&waypoint_place_ids=${placeIdsParam}`;
     }

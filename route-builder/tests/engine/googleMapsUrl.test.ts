@@ -256,6 +256,63 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       expect(url).toContain('&waypoint_place_ids=ChIJ_bell_rock|ChIJ_oak_creek');
     });
 
+    it('binds waypoint_place_ids positionally with empty slots when only a subset of intermediate waypoints have placeId', () => {
+      const origin: CoordinateLocation = { lat: 33.43, lng: -112.04, name: 'Start' };
+      const dest: CoordinateLocation = { lat: 35.19, lng: -111.62, name: 'End' };
+      const intermediate: CoordinateLocation[] = [
+        { lat: 35.07, lng: -109.78, name: 'Tiponi Point' }, // No Place ID
+        { lat: 36.73, lng: -108.24, name: 'Maverik', placeId: 'ChIJCR3fWhuQO4cRxCLXXbAfCxQ' }, // Has Place ID
+        { lat: 36.74, lng: -107.57, name: 'US-64 Scenic' }, // No Place ID
+      ];
+
+      const url = buildSingleGoogleMapsUrl(origin, dest, intermediate);
+
+      // Positional mapping: first is empty, second is Maverik ID, third is empty
+      expect(url).toContain('&waypoint_place_ids=|ChIJCR3fWhuQO4cRxCLXXbAfCxQ|');
+    });
+
+    it('strips parenthetical qualifiers like (West Main St) from clean place names', () => {
+      const origin: CoordinateLocation = { lat: 35.19, lng: -111.62, name: 'Start' };
+      const dest: CoordinateLocation = { lat: 36.87, lng: -106.58, name: 'End' };
+      const intermediate: CoordinateLocation[] = [
+        {
+          lat: 36.7328,
+          lng: -108.2444,
+          name: 'Maverik (West Main St)',
+          address: '2701 W Main St, Farmington, NM 87401',
+          type: 'fuel',
+          dwellMinutes: 15,
+        },
+      ];
+
+      const url = buildSingleGoogleMapsUrl(origin, dest, intermediate);
+
+      // Should format as "Maverik, 2701 W Main St..." rather than "Maverik (West Main St), 2701 W Main St..."
+      expect(url).toContain(encodeURIComponent('Maverik, 2701 W Main St, Farmington, NM 87401'));
+      expect(url).not.toContain(encodeURIComponent('Maverik (West Main St)'));
+    });
+
+    it('prioritizes explicit placeName over waypoint name in navigation query', () => {
+      const origin: CoordinateLocation = { lat: 35.19, lng: -111.62, name: 'Start' };
+      const dest: CoordinateLocation = { lat: 36.87, lng: -106.58, name: 'End' };
+      const intermediate: CoordinateLocation[] = [
+        {
+          lat: 36.7328,
+          lng: -108.2444,
+          name: 'Custom User Waypoint Title (With Notes)',
+          placeName: 'Maverik',
+          address: '2701 W Main St, Farmington, NM 87401',
+          type: 'fuel',
+          dwellMinutes: 15,
+        },
+      ];
+
+      const url = buildSingleGoogleMapsUrl(origin, dest, intermediate);
+
+      expect(url).toContain(encodeURIComponent('Maverik, 2701 W Main St, Farmington, NM 87401'));
+      expect(url).not.toContain('Custom+User+Waypoint+Title');
+    });
+
     it('filters out redundant in-transit audio cues on Day 1 while preserving route-forcing anchor', () => {
       const day1Waypoints: CoordinateLocation[] = [
         {
