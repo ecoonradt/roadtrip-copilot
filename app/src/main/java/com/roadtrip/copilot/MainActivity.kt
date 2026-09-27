@@ -241,6 +241,19 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
         binding.switchUseMediaChannel.isChecked = prefs.getBoolean("pref_use_media_stream", true)
         binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
+        lifecycleScope.launch {
+            RouteRepository.getInstance(this@MainActivity).refreshRoutes()
+            val currentFile = CopilotService.activeRouteFile.value
+            val currentDay = CopilotService.activeDayNumber.value
+            if (currentFile.isNotBlank()) {
+                CopilotService.setSelectedRoute(
+                    this@MainActivity,
+                    currentFile,
+                    currentDay,
+                    autoRestartIfRunning = CopilotService.isRunning.value
+                )
+            }
+        }
     }
 
     override fun onStop() {
