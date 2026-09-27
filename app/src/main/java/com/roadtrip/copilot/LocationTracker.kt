@@ -134,10 +134,28 @@ class LocationTracker(
 
         val newAlerts = mutableListOf<TriggeredAlert>()
 
-        // 1. Process geofences sequentially along the itinerary
-        for (i in activeCheckpoints.indices) {
-            val cp = activeCheckpoints[i]
-            if (cp.id !in visitedCheckpoints) {
+        // 1. Process geofences sequentially along the itinerary.
+        // Identify the current upcoming unvisited milestone.
+        val nextIndex = activeCheckpoints.indexOfFirst { it.id !in visitedCheckpoints }
+        if (nextIndex != -1) {
+            // Allow evaluating the immediate next milestone, or skipping at most 1 missed milestone
+            val maxLookaheadIndex = minOf(nextIndex + 1, activeCheckpoints.lastIndex)
+
+            for (i in nextIndex..maxLookaheadIndex) {
+                val cp = activeCheckpoints[i]
+                if (cp.id in visitedCheckpoints) continue
+
+                // Loop route destination guard: The final destination must NEVER trigger if intermediate
+                // milestones exist and none have been visited yet (prevents premature trip completion at origin).
+                if (i == activeCheckpoints.lastIndex && activeCheckpoints.size > 2) {
+                    val hasVisitedIntermediate = (1 until activeCheckpoints.lastIndex).any {
+                        activeCheckpoints[it].id in visitedCheckpoints
+                    }
+                    if (!hasVisitedIntermediate) {
+                        continue
+                    }
+                }
+
                 val dist = haversineMiles(currentLat, currentLng, cp.lat, cp.lng)
 
                 // Only trigger if entering checkpoint trigger radius
@@ -179,6 +197,7 @@ class LocationTracker(
                     )
                     newAlerts.add(alert)
                     Log.i(TAG, "Geofence triggered for: ${cp.name} (dist: %.2f mi, pace: $paceSpeech)".format(dist))
+                    break // Single milestone trigger per evaluation cycle
                 }
             }
         }

@@ -80,8 +80,12 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       const dayNum = typeof d.day === 'number' ? d.day : i + 1;
       const date = typeof d.date === 'string' ? d.date : new Date().toISOString().slice(0, 10);
       const title = typeof d.title === 'string' ? d.title : `Day ${dayNum}`;
-      const tz = typeof d.timezone === 'string' ? d.timezone : 'America/Phoenix';
       const rawCheckpoints = Array.isArray(d.checkpoints) ? (d.checkpoints as Record<string, unknown>[]) : [];
+      const firstCp = rawCheckpoints[0];
+      const inferredTz = firstCp && typeof firstCp.lat === 'number' && typeof firstCp.lng === 'number'
+        ? detectTimezone(firstCp.lat, firstCp.lng)
+        : 'America/Phoenix';
+      const tz = typeof d.timezone === 'string' && d.timezone !== 'America/Phoenix' ? d.timezone : inferredTz;
 
       const waypoints = rawCheckpoints.map((cp, idx) =>
         convertRawCheckpointToWaypoint(cp, idx, rawCheckpoints.length, tz)
@@ -111,7 +115,11 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     const rawCheckpoints = Array.isArray(data.checkpoints)
       ? (data.checkpoints as Record<string, unknown>[])
       : [];
-    const tz = typeof data.timezone === 'string' ? data.timezone : 'America/Phoenix';
+    const firstCp = rawCheckpoints[0];
+    const inferredTz = firstCp && typeof firstCp.lat === 'number' && typeof firstCp.lng === 'number'
+      ? detectTimezone(firstCp.lat, firstCp.lng)
+      : 'America/Phoenix';
+    const tz = typeof data.timezone === 'string' && data.timezone !== 'America/Phoenix' ? data.timezone : inferredTz;
     const date = typeof data.date === 'string' ? data.date : new Date().toISOString().slice(0, 10);
 
     const waypoints = rawCheckpoints.map((cp, idx) =>

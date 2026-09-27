@@ -7,6 +7,8 @@ import type {
   TimelineCascadeWaypoint,
 } from './types';
 
+import tzlookup from 'tz-lookup';
+
 /**
  * Longitude boundary between Arizona and New Mexico (~109° 02' 48" W).
  * Locations west of this coordinate (more negative) are in Arizona (America/Phoenix).
@@ -21,7 +23,7 @@ export const DEFAULT_TIMEZONE = 'America/Phoenix';
 
 /**
  * Detects timezone based on geographic coordinates or returns the fallback.
- * Covers the Arizona (MST / UTC-7 year-round) and New Mexico (MDT / UTC-6 during DST) corridor.
+ * Uses exact global polygon resolution via tz-lookup.
  */
 export function detectTimezone(
   lat: number,
@@ -32,17 +34,11 @@ export function detectTimezone(
     return fallback;
   }
 
-  // Southwest US latitude bounding box (31.0°N to 37.5°N)
-  if (lat >= 31.0 && lat <= 37.5) {
-    if (lng >= AZ_NM_LONGITUDE_BOUNDARY && lng <= -103.0) {
-      return 'America/Denver';
-    }
-    if (lng < AZ_NM_LONGITUDE_BOUNDARY && lng >= -115.0) {
-      return 'America/Phoenix';
-    }
+  try {
+    return tzlookup(lat, lng);
+  } catch {
+    return fallback;
   }
-
-  return fallback;
 }
 
 /**

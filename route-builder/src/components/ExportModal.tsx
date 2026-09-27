@@ -73,7 +73,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   // Google Maps QR Codes map (legIndex -> dataUrl)
   const [gmapsQrCodes, setGmapsQrCodes] = useState<Record<number, string>>({});
-  const [activeGmapsQrLeg, setActiveGmapsQrLeg] = useState<number | null>(null);
 
   // Build the formatted V2 Itinerary object
   const itineraryData: ItineraryExportModel = useMemo(() => {
@@ -497,23 +496,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() =>
-                          setActiveGmapsQrLeg(
-                            activeGmapsQrLeg === leg.legIndex ? null : leg.legIndex
-                          )
-                        }
-                        className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-colors flex items-center gap-1 ${
-                          activeGmapsQrLeg === leg.legIndex
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-700 hover:bg-slate-650 text-slate-200'
-                        }`}
-                      >
-                        <QrCode className="w-3.5 h-3.5" />
-                        <span>{activeGmapsQrLeg === leg.legIndex ? 'Hide QR' : 'Show QR'}</span>
-                      </button>
-                      <button
                         onClick={() => handleCopyLegUrl(leg.url, leg.legIndex)}
-                        className="px-2.5 py-1 bg-slate-700 hover:bg-slate-650 text-slate-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                        className="px-2.5 py-1 bg-slate-700 hover:bg-slate-655 text-slate-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
                       >
                         {copiedLegIndex === leg.legIndex ? (
                           <>
@@ -539,21 +523,26 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Optional QR Code Drawer for this leg */}
-                  {activeGmapsQrLeg === leg.legIndex && gmapsQrCodes[leg.legIndex] && (
-                    <div className="pt-2 border-t border-slate-700/60 flex flex-col items-center gap-2">
-                      <div className="bg-white p-2 rounded-xl shadow-md">
+                  {/* QR Code Display for this leg */}
+                  <div className="pt-2 border-t border-slate-700/60 flex flex-col items-center gap-2">
+                    <div className="bg-white p-2 rounded-xl shadow-md flex items-center justify-center min-h-[144px] min-w-[144px]">
+                      {gmapsQrCodes[leg.legIndex] ? (
                         <img
                           src={gmapsQrCodes[leg.legIndex]}
                           alt={`${leg.title} QR Code`}
                           className="w-36 h-36 object-contain"
                         />
-                      </div>
-                      <p className="text-[11px] text-emerald-400 font-medium">
-                        Scan with phone camera to launch Google Maps Navigation immediately!
-                      </p>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-slate-800 text-xs">
+                          <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+                          <span>Generating QR...</span>
+                        </div>
+                      )}
                     </div>
-                  )}
+                    <p className="text-[11px] text-emerald-400 font-medium">
+                      Scan with phone camera to launch Google Maps Navigation immediately!
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>

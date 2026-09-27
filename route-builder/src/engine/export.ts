@@ -1,5 +1,6 @@
 import type { Waypoint, WaypointType } from '../types/routing';
 import type { ScheduledStop } from './types';
+import { detectTimezone } from './cascade';
 
 export interface ItineraryNotificationV2 {
   title: string;
@@ -212,10 +213,14 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
     const firstStopName = checkpoints[0]?.name;
     const lastStopName = checkpoints[checkpoints.length - 1]?.name;
 
+    const firstCp = checkpoints[0];
+    const inferredDayTz = firstCp ? detectTimezone(firstCp.lat, firstCp.lng) : 'America/Phoenix';
+    const dayTz = dayInput.timezone && dayInput.timezone !== 'America/Phoenix' ? dayInput.timezone : inferredDayTz;
+
     const dayObj: DayV2 = {
       day: dayInput.dayNumber,
       date: dayInput.date,
-      timezone: dayInput.timezone || 'America/Phoenix',
+      timezone: dayTz,
       title: dayInput.title || `Day ${dayInput.dayNumber}: ${firstStopName || 'Start'} to ${lastStopName || 'End'}`,
       origin: dayInput.origin || firstStopName || 'Origin',
       destination: dayInput.destination || lastStopName || 'Destination',
@@ -274,9 +279,13 @@ export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): S
   const firstStopName = checkpoints[0]?.name;
   const lastStopName = checkpoints[checkpoints.length - 1]?.name;
 
+  const firstCp = checkpoints[0];
+  const inferredTz = firstCp ? detectTimezone(firstCp.lat, firstCp.lng) : 'America/Phoenix';
+  const resolvedTimezone = options.timezone && options.timezone !== 'America/Phoenix' ? options.timezone : inferredTz;
+
   const result: SingleRouteItineraryV2 = {
     trip_name: options.tripName,
-    timezone: options.timezone || 'America/Phoenix',
+    timezone: resolvedTimezone,
     metadata: {
       version: '2.0.0',
       author: options.author || 'Roadtrip Co-Pilot Route Builder',
