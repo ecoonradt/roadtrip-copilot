@@ -609,6 +609,20 @@ export function App() {
     });
   }, [activeDayIndex]);
 
+  const handleSetSchedulingMode = useCallback((mode: SchedulingMode) => {
+    setSchedulingMode(mode);
+    setTrip((prev) => {
+      const nextDays = prev.days.map((d, idx) =>
+        idx === activeDayIndex ? { ...d, isAdHoc: mode === 'adhoc' } : d
+      );
+      return {
+        ...prev,
+        isAdHoc: mode === 'adhoc',
+        days: nextDays,
+      };
+    });
+  }, [activeDayIndex]);
+
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
     setActiveDayIndex(index);
@@ -752,8 +766,15 @@ export function App() {
   // Dirty state tracking (indicates unsaved changes)
   const isDirty = useMemo(() => {
     if (!lastSavedTripJson) return false;
+    try {
+      const parsedSaved = JSON.parse(lastSavedTripJson);
+      const savedMode = (parsedSaved.isAdHoc || parsedSaved.days?.[0]?.isAdHoc) ? 'adhoc' : 'forward';
+      if (schedulingMode !== savedMode) return true;
+    } catch {
+      // ignore
+    }
     return JSON.stringify(trip) !== lastSavedTripJson;
-  }, [trip, lastSavedTripJson]);
+  }, [trip, lastSavedTripJson, schedulingMode]);
 
   // Warn user before closing/refreshing tab with unsaved changes
   useEffect(() => {
@@ -778,7 +799,7 @@ export function App() {
         departureTime={departureTime}
         setDepartureTime={handleSetDepartureTime}
         schedulingMode={schedulingMode}
-        setSchedulingMode={setSchedulingMode}
+        setSchedulingMode={handleSetSchedulingMode}
         targetArrivalTime={targetArrivalTime}
         setTargetArrivalTime={setTargetArrivalTime}
         backwardInfo={backwardInfo}
