@@ -37,8 +37,9 @@ Context:
 
 Requirements:
 1. Title: Under 30 characters. Suitable for Android Auto heads-up card.
-2. Message: 1-2 concise lines. Include target time and key driving or stopping tip.
+2. Message: 1-2 concise lines. Anticipatory ("Approaching..."). Include target time and key driving or stopping tip.
 3. Speech: Written for offline Android TextToSpeech.
+   - Anticipatory Tense: ALWAYS use future/anticipatory phrasing (e.g. "Approaching [Name] on your right...", "Coming up ahead in about half a mile...", "Prepare to see..."). NEVER use present or past tense ("Now cruising along...", "Driving past...", "Passing...") because this proximity alert triggers in advance of the milestone before reaching it! For scenic drive-bys and route anchors, this prompt is the driver's ONLY alert since non-anchor drive-bys do not appear as intermediate navigation stop pins on Google Maps.
    - Tone: Friendly, professional co-pilot.
    - Pronunciation: Spell out highway numbers naturally (e.g. "Highway one seventy-nine", not "AZ-179").
    - Length: 15-25 words (must speak completely within 8-12 seconds to minimize music ducking).
@@ -81,8 +82,9 @@ ${waypointsList}
 
 Requirements for EACH waypoint:
 1. Title: Under 30 characters. Suitable for Android Auto heads-up card.
-2. Message: 1-2 concise lines. Include target time and key driving or stopping tip.
+2. Message: 1-2 concise lines. Anticipatory ("Approaching..."). Include target time and key driving or stopping tip.
 3. Speech: Written for offline Android TextToSpeech.
+   - Anticipatory Tense: ALWAYS use future/anticipatory phrasing (e.g. "Approaching [Name] on your right...", "Coming up ahead in about half a mile...", "Prepare to see..."). NEVER use present or past tense ("Now cruising along...", "Driving past...", "Passing...") because this proximity alert triggers in advance of the milestone before reaching it! For scenic drive-bys and route anchors, this prompt is the driver's ONLY alert since non-anchor drive-bys do not appear as intermediate navigation stop pins on Google Maps.
    - Tone: Friendly, professional co-pilot.
    - Pronunciation: Spell out highway numbers naturally (e.g. "Highway one seventy-nine", not "AZ-179").
    - Length: 15-25 words (must speak completely within 8-12 seconds to minimize music ducking).

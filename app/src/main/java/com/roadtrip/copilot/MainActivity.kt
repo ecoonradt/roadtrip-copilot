@@ -246,12 +246,16 @@ class MainActivity : AppCompatActivity() {
             val currentFile = CopilotService.activeRouteFile.value
             val currentDay = CopilotService.activeDayNumber.value
             if (currentFile.isNotBlank()) {
-                CopilotService.setSelectedRoute(
-                    this@MainActivity,
-                    currentFile,
-                    currentDay,
-                    autoRestartIfRunning = CopilotService.isRunning.value
-                )
+                if (!CopilotService.isRunning.value) {
+                    CopilotService.setSelectedRoute(
+                        this@MainActivity,
+                        currentFile,
+                        currentDay,
+                        autoRestartIfRunning = false
+                    )
+                } else {
+                    syncSelectionFromServiceState(currentFile, currentDay)
+                }
             }
         }
     }

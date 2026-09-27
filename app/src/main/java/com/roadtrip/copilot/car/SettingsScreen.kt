@@ -32,7 +32,7 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
                 .setTitle("Use Media Channel (Car Stereo Volume)")
                 .addText(
                     if (useMediaStream)
-                        "ON: Pegged to music volume knob"
+                        "ON: Pegged to music volume knob (pauses music)"
                     else
                         "OFF: Pegged to Navigation Guidance volume"
                 )
@@ -51,8 +51,10 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
             Row.Builder()
                 .setTitle("Pause Music Completely")
                 .addText(
-                    if (pauseMusic)
-                        "ON: Pauses Spotify completely during announcements"
+                    if (useMediaStream)
+                        "Enforced while on Media Channel"
+                    else if (pauseMusic)
+                        "ON: Pauses music completely during announcements"
                     else
                         "OFF: Ducks volume smoothly (Google Maps style)"
                 )

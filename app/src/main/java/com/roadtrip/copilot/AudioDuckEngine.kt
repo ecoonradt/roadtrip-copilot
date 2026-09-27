@@ -38,6 +38,7 @@ class AudioDuckEngine(
                 Log.w(TAG, "US English voice data missing or not supported.")
             } else {
                 isTtsReady = true
+                applyCurrentAudioAttributes()
                 Log.i(TAG, "Offline TextToSpeech initialized successfully.")
             }
 
@@ -72,6 +73,28 @@ class AudioDuckEngine(
 
     var pauseMusicInsteadOfDuck: Boolean = false
     var useMediaStreamChannel: Boolean = true
+        set(value) {
+            field = value
+            applyCurrentAudioAttributes()
+        }
+
+    fun applyCurrentAudioAttributes() {
+        val speechAttributes = getSpeechAudioAttributes()
+        tts?.setAudioAttributes(speechAttributes)
+    }
+
+    private fun getSpeechAudioAttributes(): AudioAttributes {
+        val (usage, contentType) = if (useMediaStreamChannel) {
+            Pair(AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC)
+        } else {
+            Pair(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE, AudioAttributes.CONTENT_TYPE_SPEECH)
+        }
+
+        return AudioAttributes.Builder()
+            .setUsage(usage)
+            .setContentType(contentType)
+            .build()
+    }
 
     /**
      * Ducks active media (like Google Maps) or pauses it, speaks the provided text through
@@ -98,17 +121,7 @@ class AudioDuckEngine(
             }
         }
 
-        val speechUsage = if (useMediaStreamChannel) {
-            AudioAttributes.USAGE_MEDIA
-        } else {
-            AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
-        }
-
-        val speechAttributes = AudioAttributes.Builder()
-            .setUsage(speechUsage)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
-
+        val speechAttributes = getSpeechAudioAttributes()
         tts?.setAudioAttributes(speechAttributes)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
     }
@@ -122,18 +135,18 @@ class AudioDuckEngine(
     }
 
     private fun requestDuckingFocus(): Boolean {
-        val focusUsage = if (useMediaStreamChannel) {
-            AudioAttributes.USAGE_MEDIA
+        val (focusUsage, contentType) = if (useMediaStreamChannel) {
+            Pair(AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC)
         } else {
-            AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+            Pair(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE, AudioAttributes.CONTENT_TYPE_SPEECH)
         }
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(focusUsage)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .setContentType(contentType)
             .build()
 
-        val gain = if (pauseMusicInsteadOfDuck) {
+        val gain = if (useMediaStreamChannel || pauseMusicInsteadOfDuck) {
             AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
         } else {
             AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
