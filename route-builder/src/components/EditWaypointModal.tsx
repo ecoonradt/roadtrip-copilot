@@ -2,15 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
-  Bot,
   Volume2,
   VolumeX,
   Sliders,
   Check,
-  RefreshCw,
   Loader2,
   Car,
-  Bell,
   Navigation,
   Info,
   MapPin,
@@ -19,7 +16,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import type { Waypoint, WaypointType } from '../types/routing';
-import type { WaypointContext, CopilotAlert, AiEngineType } from '../types/ai';
+import type { WaypointContext, CopilotAlert } from '../types/ai';
 import { generateCopilotAlert } from '../services/api';
 import { defaultAiQueue } from '../services/aiQueue';
 
@@ -35,8 +32,6 @@ export const STOP_TYPE_OPTIONS: { value: WaypointType; label: string }[] = [
 
 const DWELL_PRESETS = [0, 15, 30, 45, 60, 90, 120];
 const RADIUS_PRESETS = [0.5, 1.0, 1.5, 2.0, 3.0, 5.0];
-
-type ModalEngineState = AiEngineType | 'saved';
 
 export interface EditWaypointModalProps {
   isOpen: boolean;
@@ -132,7 +127,6 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   const [message, setMessage] = useState('');
   const [speech, setSpeech] = useState('');
   const [radius, setRadius] = useState<number>(2.0);
-  const [engine, setEngine] = useState<ModalEngineState>('saved');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -157,13 +151,11 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
       setMessage(waypoint.notification.message);
       setSpeech(waypoint.notification.speech);
       setRadius(waypoint.trigger_radius_miles || 2.0);
-      setEngine('saved');
     } else {
       setTitle('');
       setMessage('');
       setSpeech('');
       setRadius(waypoint.trigger_radius_miles || 2.0);
-      setEngine('saved');
     }
   }, [waypoint?.id, isOpen, initialTab, isLast]);
 
@@ -236,7 +228,6 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
       setMessage(result.message);
       setSpeech(result.speech);
       setRadius(result.recommended_trigger_radius_miles);
-      setEngine(result.engine);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Generation failed';
       setError(msg);
@@ -615,118 +606,60 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
             /* TAB 2: In-Car Alert & Audio Configuration */
             <div className="space-y-4">
               {!aiAvailable && (
-                <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
+                <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-semibold text-white">AI Co-Pilot Script Generator Unavailable</span>
+                    <span className="font-semibold text-white">AI Script Generation Unavailable</span>
                     <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                      An active AI engine or API key is required to automatically generate alerts. You can still manually author or edit heads-up card text and spoken phonetic audio scripts below.
+                      An active AI engine or API key is required to automatically generate alerts. You can manually author or edit the card title, message, and spoken audio script below.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* AI Generation Control */}
-              <div className="flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold text-slate-200">
-                      AI Co-Pilot Script Generator
-                    </span>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span
-                        className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${
-                          engine === 'saved'
-                            ? 'bg-sky-950/80 text-sky-300 border-sky-700/60'
-                            : !aiAvailable
-                            ? 'bg-slate-800 text-slate-400 border-slate-700'
-                            : 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
-                        }`}
-                      >
-                        {engine === 'saved'
-                          ? 'Saved Itinerary Alert'
-                          : !aiAvailable
-                          ? 'Manual Alert'
-                          : 'AI Generated'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={aiAvailable ? handleGenerateAlert : undefined}
-                  disabled={!aiAvailable || isLoading}
-                  title={
-                    !aiAvailable
-                      ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
-                      : title
-                      ? 'Regenerate script with AI'
-                      : 'Generate script with AI'
-                  }
-                  className={`px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm ${
-                    !aiAvailable
-                      ? 'bg-slate-850 border border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
-                      : 'bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white cursor-pointer'
-                  }`}
-                >
-                  {isLoading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                  ) : (
-                    <RefreshCw className="w-3.5 h-3.5 text-white" />
-                  )}
-                  <span>{isLoading ? 'Generating...' : title ? 'Regenerate Script' : 'Generate Alert'}</span>
-                </button>
-              </div>
-
-              {/* Android Auto Heads-Up Card Preview & Editing */}
-              <div className="space-y-2">
+              {/* CARD 1: Android Auto Heads-Up Display */}
+              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Car className="w-3.5 h-3.5 text-sky-400" />
-                    Android Auto Heads-Up Display Preview
-                  </span>
-                  <span className="text-[11px] text-slate-400">Overlaid on Google Maps</span>
-                </div>
-
-                <div className="p-4 rounded-xl bg-slate-950 border border-slate-700/90 shadow-lg space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                        <Navigation className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-bold text-emerald-400 tracking-wide">
-                        Co-Pilot: {title || 'Waypoint Ahead'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                      <Bell className="w-3 h-3" />
-                      <span>Now</span>
-                    </div>
+                  <div>
+                    <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Car className="w-3.5 h-3.5 text-sky-400" />
+                      Android Auto Heads-Up Display
+                    </span>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Overlaid on Google Maps when approaching stop
+                    </p>
                   </div>
 
-                  <p className="text-sm text-slate-200 whitespace-pre-line leading-relaxed font-sans pl-8">
-                    {message || 'Approaching scheduled waypoint. Follow local road signs.'}
-                  </p>
-
-                  <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80 pl-8">
-                    <span className="text-[11px] px-2.5 py-1 bg-slate-800 text-slate-300 rounded-md">
-                      Dismiss
-                    </span>
-                    <span className="text-[11px] px-2.5 py-1 bg-sky-600/30 text-sky-300 border border-sky-500/40 rounded-md">
-                      Acknowledge
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={aiAvailable ? handleGenerateAlert : undefined}
+                    disabled={!aiAvailable || isLoading}
+                    title={
+                      !aiAvailable
+                        ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                        : title
+                        ? 'Regenerate script and alert with AI'
+                        : 'Generate script and alert with AI'
+                    }
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border shadow-sm ${
+                      !aiAvailable
+                        ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                        : 'bg-slate-800 hover:bg-slate-750 border-slate-700/80 text-sky-400 hover:text-sky-300 cursor-pointer'
+                    }`}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                    )}
+                    <span>{isLoading ? 'Generating...' : title ? 'Regenerate with AI' : 'Generate with AI'}</span>
+                  </button>
                 </div>
 
-                {/* Inline Editing for Card */}
-                <div className="grid grid-cols-1 gap-2.5 pt-1">
+                <div className="space-y-3">
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[11px] font-semibold text-slate-300">
+                      <label className="block text-xs font-semibold text-slate-300">
                         Card Title (max 30 chars)
                       </label>
                       <span
@@ -742,39 +675,45 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                       maxLength={30}
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      placeholder="e.g. Scenic Overlook Ahead"
-                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-xs text-white focus:outline-none focus:border-sky-500"
+                      placeholder="e.g. Newton Plaza Ahead"
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
                     />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Short headline displayed in the in-car heads-up banner over Google Maps.
+                    </p>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
                       Notification Message (concise 1–2 lines)
                     </label>
                     <textarea
                       rows={2}
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
-                      placeholder="Upcoming scenic overlook on right with panoramic canyon views."
-                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-xs text-white focus:outline-none focus:border-sky-500 resize-none"
+                      placeholder="e.g. Target arrival: +4m. Prepare to turn into Newton Plaza for your scheduled meal stop."
+                      className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 resize-none"
                     />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Concise instruction or arrival notice shown on the vehicle display.
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Spoken TTS Audio Script Preview & Editing */}
-              <div className="space-y-2">
+              {/* CARD 2: Spoken Audio Announcement */}
+              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                     <Volume2 className="w-3.5 h-3.5 text-amber-400" />
-                    Offline TTS Audio Announcement (Ducks Music)
+                    Spoken Audio Announcement (TTS)
                   </span>
                   <div className="flex items-center gap-2 text-[11px]">
                     <span
-                      className={`font-mono px-1.5 py-0.5 rounded ${
+                      className={`font-mono px-2 py-0.5 rounded text-xs border ${
                         wordCount >= 15 && wordCount <= 25
-                          ? 'bg-emerald-950 text-emerald-300'
-                          : 'bg-amber-950 text-amber-300'
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60'
+                          : 'bg-amber-950 text-amber-300 border-amber-800/60'
                       }`}
                     >
                       {wordCount} words (~{estSpeechSeconds}s)
@@ -783,54 +722,61 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-700/80 flex items-start gap-3">
-                  <button
-                    type="button"
-                    onClick={handleToggleSpeak}
-                    disabled={!speech}
-                    className={`p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center cursor-pointer ${
-                      isSpeaking
-                        ? 'bg-amber-500 text-slate-950 hover:bg-amber-400'
-                        : 'bg-slate-800 text-amber-400 hover:bg-slate-750'
-                    } disabled:opacity-40`}
-                    title={isSpeaking ? 'Stop speaking preview' : 'Play TTS audio preview'}
-                  >
-                    {isSpeaking ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                  </button>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-slate-200 italic leading-relaxed">
-                      &ldquo;{speech || 'Approaching your scheduled road trip stop.'}&rdquo;
-                    </p>
-                    <div className="mt-2 text-[11px] text-slate-400 flex items-center gap-1">
-                      <Info className="w-3 h-3 text-sky-400" />
-                      <span>Ducks Spotify car audio during utterance, restoring volume on completion.</span>
-                    </div>
-                  </div>
-                </div>
-
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Spoken Script Content
                   </label>
                   <textarea
-                    rows={2}
+                    rows={3}
                     value={speech}
                     onChange={(e) => setSpeech(e.target.value)}
-                    placeholder="Approaching Oak Creek Vista in two miles. Prepare to turn right into the overlook parking area."
-                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700/80 rounded-lg text-xs text-white focus:outline-none focus:border-sky-500 resize-none"
+                    placeholder="e.g. Approaching Newton Plaza in four minutes. Prepare to slow down and turn right into the shopping center for dining."
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 resize-none leading-relaxed"
                   />
+                </div>
+
+                <div className="flex items-center justify-between pt-0.5">
+                  <button
+                    type="button"
+                    onClick={handleToggleSpeak}
+                    disabled={!speech.trim()}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-700/80 cursor-pointer ${
+                      isSpeaking
+                        ? 'bg-amber-500 text-slate-950 hover:bg-amber-400 font-semibold'
+                        : 'bg-slate-800 text-amber-400 hover:text-amber-300 hover:bg-slate-750'
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    title={isSpeaking ? 'Stop speaking preview' : 'Play TTS audio preview'}
+                  >
+                    {isSpeaking ? (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5" />
+                        <span>Stop Preview</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>Listen Preview</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Info className="w-3 h-3 text-sky-400" />
+                    <span>Ducks Spotify car audio during utterance, restoring volume on completion.</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Geofence Trigger Radius */}
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+              {/* CARD 3: Alert Distance (Geofence Trigger) */}
+              <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5">
                     <Sliders className="w-3.5 h-3.5 text-sky-400" />
-                    Heads-Up Alert Distance (Geofence Trigger)
-                  </span>
-                  <span className="text-xs font-mono font-bold text-sky-400 bg-sky-950/80 border border-sky-800 px-2 py-0.5 rounded">
+                    <span className="text-xs font-semibold text-slate-300">
+                      Heads-Up Alert Distance (Geofence Trigger)
+                    </span>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-sky-400 bg-sky-950/70 border border-sky-800/80 px-2 py-0.5 rounded">
                     {radius.toFixed(1)} miles before stop
                   </span>
                 </div>
@@ -851,21 +797,40 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                   <span>6.0 mi (Interstate)</span>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {RADIUS_PRESETS.map((r) => (
                     <button
                       key={r}
                       type="button"
                       onClick={() => setRadius(r)}
-                      className={`px-2 py-1 rounded text-xs font-mono transition-colors cursor-pointer ${
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all cursor-pointer ${
                         Math.abs(radius - r) < 0.05
-                          ? 'bg-sky-600 text-white font-bold'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          ? 'bg-sky-600 text-white font-bold shadow-sm'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
                       }`}
                     >
                       {r.toFixed(1)} mi
                     </button>
                   ))}
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <input
+                      type="number"
+                      min="0.3"
+                      max="6.0"
+                      step="0.1"
+                      value={radius}
+                      onChange={(e) =>
+                        setRadius(
+                          Math.max(
+                            0.3,
+                            Math.min(6.0, parseFloat(parseFloat(e.target.value).toFixed(1)) || 0.3)
+                          )
+                        )
+                      }
+                      className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-center text-xs font-mono text-white focus:outline-none focus:border-sky-500"
+                    />
+                    <span className="text-xs text-slate-400">miles</span>
+                  </div>
                 </div>
               </div>
             </div>
