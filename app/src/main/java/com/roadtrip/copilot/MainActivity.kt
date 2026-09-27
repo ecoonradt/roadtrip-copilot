@@ -36,13 +36,30 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class TripGroup(
+    val title: String,
+    val routeFile: String,
+    val isAsset: Boolean,
+    val days: List<RouteOption>
+) {
+    override fun toString(): String {
+        return if (days.size > 1 && !title.contains("Days", ignoreCase = true)) {
+            "$title (${days.size} Days)"
+        } else {
+            title
+        }
+    }
+}
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private var copilotService: CopilotService? = null
     private var isBound = false
     private var routeOptions: List<RouteOption> = emptyList()
-    private var routeAdapter: ArrayAdapter<RouteOption>? = null
+    private var tripGroups: List<TripGroup> = emptyList()
+    private var tripAdapter: ArrayAdapter<TripGroup>? = null
+    private var dayAdapter: ArrayAdapter<RouteOption>? = null
 
     private val importLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -234,31 +251,141 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun buildTripGroups(routes: List<RouteOption>): List<TripGroup> {
+        val grouped = LinkedHashMap<String, MutableList<RouteOption>>()
+        for (opt in routes) {
+            grouped.getOrPut(opt.routeFile) { mutableListOf() }.add(opt)
+        }
+        return grouped.map { (file, daysList) ->
+            val first = daysList.first()
+            val title = first.tripName?.takeIf { it.isNotBlank() }
+                ?: if (daysList.size == 1) first.title else file.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
+            TripGroup(
+                title = title,
+                routeFile = file,
+                isAsset = first.isAsset,
+                days = daysList.sortedBy { it.dayNumber }
+            )
+        }
+    }
+
+    private fun getSelectedRouteOption(): RouteOption? {
+        val tripIdx = binding.spinnerRoute.selectedItemPosition
+        val trip = tripGroups.getOrNull(tripIdx) ?: return null
+        return if (trip.days.size > 1) {
+            val dayIdx = binding.spinnerDay.selectedItemPosition
+            trip.days.getOrNull(dayIdx) ?: trip.days.firstOrNull()
+        } else {
+            trip.days.firstOrNull()
+        }
+    }
+
+    private fun handleTripSelection(trip: TripGroup) {
+        if (trip.days.size > 1) {
+            binding.layoutDaySelect.visibility = View.VISIBLE
+            dayAdapter?.apply {
+                clear()
+                addAll(trip.days)
+                notifyDataSetChanged()
+            }
+            val targetDayNum = if (trip.routeFile == CopilotService.activeRouteFile.value) {
+                CopilotService.activeDayNumber.value
+            } else {
+                1
+            }
+            val dayIdx = trip.days.indexOfFirst { it.dayNumber == targetDayNum }.coerceAtLeast(0)
+            if (binding.spinnerDay.selectedItemPosition != dayIdx) {
+                binding.spinnerDay.setSelection(dayIdx)
+            }
+            val selectedDay = trip.days.getOrNull(dayIdx) ?: return
+            if (selectedDay.routeFile != CopilotService.activeRouteFile.value ||
+                selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
+                val running = CopilotService.isRunning.value
+                CopilotService.setSelectedRoute(this, selectedDay.routeFile, selectedDay.dayNumber, autoRestartIfRunning = running)
+            }
+        } else {
+            binding.layoutDaySelect.visibility = View.GONE
+            dayAdapter?.apply {
+                clear()
+                notifyDataSetChanged()
+            }
+            val selectedDay = trip.days.firstOrNull() ?: return
+            if (selectedDay.routeFile != CopilotService.activeRouteFile.value ||
+                selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
+                val running = CopilotService.isRunning.value
+                CopilotService.setSelectedRoute(this, selectedDay.routeFile, selectedDay.dayNumber, autoRestartIfRunning = running)
+            }
+        }
+    }
+
+    private fun syncSelectionFromServiceState(
+        file: String = CopilotService.activeRouteFile.value,
+        day: Int = CopilotService.activeDayNumber.value
+    ) {
+        val tripIdx = tripGroups.indexOfFirst { it.routeFile == file }
+        if (tripIdx >= 0) {
+            if (binding.spinnerRoute.selectedItemPosition != tripIdx) {
+                binding.spinnerRoute.setSelection(tripIdx)
+            }
+            val trip = tripGroups[tripIdx]
+            if (trip.days.size > 1) {
+                binding.layoutDaySelect.visibility = View.VISIBLE
+                if (dayAdapter?.count != trip.days.size) {
+                    dayAdapter?.clear()
+                    dayAdapter?.addAll(trip.days)
+                    dayAdapter?.notifyDataSetChanged()
+                }
+                val dayIdx = trip.days.indexOfFirst { it.dayNumber == day }.coerceAtLeast(0)
+                if (binding.spinnerDay.selectedItemPosition != dayIdx) {
+                    binding.spinnerDay.setSelection(dayIdx)
+                }
+            } else {
+                binding.layoutDaySelect.visibility = View.GONE
+            }
+        }
+    }
+
     private fun setupRouteSpinner() {
         routeOptions = RouteRepository.getInstance(this).getRouteOptions()
-        val adapter = ArrayAdapter(this, R.layout.spinner_item, ArrayList(routeOptions)).apply {
+        tripGroups = buildTripGroups(routeOptions)
+
+        tripAdapter = ArrayAdapter(this, R.layout.spinner_item, ArrayList(tripGroups)).apply {
             setDropDownViewResource(R.layout.spinner_dropdown_item)
         }
-        routeAdapter = adapter
-        binding.spinnerRoute.adapter = adapter
+        binding.spinnerRoute.adapter = tripAdapter
 
-        val currentFile = CopilotService.activeRouteFile.value
-        val currentDay = CopilotService.activeDayNumber.value
-        val idx = routeOptions.indexOfFirst { it.routeFile == currentFile && it.dayNumber == currentDay }
-        if (idx >= 0) {
-            binding.spinnerRoute.setSelection(idx)
+        dayAdapter = ArrayAdapter(this, R.layout.spinner_item, ArrayList<RouteOption>()).apply {
+            setDropDownViewResource(R.layout.spinner_dropdown_item)
         }
+        binding.spinnerDay.adapter = dayAdapter
 
         binding.spinnerRoute.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val selected = routeOptions.getOrNull(position) ?: return
-                val running = CopilotService.isRunning.value
-                if (selected.routeFile != CopilotService.activeRouteFile.value || selected.dayNumber != CopilotService.activeDayNumber.value) {
-                    CopilotService.setSelectedRoute(this@MainActivity, selected.routeFile, selected.dayNumber, autoRestartIfRunning = running)
-                }
+                val trip = tripGroups.getOrNull(position) ?: return
+                handleTripSelection(trip)
             }
+
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+
+        binding.spinnerDay.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val tripIdx = binding.spinnerRoute.selectedItemPosition
+                val trip = tripGroups.getOrNull(tripIdx) ?: return
+                if (trip.days.size > 1) {
+                    val selectedDay = trip.days.getOrNull(position) ?: return
+                    if (selectedDay.routeFile != CopilotService.activeRouteFile.value ||
+                        selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
+                        val running = CopilotService.isRunning.value
+                        CopilotService.setSelectedRoute(this@MainActivity, selectedDay.routeFile, selectedDay.dayNumber, autoRestartIfRunning = running)
+                    }
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        syncSelectionFromServiceState()
     }
 
     private fun setupListeners() {
@@ -274,10 +401,9 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.testAudio()
             } else {
-                val selectedIdx = binding.spinnerRoute.selectedItemPosition
-                val selectedRoute = routeOptions.getOrNull(selectedIdx)
-                val routeFile = selectedRoute?.routeFile ?: "sample_itinerary.json"
-                val dayNum = selectedRoute?.dayNumber ?: 1
+                val selectedRoute = getSelectedRouteOption()
+                val routeFile = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
+                val dayNum = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
                     putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
@@ -292,10 +418,9 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.testAlert()
             } else {
-                val selectedIdx = binding.spinnerRoute.selectedItemPosition
-                val selectedRoute = routeOptions.getOrNull(selectedIdx)
-                val routeFile = selectedRoute?.routeFile ?: "sample_itinerary.json"
-                val dayNum = selectedRoute?.dayNumber ?: 1
+                val selectedRoute = getSelectedRouteOption()
+                val routeFile = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
+                val dayNum = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
                     putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
@@ -366,8 +491,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCopilotService() {
-        val selectedIdx = binding.spinnerRoute.selectedItemPosition
-        val selectedRoute = routeOptions.getOrNull(selectedIdx)
+        val selectedRoute = getSelectedRouteOption()
         val file = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
         val day = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
 
@@ -384,17 +508,13 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     RouteRepository.getInstance(this@MainActivity).routes.collectLatest { options ->
                         routeOptions = options
-                        routeAdapter?.apply {
+                        tripGroups = buildTripGroups(options)
+                        tripAdapter?.apply {
                             clear()
-                            addAll(options)
+                            addAll(tripGroups)
                             notifyDataSetChanged()
                         }
-                        val currentFile = CopilotService.activeRouteFile.value
-                        val currentDay = CopilotService.activeDayNumber.value
-                        val idx = options.indexOfFirst { it.routeFile == currentFile && it.dayNumber == currentDay }
-                        if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
-                            binding.spinnerRoute.setSelection(idx)
-                        }
+                        syncSelectionFromServiceState()
                     }
                 }
 
@@ -451,10 +571,7 @@ class MainActivity : AppCompatActivity() {
                         CopilotService.activeRouteFile,
                         CopilotService.activeDayNumber
                     ) { file, day -> Pair(file, day) }.collectLatest { (file, day) ->
-                        val idx = routeOptions.indexOfFirst { it.routeFile == file && it.dayNumber == day }
-                        if (idx >= 0 && binding.spinnerRoute.selectedItemPosition != idx) {
-                            binding.spinnerRoute.setSelection(idx)
-                        }
+                        syncSelectionFromServiceState(file, day)
                     }
                 }
             }

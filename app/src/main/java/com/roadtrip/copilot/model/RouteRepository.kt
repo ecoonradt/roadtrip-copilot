@@ -278,6 +278,9 @@ class RouteRepository(
 
         if (!itinerary.days.isNullOrEmpty()) {
             val sortedDays = itinerary.days.sortedBy { it.day }
+            val tripName = itinerary.tripName.ifBlank {
+                fileName.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
+            }
             for (day in sortedDays) {
                 val dayNum = day.day
                 val rawTitle = day.title?.trim()
@@ -300,7 +303,8 @@ class RouteRepository(
                         dayNumber = dayNum,
                         isAsset = isAsset,
                         absolutePath = absolutePath,
-                        subtitle = subtitle
+                        subtitle = subtitle,
+                        tripName = tripName
                     )
                 )
             }
@@ -318,7 +322,8 @@ class RouteRepository(
                     dayNumber = 1,
                     isAsset = isAsset,
                     absolutePath = absolutePath,
-                    subtitle = subtitle
+                    subtitle = subtitle,
+                    tripName = title
                 )
             )
         }
@@ -402,7 +407,8 @@ class RouteRepository(
                 routeFile = "sample_itinerary.json",
                 dayNumber = 1,
                 isAsset = true,
-                subtitle = "Sample Route • Phoenix → Sedona → Flagstaff"
+                subtitle = "Sample Route • Phoenix → Sedona → Flagstaff",
+                tripName = "Scenic Southwest: Phoenix to Flagstaff"
             )
         )
     }

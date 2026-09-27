@@ -346,6 +346,10 @@ class RouteRepositoryTest {
         assertEquals(3, day3.dayNumber)
         assertFalse(day3.isAsset)
 
+        assertEquals("Southwest Canyon Loop", day1.tripName)
+        assertEquals("Southwest Canyon Loop", day2.tripName)
+        assertEquals("Southwest Canyon Loop", day3.tripName)
+
         // Verify checkpoints resolution for each day in multi-day
         val d1Cps = repository.resolveCheckpoints(day1)
         assertEquals(2, d1Cps.size)
@@ -366,6 +370,7 @@ class RouteRepositoryTest {
         assertEquals("Albany Quick Test Loop", singleOption?.title)
         assertEquals(1, singleOption?.dayNumber)
         assertFalse(singleOption!!.isAsset)
+        assertEquals("Albany Quick Test Loop", singleOption.tripName)
 
         // Verify checkpoints resolution for single route
         val singleCps = repository.resolveCheckpoints(singleOption, tripStartTimeMillis = 1000000L)
@@ -549,5 +554,50 @@ class RouteRepositoryTest {
         val fallbackAsset = repository.loadItinerary("sample_itinerary.json")
         assertNotNull("Calling loadItinerary without isAsset flag must fallback to assetProvider and succeed", fallbackAsset)
         assertEquals("Scenic Southwest: Phoenix to Flagstaff", fallbackAsset?.tripName)
+    }
+
+    @Test
+    fun testTripGroupGroupingAndToString() {
+        val singleOption = RouteOption(
+            title = "Albany Quick Test Loop",
+            routeFile = "single_run.json",
+            dayNumber = 1,
+            tripName = "Albany Quick Test Loop"
+        )
+        val singleGroup = TripGroup(
+            title = singleOption.tripName ?: singleOption.title,
+            routeFile = singleOption.routeFile,
+            isAsset = false,
+            days = listOf(singleOption)
+        )
+        assertEquals("Albany Quick Test Loop", singleGroup.toString())
+
+        val day1 = RouteOption(
+            title = "Day 1: Phoenix to Sedona",
+            routeFile = "multi_day.json",
+            dayNumber = 1,
+            tripName = "Southwest Canyon Loop"
+        )
+        val day2 = RouteOption(
+            title = "Day 2: Sedona to Grand Canyon",
+            routeFile = "multi_day.json",
+            dayNumber = 2,
+            tripName = "Southwest Canyon Loop"
+        )
+        val multiGroup = TripGroup(
+            title = day1.tripName ?: "Southwest Canyon Loop",
+            routeFile = day1.routeFile,
+            isAsset = false,
+            days = listOf(day1, day2)
+        )
+        assertEquals("Southwest Canyon Loop (2 Days)", multiGroup.toString())
+
+        val existingDaysGroup = TripGroup(
+            title = "Southwest Canyon Loop (2 Days)",
+            routeFile = "multi_day.json",
+            isAsset = false,
+            days = listOf(day1, day2)
+        )
+        assertEquals("Southwest Canyon Loop (2 Days)", existingDaysGroup.toString())
     }
 }

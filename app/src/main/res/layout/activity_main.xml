@@ -66,20 +66,23 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:orientation="horizontal"
+                    android:orientation="vertical"
                     android:visibility="gone">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Day: "
+                        android:text="Select Driving Leg / Day"
                         android:textColor="@color/text_muted"
-                        android:textSize="14sp" />
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
 
                     <Spinner
                         android:id="@+id/spinnerDay"
-                        android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:popupBackground="@color/card_dark"
                         android:backgroundTint="@color/accent" />
                 </LinearLayout>
 

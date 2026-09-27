@@ -16,7 +16,8 @@ data class RouteOption(
     val dayNumber: Int,
     val isAsset: Boolean = false,
     val absolutePath: String? = null,
-    val subtitle: String? = null
+    val subtitle: String? = null,
+    val tripName: String? = null
 ) {
     override fun toString(): String = title
 }
