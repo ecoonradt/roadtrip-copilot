@@ -1,10 +1,3 @@
-export interface GeocodeResult {
-  lat: number;
-  lng: number;
-  displayName: string;
-  boundingBox?: [number, number, number, number];
-}
-
 export type WaypointType =
   | 'origin'
   | 'destination'
@@ -13,6 +6,17 @@ export type WaypointType =
   | 'meal'
   | 'fuel'
   | 'lodging';
+
+export interface GeocodeResult {
+  lat: number;
+  lng: number;
+  displayName: string;
+  name?: string;
+  placeName?: string;
+  address?: string;
+  category?: WaypointType;
+  boundingBox?: [number, number, number, number];
+}
 
 export interface WaypointNotification {
   title: string;

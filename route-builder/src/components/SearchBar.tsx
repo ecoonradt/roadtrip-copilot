@@ -110,15 +110,15 @@ export const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(({
 
       {/* Results dropdown */}
       {isOpen && (
-        <div className="absolute z-[1050] left-0 right-0 mt-1.5 bg-slate-900/98 border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto backdrop-blur-md">
+        <div className="absolute z-[1050] left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
           {error && (
-            <div className="p-3 text-xs text-rose-400 bg-rose-950/40 border-b border-rose-900/30">
+            <div className="p-3 text-xs text-rose-400 bg-rose-950 border-b border-rose-900/60">
               {error}
             </div>
           )}
 
           {results.length === 0 && !error && !isLoading && (
-            <div className="p-3.5 text-xs text-slate-400 text-center">
+            <div className="p-3.5 text-xs text-slate-400 text-center bg-slate-900">
               No matching locations found
             </div>
           )}
@@ -127,15 +127,15 @@ export const SearchBar = React.forwardRef<HTMLInputElement, SearchBarProps>(({
             <button
               key={`${item.lat}-${item.lng}-${index}`}
               onClick={() => handleSelect(item)}
-              className="w-full text-left px-3.5 py-2.5 hover:bg-slate-800/90 border-b border-slate-800/60 last:border-0 flex items-start gap-2.5 transition-colors group cursor-pointer"
+              className="w-full text-left px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 border-b border-slate-800 last:border-0 flex items-start gap-2.5 transition-colors group cursor-pointer"
             >
               <MapPin className="w-4 h-4 text-sky-400 mt-0.5 shrink-0 group-hover:scale-110 transition-transform" />
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-semibold text-slate-100 truncate">
-                  {item.displayName.split(',')[0]}
+                  {item.name || item.displayName.split(',')[0]}
                 </div>
                 <div className="text-[11px] text-slate-400 truncate">
-                  {item.displayName}
+                  {item.address || item.displayName}
                 </div>
               </div>
             </button>

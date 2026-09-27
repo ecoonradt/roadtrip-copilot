@@ -394,27 +394,34 @@ export function App() {
   }, [activeDayIndex]);
 
   const handleSelectLocation = useCallback((result: GeocodeResult) => {
+    const isFirstStop = waypoints.length === 0;
+    const resolvedType: WaypointType = isFirstStop ? 'origin' : (result.category || 'scenic_pull_off');
+    const defaultDwell = isFirstStop ? 0 : (resolvedType === 'meal' ? 45 : resolvedType === 'lodging' ? 0 : 15);
+
     const newWaypoint: Waypoint = {
       id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: result.displayName.split(',')[0],
-      type: 'scenic_pull_off',
+      name: result.name || result.displayName.split(',')[0].trim(),
+      type: resolvedType,
       lat: result.lat,
       lng: result.lng,
-      dwell_minutes: 15,
+      dwell_minutes: defaultDwell,
       trigger_radius_miles: 2.0,
+      ...(result.placeName ? { place_name: result.placeName } : {}),
+      ...(result.address ? { address: result.address } : {}),
     };
     updateCurrentDayWaypoints([...waypoints, newWaypoint]);
   }, [updateCurrentDayWaypoints, waypoints]);
 
   const handleMapClick = useCallback((lat: number, lng: number) => {
+    const isFirstStop = waypoints.length === 0;
     const stopNum = waypoints.length + 1;
     const newWaypoint: Waypoint = {
       id: `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: `Stop ${stopNum} (${lat.toFixed(3)}, ${lng.toFixed(3)})`,
-      type: 'scenic_pull_off',
+      name: isFirstStop ? 'Origin' : `Stop ${stopNum} (${lat.toFixed(3)}, ${lng.toFixed(3)})`,
+      type: isFirstStop ? 'origin' : 'scenic_pull_off',
       lat,
       lng,
-      dwell_minutes: 15,
+      dwell_minutes: isFirstStop ? 0 : 15,
       trigger_radius_miles: 2.0,
     };
     updateCurrentDayWaypoints([...waypoints, newWaypoint]);

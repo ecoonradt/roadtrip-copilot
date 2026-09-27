@@ -247,7 +247,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
       className="relative h-full flex flex-col bg-slate-900 border-r border-slate-800 text-slate-100 shrink-0 z-20 shadow-xl select-none"
     >
       {/* Sidebar Header: Actions & Controls */}
-      <div className="p-3 border-b border-slate-800 bg-slate-900/90 backdrop-blur-sm">
+      <div className="p-3 border-b border-slate-800 bg-slate-900/95 backdrop-blur-sm relative z-30">
         {/* Row 1: Title, Count Badge, and Utility Icons */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -662,6 +662,23 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
                       {/* Status Chips Row */}
                       <div className="flex flex-wrap items-center gap-1.5 py-0.5 text-[11px]">
+                        {originalWp?.place_name && (
+                          <span
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'details',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-teal-950/70 text-teal-300 border border-teal-800/60 font-mono text-[10px] cursor-pointer hover:bg-teal-900/80 transition-colors truncate max-w-[180px]"
+                            title={`Google Maps Establishment Name: ${originalWp.place_name}. Click to view or edit.`}
+                          >
+                            🗺️ {originalWp.place_name}
+                          </span>
+                        )}
+
                         {originalWp?.address ? (
                           <span
                             onClick={() => {

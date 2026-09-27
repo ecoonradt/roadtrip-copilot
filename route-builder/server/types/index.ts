@@ -2,7 +2,38 @@ export interface GeocodeResult {
   lat: number;
   lng: number;
   displayName: string;
+  name?: string;
+  placeName?: string;
+  address?: string;
+  category?: 'origin' | 'destination' | 'scenic_pull_off' | 'scenic_drive_by' | 'meal' | 'fuel' | 'lodging';
   boundingBox?: [number, number, number, number]; // [south, north, west, east]
+}
+
+export interface NominatimAddress {
+  house_number?: string;
+  road?: string;
+  pedestrian?: string;
+  footway?: string;
+  street?: string;
+  residential?: string;
+  suburb?: string;
+  neighbourhood?: string;
+  hamlet?: string;
+  village?: string;
+  town?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+  country_code?: string;
+  amenity?: string;
+  shop?: string;
+  tourism?: string;
+  leisure?: string;
+  historic?: string;
+  building?: string;
+  [key: string]: string | undefined;
 }
 
 export interface NominatimRawResult {
@@ -16,6 +47,9 @@ export interface NominatimRawResult {
   display_name: string;
   class?: string;
   type?: string;
+  addresstype?: string;
+  name?: string;
+  address?: NominatimAddress;
   importance?: number;
 }
 
