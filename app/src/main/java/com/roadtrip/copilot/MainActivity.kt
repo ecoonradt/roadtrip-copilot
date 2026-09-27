@@ -267,17 +267,19 @@ class MainActivity : AppCompatActivity() {
     private fun buildTripGroups(routes: List<RouteOption>): List<TripGroup> {
         val grouped = LinkedHashMap<String, MutableList<RouteOption>>()
         for (opt in routes) {
-            grouped.getOrPut(opt.routeFile) { mutableListOf() }.add(opt)
+            val key = if (opt.isAsset) "asset:${opt.routeFile}" else "file:${opt.routeFile}"
+            grouped.getOrPut(key) { mutableListOf() }.add(opt)
         }
-        return grouped.map { (file, daysList) ->
+        return grouped.map { (_, daysList) ->
             val first = daysList.first()
+            val distinctDays = daysList.distinctBy { it.dayNumber }.sortedBy { it.dayNumber }
             val title = first.tripName?.takeIf { it.isNotBlank() }
-                ?: if (daysList.size == 1) first.title else file.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
+                ?: if (distinctDays.size == 1) first.title else first.routeFile.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
             TripGroup(
                 title = title,
-                routeFile = file,
+                routeFile = first.routeFile,
                 isAsset = first.isAsset,
-                days = daysList.sortedBy { it.dayNumber }
+                days = distinctDays
             )
         }
     }
@@ -553,11 +555,16 @@ class MainActivity : AppCompatActivity() {
                     CopilotService.telemetryFlow.collectLatest { result ->
                         if (result != null) {
                             binding.tvSpeed.text = "%.0f mph".format(result.speedMph)
-                            if (result.nextCheckpoint != null && result.distanceToNextMiles != null) {
+                            if (result.nextCheckpoint != null) {
                                 binding.tvNextWaypoint.text = result.nextCheckpoint.name
-                                binding.tvDistanceNext.text = "%.1f mi away".format(result.distanceToNextMiles)
+                                if (result.distanceToNextMiles != null) {
+                                    binding.tvDistanceNext.text = "%.1f mi away".format(result.distanceToNextMiles)
+                                } else {
+                                    val count = CopilotService.activeCheckpoints.value.size
+                                    binding.tvDistanceNext.text = if (count > 0) "Ready • $count stops" else "Ready to depart"
+                                }
                                 val targetTime = result.nextCheckpoint.formattedTargetTime
-                                binding.tvTargetTime.text = if (!targetTime.isNullOrBlank()) "Target: $targetTime" else "Target: --"
+                                binding.tvTargetTime.text = if (!targetTime.isNullOrBlank()) "Target: $targetTime" else "Target: Start"
                             } else {
                                 binding.tvNextWaypoint.text = "All Checkpoints Visited"
                                 binding.tvDistanceNext.text = "--"
@@ -568,6 +575,26 @@ class MainActivity : AppCompatActivity() {
                                 binding.tvScheduleDelta.text = result.scheduleDelta.statusText
                                 val color = if (result.scheduleDelta.isAhead) getColor(R.color.success) else getColor(R.color.danger)
                                 binding.tvScheduleDelta.setTextColor(color)
+                            }
+                        }
+                    }
+                }
+
+                launch {
+                    CopilotService.activeCheckpoints.collectLatest { checkpoints ->
+                        if (!CopilotService.isRunning.value) {
+                            val firstCp = checkpoints.firstOrNull()
+                            if (firstCp != null) {
+                                binding.tvNextWaypoint.text = firstCp.name
+                                binding.tvDistanceNext.text = "Ready • ${checkpoints.size} stops"
+                                val targetTime = firstCp.formattedTargetTime
+                                binding.tvTargetTime.text = if (!targetTime.isNullOrBlank()) "Target: $targetTime" else "Target: Start"
+                                binding.tvScheduleDelta.text = "Awaiting Departure"
+                                binding.tvScheduleDelta.setTextColor(getColor(R.color.success))
+                            } else {
+                                binding.tvNextWaypoint.text = "-- None Selected --"
+                                binding.tvDistanceNext.text = "--"
+                                binding.tvTargetTime.text = "Target: --"
                             }
                         }
                     }

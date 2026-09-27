@@ -55,7 +55,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   isAdHoc = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'handoff' | 'gmaps' | 'json'>('handoff');
-  const [fileName, setFileName] = useState('sample_itinerary.json');
+  const defaultFileName = useMemo(() => {
+    const sanitized = (tripName || 'itinerary')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '');
+    return `${sanitized || 'itinerary'}.json`;
+  }, [tripName]);
+  const [fileName, setFileName] = useState(defaultFileName);
+
+  useEffect(() => {
+    setFileName(defaultFileName);
+  }, [defaultFileName]);
   const [copiedJson, setCopiedJson] = useState(false);
   const [copiedLegIndex, setCopiedLegIndex] = useState<number | null>(null);
 

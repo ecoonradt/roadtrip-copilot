@@ -106,7 +106,9 @@ class RouteRepository(
             }
         }
 
-        val assetRoutes = loadAssetRoutes()
+        val assetRoutes = loadAssetRoutes().filter { asset ->
+            customRoutes.none { it.routeFile == asset.routeFile }
+        }
         val combined = customRoutes + assetRoutes
         _routes.value = combined
         combined
