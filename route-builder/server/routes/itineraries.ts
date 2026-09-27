@@ -71,4 +71,22 @@ export const itineraryRoutes: FastifyPluginAsync<ItineraryPluginOptions> = async
       }
     }
   );
+
+  // DELETE /api/itineraries/:filename - Delete an itinerary file from storage
+  fastify.delete<{ Params: { filename: string } }>(
+    '/api/itineraries/:filename',
+    async (request, reply) => {
+      const { filename } = request.params;
+      try {
+        const result = await service.deleteItinerary(filename);
+        return reply.status(200).send(result);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Failed to delete itinerary';
+        const isNotFound = msg.toLowerCase().includes('not found');
+        const isProtected = msg.toLowerCase().includes('protected');
+        const status = isNotFound ? 404 : isProtected ? 403 : 500;
+        return reply.status(status).send({ error: msg });
+      }
+    }
+  );
 };

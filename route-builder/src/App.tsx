@@ -723,6 +723,22 @@ export function App() {
     window.history.replaceState({}, '', url.toString());
   }, []);
 
+  const handleDeleteTrip = useCallback(
+    async (deletedFile: string) => {
+      const activeFile = trip.fileName || localStorage.getItem('copilot_active_file');
+      if (activeFile === deletedFile) {
+        try {
+          const fallbackRaw = await fetchItinerary('sample_itinerary.json');
+          const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
+          handleSelectTrip(parsed);
+        } catch {
+          handleSelectTrip(INITIAL_FALLBACK_TRIP);
+        }
+      }
+    },
+    [trip.fileName, handleSelectTrip]
+  );
+
   const handleSaveTrip = useCallback(async () => {
     setIsSaving(true);
     try {
@@ -896,6 +912,7 @@ export function App() {
         onClose={() => setIsRouteSelectorOpen(false)}
         onSelectTrip={handleSelectTrip}
         currentFileName={trip.fileName}
+        onDeleteTrip={handleDeleteTrip}
       />
 
       {/* Export & Phone Handoff Modal */}

@@ -19,6 +19,7 @@ export interface ItineraryMetadataSummary {
   totalCheckpoints: number;
   dates?: { start: string; end: string };
   lastModified?: string;
+  isProtected?: boolean;
 }
 
 export interface ItineraryStorageOptions {
@@ -88,7 +89,14 @@ export class ItineraryStorageService {
             }
 
             const stat = await fs.stat(filePath);
-            const summary = this.extractMetadataSummary(entry.name, data, stat.mtime.toISOString());
+            const isPrimary = path.resolve(dir) === path.resolve(this.primaryWriteDirectory);
+            const isProtected = !isPrimary || entry.name === 'sample_itinerary.json';
+            const summary = this.extractMetadataSummary(
+              entry.name,
+              data,
+              stat.mtime.toISOString(),
+              isProtected
+            );
             results.push(summary);
             seenFiles.add(entry.name);
           } catch {
@@ -153,12 +161,45 @@ export class ItineraryStorageService {
   }
 
   /**
+   * Deletes an itinerary file from the primary storage directory.
+   * Protects sample_itinerary.json and files outside primaryWriteDirectory.
+   */
+  async deleteItinerary(
+    fileName: string
+  ): Promise<{ success: boolean; fileName: string }> {
+    let safeName = path.basename(fileName);
+    if (!safeName.endsWith('.json')) {
+      safeName = `${safeName}.json`;
+    }
+
+    if (safeName === 'sample_itinerary.json') {
+      throw new Error(`Cannot delete protected itinerary: ${safeName}`);
+    }
+
+    const targetPath = path.join(this.primaryWriteDirectory, safeName);
+
+    try {
+      await fs.access(targetPath);
+    } catch {
+      throw new Error(`Itinerary "${safeName}" not found in writable storage`);
+    }
+
+    await fs.unlink(targetPath);
+
+    return {
+      success: true,
+      fileName: safeName,
+    };
+  }
+
+  /**
    * Parses raw itinerary data into a clean metadata summary.
    */
   private extractMetadataSummary(
     fileName: string,
     data: Record<string, unknown>,
-    lastModified?: string
+    lastModified?: string,
+    isProtected?: boolean
   ): ItineraryMetadataSummary {
     const tripName =
       typeof data.trip_name === 'string'
@@ -235,6 +276,7 @@ export class ItineraryStorageService {
       totalCheckpoints,
       dates,
       lastModified,
+      isProtected,
     };
   }
 }

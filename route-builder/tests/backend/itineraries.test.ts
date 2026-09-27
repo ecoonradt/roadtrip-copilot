@@ -131,6 +131,57 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect(loaded).toBeDefined();
       expect((loaded as Record<string, unknown>).trip_name).toBe('Saved Trip');
     });
+
+    it('marks sample_itinerary.json as protected and allows deleting custom routes', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      // Write a sample itinerary and a custom trip
+      await fs.writeFile(
+        path.join(tempDir, 'sample_itinerary.json'),
+        JSON.stringify({ trip_name: 'Sample Route', checkpoints: [] }),
+        'utf-8'
+      );
+      await fs.writeFile(
+        path.join(tempDir, 'deletable_trip.json'),
+        JSON.stringify({ trip_name: 'Deletable Trip', checkpoints: [] }),
+        'utf-8'
+      );
+
+      const list = await service.listItineraries();
+      const sample = list.find((i) => i.fileName === 'sample_itinerary.json');
+      const custom = list.find((i) => i.fileName === 'deletable_trip.json');
+
+      expect(sample?.isProtected).toBe(true);
+      expect(custom?.isProtected).toBe(false);
+
+      // Attempting to delete sample_itinerary.json should throw
+      await expect(service.deleteItinerary('sample_itinerary.json')).rejects.toThrow(
+        /Cannot delete protected itinerary/
+      );
+
+      // Deleting custom trip should succeed
+      const result = await service.deleteItinerary('deletable_trip.json');
+      expect(result.success).toBe(true);
+      expect(result.fileName).toBe('deletable_trip.json');
+
+      // Verify file is gone
+      const deletedCheck = await service.getItinerary('deletable_trip.json');
+      expect(deletedCheck).toBeNull();
+    });
+
+    it('throws when trying to delete non-existent itinerary', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await expect(service.deleteItinerary('does_not_exist.json')).rejects.toThrow(
+        /not found/i
+      );
+    });
   });
 
   describe('Fastify Endpoints Integration', () => {
@@ -208,6 +259,67 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       const onDisk = await storageService.getItinerary('posted_trip.json');
       expect(onDisk).toBeDefined();
       expect((onDisk as Record<string, unknown>).trip_name).toBe('Posted Via API');
+    });
+
+    it('DELETE /api/itineraries/:filename deletes file and returns 200', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      // Save a file first
+      await storageService.saveItinerary('trip_to_delete.json', { trip_name: 'Delete Me' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/itineraries/trip_to_delete.json',
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as { success: boolean; fileName: string };
+      expect(body.success).toBe(true);
+      expect(body.fileName).toBe('trip_to_delete.json');
+
+      const onDisk = await storageService.getItinerary('trip_to_delete.json');
+      expect(onDisk).toBeNull();
+    });
+
+    it('DELETE /api/itineraries/sample_itinerary.json returns 403 Forbidden', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/itineraries/sample_itinerary.json',
+      });
+
+      expect(response.statusCode).toBe(403);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/Cannot delete protected itinerary/);
+    });
+
+    it('DELETE /api/itineraries/:filename returns 404 when file does not exist', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/itineraries/non_existent.json',
+      });
+
+      expect(response.statusCode).toBe(404);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/not found/i);
     });
   });
 });

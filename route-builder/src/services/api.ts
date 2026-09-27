@@ -200,6 +200,7 @@ export interface ItineraryMetadataSummary {
   totalCheckpoints: number;
   dates?: { start: string; end: string };
   lastModified?: string;
+  isProtected?: boolean;
 }
 
 export async function fetchItineraryList(): Promise<{ itineraries: ItineraryMetadataSummary[] }> {
@@ -242,6 +243,23 @@ export async function saveItinerary(
   }
 
   return (await res.json()) as { success: boolean; fileName: string; filePath: string };
+}
+
+export async function deleteItinerary(
+  fileName: string
+): Promise<{ success: boolean; fileName: string }> {
+  const res = await fetch(`/api/itineraries/${encodeURIComponent(fileName)}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Failed to delete itinerary' }))) as {
+      error?: string;
+    };
+    throw new Error(errorData.error || `Failed to delete itinerary with HTTP ${res.status}`);
+  }
+
+  return (await res.json()) as { success: boolean; fileName: string };
 }
 
 export async function chatWithScout(request: ScoutChatRequest): Promise<ScoutChatResponse> {

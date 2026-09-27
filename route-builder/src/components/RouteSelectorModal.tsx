@@ -9,8 +9,14 @@ import {
   AlertCircle,
   Loader2,
   FileText,
+  Trash2,
 } from 'lucide-react';
-import { fetchItineraryList, fetchItinerary, type ItineraryMetadataSummary } from '../services/api';
+import {
+  fetchItineraryList,
+  fetchItinerary,
+  deleteItinerary,
+  type ItineraryMetadataSummary,
+} from '../services/api';
 import { parseItineraryJson, type ParsedTrip } from '../engine/itineraryParser';
 
 interface RouteSelectorModalProps {
@@ -18,6 +24,7 @@ interface RouteSelectorModalProps {
   onClose: () => void;
   onSelectTrip: (trip: ParsedTrip) => void;
   currentFileName?: string;
+  onDeleteTrip?: (fileName: string) => void;
 }
 
 export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
@@ -25,11 +32,14 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   onClose,
   onSelectTrip,
   currentFileName,
+  onDeleteTrip,
 }) => {
   const [activeTab, setActiveTab] = useState<'workspace' | 'import' | 'new'>('workspace');
   const [workspaceRoutes, setWorkspaceRoutes] = useState<ItineraryMetadataSummary[]>([]);
   const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
   const [loadingRouteName, setLoadingRouteName] = useState<string | null>(null);
+  const [confirmDeleteFile, setConfirmDeleteFile] = useState<string | null>(null);
+  const [isDeletingFile, setIsDeletingFile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Import state
@@ -76,7 +86,11 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
 
   // Close on Escape key
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setConfirmDeleteFile(null);
+      setIsDeletingFile(null);
+      return;
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
@@ -101,6 +115,24 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
       setError(msg);
     } finally {
       setLoadingRouteName(null);
+    }
+  };
+
+  const handleDeleteRoute = async (fileName: string) => {
+    setIsDeletingFile(fileName);
+    setError(null);
+    try {
+      await deleteItinerary(fileName);
+      setWorkspaceRoutes((prev) => prev.filter((r) => r.fileName !== fileName));
+      setConfirmDeleteFile(null);
+      if (onDeleteTrip) {
+        onDeleteTrip(fileName);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete route file';
+      setError(msg);
+    } finally {
+      setIsDeletingFile(null);
     }
   };
 
@@ -299,24 +331,64 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => handleSelectWorkspaceRoute(route)}
-                        disabled={isLoading}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
-                          isCurrent
-                            ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                            : 'bg-sky-600 hover:bg-sky-500 text-white'
-                        }`}
-                      >
-                        {isLoading ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : isCurrent ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {confirmDeleteFile === route.fileName ? (
+                          <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-800/80 rounded-lg p-0.5 animate-in fade-in duration-150">
+                            <button
+                              onClick={() => handleDeleteRoute(route.fileName)}
+                              disabled={isDeletingFile === route.fileName}
+                              className="px-2 py-1 rounded-md text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              title="Confirm permanently deleting this itinerary"
+                            >
+                              {isDeletingFile === route.fileName ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3 h-3" />
+                              )}
+                              <span>Delete?</span>
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteFile(null)}
+                              disabled={isDeletingFile === route.fileName}
+                              className="px-2 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Cancel"
+                            >
+                              Cancel
+                            </button>
+                          </div>
                         ) : (
-                          <FolderOpen className="w-3.5 h-3.5" />
+                          <>
+                            {!route.isProtected && (
+                              <button
+                                onClick={() => setConfirmDeleteFile(route.fileName)}
+                                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                                title={`Delete ${route.tripName}`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </>
                         )}
-                        <span>{isCurrent ? 'Reload' : 'Open'}</span>
-                      </button>
+
+                        <button
+                          onClick={() => handleSelectWorkspaceRoute(route)}
+                          disabled={isLoading || isDeletingFile === route.fileName}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                            isCurrent
+                              ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                              : 'bg-sky-600 hover:bg-sky-500 text-white'
+                          }`}
+                        >
+                          {isLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : isCurrent ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <FolderOpen className="w-3.5 h-3.5" />
+                          )}
+                          <span>{isCurrent ? 'Reload' : 'Open'}</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })
