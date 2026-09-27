@@ -926,6 +926,7 @@ export function App() {
         departureTime={departureTime}
         googleMapsRoute={googleMapsRoute}
         isAdHoc={schedulingMode === 'adhoc'}
+        fileName={trip.fileName}
       />
     </div>
   );

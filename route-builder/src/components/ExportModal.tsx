@@ -41,6 +41,7 @@ interface ExportModalProps {
   departureTime?: string;
   googleMapsRoute?: GoogleMapsRouteResult;
   isAdHoc?: boolean;
+  fileName?: string;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
@@ -53,16 +54,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   departureTime = '14:30:00',
   googleMapsRoute,
   isAdHoc = false,
+  fileName: initialFileName,
 }) => {
   const [activeTab, setActiveTab] = useState<'handoff' | 'gmaps' | 'json'>('handoff');
   const defaultFileName = useMemo(() => {
+    if (initialFileName) {
+      return initialFileName.endsWith('.json') ? initialFileName : `${initialFileName}.json`;
+    }
     const sanitized = (tripName || 'itinerary')
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, '_')
       .replace(/_+/g, '_')
       .replace(/^_|_$/g, '');
     return `${sanitized || 'itinerary'}.json`;
-  }, [tripName]);
+  }, [initialFileName, tripName]);
   const [fileName, setFileName] = useState(defaultFileName);
 
   useEffect(() => {
