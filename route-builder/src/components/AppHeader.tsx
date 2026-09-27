@@ -19,6 +19,7 @@ import type {
   TimelineCascadeResult,
   BackwardScheduleResult,
   GoogleMapsRouteResult,
+  SchedulingMode,
 } from '../engine/types';
 
 interface AppHeaderProps {
@@ -29,8 +30,8 @@ interface AppHeaderProps {
   setBaseDate: (date: string) => void;
   departureTime: string;
   setDepartureTime: (time: string) => void;
-  schedulingMode: 'forward' | 'backward';
-  setSchedulingMode: (mode: 'forward' | 'backward') => void;
+  schedulingMode: SchedulingMode;
+  setSchedulingMode: (mode: SchedulingMode) => void;
   targetArrivalTime: string;
   setTargetArrivalTime: (time: string) => void;
   backwardInfo: BackwardScheduleResult | null;
@@ -128,7 +129,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   const totalTripSecs = cascadeResult.totalTripSeconds || 0;
 
   return (
-    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between gap-3 text-slate-100 shrink-0 z-30 shadow-md">
+    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between gap-3 text-slate-100 shrink-0 z-[1100] shadow-md">
       {/* Left: Brand Logo & Status */}
       <div className="flex items-center gap-3 shrink-0">
         <div className="flex items-center gap-2">
@@ -185,28 +186,35 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <button
             onClick={() => setIsSchedulePopoverOpen(!isSchedulePopoverOpen)}
             className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-xs text-slate-200 transition-colors shadow-sm cursor-pointer"
-            title="Configure departure date and time"
+            title="Configure trip schedule and departure mode"
           >
-            <Calendar className="w-3.5 h-3.5 text-sky-400" />
+            {schedulingMode === 'adhoc' ? (
+              <Clock className="w-3.5 h-3.5 text-teal-400" />
+            ) : (
+              <Calendar className="w-3.5 h-3.5 text-sky-400" />
+            )}
             <span className="font-mono text-[11px]">
-              {baseDate} &bull;{' '}
-              {schedulingMode === 'forward'
-                ? departureTime.slice(0, 5)
-                : `By ${targetArrivalTime.slice(0, 5)}`}
+              {schedulingMode === 'adhoc'
+                ? 'Ad-Hoc • Dynamic Start'
+                : `${baseDate} • ${
+                    schedulingMode === 'forward'
+                      ? departureTime.slice(0, 5)
+                      : `By ${targetArrivalTime.slice(0, 5)}`
+                  }`}
             </span>
             <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
 
           {/* Schedule Configuration Dropdown */}
           {isSchedulePopoverOpen && (
-            <div className="absolute right-0 mt-2 w-72 p-3.5 bg-slate-900/98 border border-slate-700 rounded-xl shadow-2xl z-50 backdrop-blur-md space-y-3">
+            <div className="absolute right-0 mt-2 w-76 p-3.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 backdrop-blur-md space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <span className="text-xs font-semibold text-white">Trip Schedule</span>
                 {/* Mode Selector */}
                 <div className="flex bg-slate-800 p-0.5 rounded-lg text-[11px]">
                   <button
                     onClick={() => setSchedulingMode('forward')}
-                    className={`px-2 py-0.5 rounded-md transition-all ${
+                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
                       schedulingMode === 'forward'
                         ? 'bg-sky-600 text-white font-medium'
                         : 'text-slate-400 hover:text-slate-200'
@@ -216,7 +224,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   </button>
                   <button
                     onClick={() => setSchedulingMode('backward')}
-                    className={`px-2 py-0.5 rounded-md transition-all ${
+                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
                       schedulingMode === 'backward'
                         ? 'bg-indigo-600 text-white font-medium'
                         : 'text-slate-400 hover:text-slate-200'
@@ -225,46 +233,69 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   >
                     Catch-Up
                   </button>
+                  <button
+                    onClick={() => setSchedulingMode('adhoc')}
+                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                      schedulingMode === 'adhoc'
+                        ? 'bg-teal-600 text-white font-medium'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Ad-hoc route with relative drive offsets"
+                  >
+                    Ad-Hoc
+                  </button>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Trip Date</label>
-                  <input
-                    type="date"
-                    value={baseDate}
-                    onChange={(e) => setBaseDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-sky-500"
-                  />
+              {schedulingMode === 'adhoc' ? (
+                <div className="p-2.5 bg-teal-950/60 border border-teal-700/60 rounded-lg text-xs text-teal-200 space-y-1">
+                  <div className="font-semibold text-white flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-teal-400" />
+                    Dynamic Drive Offsets
+                  </div>
+                  <p className="text-[11px] text-teal-300/90 leading-relaxed">
+                    Departure time is captured when you begin driving in the car. Checkpoints calculate arrival times dynamically based on cumulative drive and dwell durations.
+                  </p>
                 </div>
-
-                {schedulingMode === 'forward' ? (
+              ) : (
+                <div className="space-y-2">
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">Departure Time</label>
+                    <label className="block text-[11px] text-slate-400 mb-1">Trip Date</label>
                     <input
-                      type="time"
-                      step="60"
-                      value={departureTime.slice(0, 5)}
-                      onChange={(e) => setDepartureTime(`${e.target.value}:00`)}
+                      type="date"
+                      value={baseDate}
+                      onChange={(e) => setBaseDate(e.target.value)}
                       className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-sky-500"
                     />
                   </div>
-                ) : (
-                  <div>
-                    <label className="block text-[11px] text-indigo-300 font-medium mb-1">
-                      Target Arrival Deadline
-                    </label>
-                    <input
-                      type="time"
-                      step="60"
-                      value={targetArrivalTime.slice(0, 5)}
-                      onChange={(e) => setTargetArrivalTime(`${e.target.value}:00`)}
-                      className="w-full bg-slate-800 border border-indigo-500/70 text-indigo-100 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-indigo-400"
-                    />
-                  </div>
-                )}
-              </div>
+
+                  {schedulingMode === 'forward' ? (
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Departure Time</label>
+                      <input
+                        type="time"
+                        step="60"
+                        value={departureTime.slice(0, 5)}
+                        onChange={(e) => setDepartureTime(`${e.target.value}:00`)}
+                        className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-[11px] text-indigo-300 font-medium mb-1">
+                        Target Arrival Deadline
+                      </label>
+                      <input
+                        type="time"
+                        step="60"
+                        value={targetArrivalTime.slice(0, 5)}
+                        onChange={(e) => setTargetArrivalTime(`${e.target.value}:00`)}
+                        className="w-full bg-slate-800 border border-indigo-500/70 text-indigo-100 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-indigo-400"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {schedulingMode === 'backward' && backwardInfo && (
                 <div className="p-2 bg-indigo-950/70 border border-indigo-700/60 rounded-lg text-xs text-indigo-200 flex items-start gap-2">
@@ -346,7 +377,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                 </button>
 
                 {isMapsDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-72 p-2.5 bg-slate-900/98 border border-slate-700 rounded-xl shadow-2xl z-50 backdrop-blur-md space-y-2">
+                  <div className="absolute right-0 mt-2 w-72 p-2.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 backdrop-blur-md space-y-2">
                     <div className="text-[11px] font-semibold text-slate-400 px-1">
                       Multi-Leg Navigation Links (&le; 9 stops each)
                     </div>

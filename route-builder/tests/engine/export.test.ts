@@ -316,6 +316,20 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       expect(singleRoute.checkpoints[0].offset_minutes_from_start).toBe(0);
       expect(singleRoute.checkpoints[1].offset_minutes_from_start).toBe(31);
     });
+
+    it('omits date and target_time when isAdHoc is true', () => {
+      const singleRoute = formatSingleRouteItinerary({
+        tripName: 'Ad-Hoc Shopping Drive',
+        waypoints: sampleWaypoints,
+        isAdHoc: true,
+      });
+
+      expect(singleRoute.date).toBeUndefined();
+      expect(singleRoute.checkpoints[0].target_time).toBeUndefined();
+      expect(singleRoute.checkpoints[0].offset_minutes_from_start).toBe(0);
+      expect(singleRoute.checkpoints[1].target_time).toBeUndefined();
+      expect(singleRoute.checkpoints[1].offset_minutes_from_start).toBe(15);
+    });
   });
 
   describe('downloadItineraryJson', () => {

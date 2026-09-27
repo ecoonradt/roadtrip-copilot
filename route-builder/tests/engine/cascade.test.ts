@@ -592,4 +592,42 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
       expect(sfParts.second).toBe('00');
     });
   });
+
+  describe('Ad-Hoc Relative Route Scheduling', () => {
+    it('calculates relative offsets from start rather than fixed clock times', () => {
+      const result = calculateTimelineCascade({
+        baseDate: '2026-09-27',
+        departureTime: '09:00:00',
+        waypoints: SAMPLE_WAYPOINTS,
+        driveDurationsSeconds: SAMPLE_DURATIONS,
+        driveDistancesMiles: SAMPLE_DISTANCES,
+        isAdHoc: true,
+      });
+
+      expect(result.isAdHoc).toBe(true);
+      expect(result.startTime).toBe('Dynamic Start');
+      // Stop 0: PHX origin (dwell = 0)
+      expect(result.stops[0].offsetMinutesFromStart).toBe(0);
+      expect(result.stops[0].arrivalShortTime).toBe('Start');
+      expect(result.stops[0].departureShortTime).toBe('Start');
+
+      // Stop 1: Sedona Bell Rock (drive = 105m, dwell = 30m)
+      // arrival = +105m (+1h 45m), departure = +135m (+2h 15m)
+      expect(result.stops[1].offsetMinutesFromStart).toBe(105);
+      expect(result.stops[1].arrivalShortTime).toBe('+1h 45m');
+      expect(result.stops[1].departureShortTime).toBe('+2h 15m');
+
+      // Stop 2: Oak Creek (drive = 30m, dwell = 20m)
+      // arrival = +165m (+2h 45m), departure = +185m (+3h 05m)
+      expect(result.stops[2].offsetMinutesFromStart).toBe(165);
+      expect(result.stops[2].arrivalShortTime).toBe('+2h 45m');
+      expect(result.stops[2].departureShortTime).toBe('+3h 05m');
+
+      // Stop 3: Flagstaff destination (drive = 25m, lodging dwell = 0)
+      // arrival = +210m (+3h 30m)
+      expect(result.stops[3].offsetMinutesFromStart).toBe(210);
+      expect(result.stops[3].arrivalShortTime).toBe('+3h 30m');
+      expect(result.endTime).toBe('+3h 30m');
+    });
+  });
 });

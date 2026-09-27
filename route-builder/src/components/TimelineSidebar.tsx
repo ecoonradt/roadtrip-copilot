@@ -30,6 +30,7 @@ interface TimelineSidebarProps {
   isLoadingRoute: boolean;
   onDeleteWaypoint: (id: string) => void;
   onUpdateWaypoint: (id: string, updates: Partial<Waypoint>) => void;
+  onBatchUpdateWaypoints?: (updates: Record<string, Partial<Waypoint>>) => void;
   onMoveWaypoint: (index: number, direction: 'up' | 'down') => void;
   onResetSample: () => void;
   onClearAll: () => void;
@@ -61,6 +62,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   isLoadingRoute,
   onDeleteWaypoint,
   onUpdateWaypoint,
+  onBatchUpdateWaypoints,
   onMoveWaypoint,
   onResetSample,
   onClearAll,
@@ -200,16 +202,26 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
       });
 
       const batchResult = await generateBatchCopilotAlerts(contexts);
+      const updatesMap: Record<string, Partial<Waypoint>> = {};
       for (const [wpId, alert] of Object.entries(batchResult.alerts)) {
-        onUpdateWaypoint(wpId, {
+        updatesMap[wpId] = {
           notification: {
             title: alert.title,
             message: alert.message,
             speech: alert.speech,
           },
           trigger_radius_miles: alert.recommended_trigger_radius_miles,
-        });
+        };
       }
+
+      if (onBatchUpdateWaypoints) {
+        onBatchUpdateWaypoints(updatesMap);
+      } else {
+        for (const [wpId, updates] of Object.entries(updatesMap)) {
+          onUpdateWaypoint(wpId, updates);
+        }
+      }
+
       setBatchProgress(`Created alerts for all ${Object.keys(batchResult.alerts).length} stops!`);
       setTimeout(() => setBatchProgress(null), 3000);
     } catch (err: unknown) {

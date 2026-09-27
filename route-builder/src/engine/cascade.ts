@@ -286,8 +286,12 @@ export function calculateTimelineCascade(
     detectTimezone(firstWp.lat, firstWp.lng, defaultTimezone);
   timezonesSet.add(firstTz);
 
+  const isAdHoc = Boolean(input.isAdHoc);
+  const effectiveBaseDate = baseDate || new Date().toISOString().slice(0, 10);
+  const effectiveDepTime = departureTime || '09:00:00';
+
   // Compute epoch for arrival at stop 0 (equals day departure time)
-  let currentArrivalEpoch = parseLocalToUtcEpoch(baseDate, departureTime, firstTz);
+  let currentArrivalEpoch = parseLocalToUtcEpoch(effectiveBaseDate, effectiveDepTime, firstTz);
   let previousDepartureEpoch = currentArrivalEpoch;
   let previousTimezone = firstTz;
   let previousOffsetMinutes = 0;
@@ -295,6 +299,14 @@ export function calculateTimelineCascade(
   let totalDriveSeconds = 0;
   let totalDwellMinutes = 0;
   let totalDistanceMiles = 0;
+
+  const formatOffsetMinutes = (mins: number): string => {
+    if (mins === 0) return 'Start';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return `+${m}m`;
+    return `+${h}h ${m.toString().padStart(2, '0')}m`;
+  };
 
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
@@ -356,6 +368,23 @@ export function calculateTimelineCascade(
         (arrivalDetails.offsetMinutes - previousOffsetMinutes) / 60;
     }
 
+    const firstStopArrivalEpoch = stops[0]?.arrivalEpochMs ?? currentArrivalEpoch;
+    const offsetArrivalSec = i === 0 ? 0 : Math.round((currentArrivalEpoch - firstStopArrivalEpoch) / 1000);
+    const offsetArrivalMin = Math.round(offsetArrivalSec / 60);
+    const offsetDepartureSec = Math.round((departureEpoch - firstStopArrivalEpoch) / 1000);
+    const offsetDepartureMin = Math.round(offsetDepartureSec / 60);
+
+    const arrivalShortTime = isAdHoc
+      ? (i === 0 ? 'Start' : formatOffsetMinutes(offsetArrivalMin))
+      : arrivalDetails.shortTime;
+
+    const departureShortTime = isAdHoc
+      ? (i === 0 && dwellMinutes === 0 ? 'Start' : formatOffsetMinutes(offsetDepartureMin))
+      : departureDetails.shortTime;
+
+    const arrivalTime = isAdHoc ? formatOffsetMinutes(offsetArrivalMin) : arrivalDetails.time;
+    const departureTime = isAdHoc ? formatOffsetMinutes(offsetDepartureMin) : departureDetails.time;
+
     stops.push({
       id: wp.id,
       name: wp.name,
@@ -375,10 +404,11 @@ export function calculateTimelineCascade(
       timezoneAbbreviation: arrivalDetails.abbreviation,
       timezoneOffsetMinutes: arrivalDetails.offsetMinutes,
       timezoneOffsetStr: arrivalDetails.offsetStr,
-      arrivalTime: arrivalDetails.time,
-      arrivalShortTime: arrivalDetails.shortTime,
-      departureTime: departureDetails.time,
-      departureShortTime: departureDetails.shortTime,
+      arrivalTime,
+      arrivalShortTime,
+      departureTime,
+      departureShortTime,
+      offsetMinutesFromStart: offsetArrivalMin,
       localDate: arrivalDetails.localDate,
       arrivalIso: arrivalDetails.isoWithOffset,
       departureIso: departureDetails.isoWithOffset,
@@ -410,9 +440,10 @@ export function calculateTimelineCascade(
     totalDwellMinutes,
     totalTripSeconds,
     totalDistanceMiles: Number(totalDistanceMiles.toFixed(2)),
-    startTime: initialStop ? initialStop.departureTime : '',
-    endTime: finalStop ? finalStop.arrivalTime : '',
+    startTime: isAdHoc ? 'Dynamic Start' : (initialStop ? initialStop.departureTime : ''),
+    endTime: isAdHoc ? (stops.length > 0 ? formatOffsetMinutes(Math.round(totalTripSeconds / 60)) : '') : (finalStop ? finalStop.arrivalTime : ''),
     timezonesCrossed: Array.from(timezonesSet),
+    isAdHoc,
   };
 }
 

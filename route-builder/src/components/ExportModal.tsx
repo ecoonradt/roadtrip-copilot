@@ -20,9 +20,10 @@ import type { Waypoint } from '../types/routing';
 import type { ScheduledStop, GoogleMapsRouteResult } from '../engine/types';
 import {
   formatMultiDayItinerary,
+  formatSingleRouteItinerary,
   exportItineraryToJson,
   downloadItineraryJson,
-  type MultiDayItineraryV2,
+  type ItineraryExportModel,
 } from '../engine/export';
 import {
   fetchDeviceStatus,
@@ -39,6 +40,7 @@ interface ExportModalProps {
   baseDate?: string;
   departureTime?: string;
   googleMapsRoute?: GoogleMapsRouteResult;
+  isAdHoc?: boolean;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
@@ -50,6 +52,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   baseDate = '2026-10-09',
   departureTime = '14:30:00',
   googleMapsRoute,
+  isAdHoc = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'handoff' | 'gmaps' | 'json'>('handoff');
   const [fileName, setFileName] = useState('sample_itinerary.json');
@@ -73,7 +76,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [activeGmapsQrLeg, setActiveGmapsQrLeg] = useState<number | null>(null);
 
   // Build the formatted V2 Itinerary object
-  const itineraryData: MultiDayItineraryV2 = useMemo(() => {
+  const itineraryData: ItineraryExportModel = useMemo(() => {
+    if (isAdHoc) {
+      return formatSingleRouteItinerary({
+        tripName,
+        waypoints,
+        scheduledStops,
+        isAdHoc: true,
+      });
+    }
     return formatMultiDayItinerary({
       tripName,
       startDate: baseDate,
@@ -87,7 +98,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         },
       ],
     });
-  }, [tripName, baseDate, departureTime, waypoints, scheduledStops]);
+  }, [tripName, baseDate, departureTime, waypoints, scheduledStops, isAdHoc]);
 
   const jsonString = useMemo(() => {
     return exportItineraryToJson(itineraryData, 2);
@@ -553,7 +564,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400 font-mono">
-                  Schema v2.0.0 &bull; {itineraryData.days[0]?.checkpoints.length || 0} checkpoints
+                  Schema v2.0.0 &bull; {'days' in itineraryData ? (itineraryData.days[0]?.checkpoints.length || 0) : (itineraryData.checkpoints.length || 0)} checkpoints
                 </span>
                 <button
                   onClick={handleCopyJson}

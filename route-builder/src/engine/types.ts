@@ -60,6 +60,7 @@ export interface ScheduledStop {
   // Unix epoch timestamps (ms) for exact arithmetic and comparison
   arrivalEpochMs: number;
   departureEpochMs: number;
+  offsetMinutesFromStart?: number;
 
   // Segment metrics from preceding stop (0 for the initial stop)
   driveDurationFromPreviousSeconds: number;
@@ -69,6 +70,8 @@ export interface ScheduledStop {
   isTimezoneBoundaryCrossing: boolean;
   timezoneShiftHours?: number; // e.g. +1 when moving from AZ (UTC-7) to NM (UTC-6)
 }
+
+export type SchedulingMode = 'forward' | 'backward' | 'adhoc';
 
 /**
  * Options and parameters provided to the forward timeline cascade engine.
@@ -80,6 +83,7 @@ export interface TimelineCascadeInput {
   waypoints: TimelineCascadeWaypoint[];
   driveDurationsSeconds?: number[]; // Pairwise driving durations between consecutive stops: [W0->W1, W1->W2, ...]
   driveDistancesMiles?: number[]; // Pairwise driving distances between consecutive stops
+  isAdHoc?: boolean;
 }
 
 /**
@@ -95,6 +99,7 @@ export interface TimelineCascadeResult {
   startTime: string; // Local departure time at stop 1
   endTime: string; // Local arrival time at final stop
   timezonesCrossed: string[]; // Unique list of timezones encountered along the route
+  isAdHoc?: boolean;
 }
 
 /**

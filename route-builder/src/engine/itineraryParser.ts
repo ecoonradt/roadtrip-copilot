@@ -12,6 +12,7 @@ export interface ParsedDay {
   origin?: string;
   destination?: string;
   notes?: string;
+  isAdHoc?: boolean;
 }
 
 export interface ParsedTrip {
@@ -20,6 +21,7 @@ export interface ParsedTrip {
   isMultiDay: boolean;
   dates?: { start: string; end: string };
   days: ParsedDay[];
+  isAdHoc?: boolean;
 }
 
 /**
@@ -135,6 +137,10 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
         ? ((data.destination as Record<string, unknown>).address as string)
         : undefined;
 
+    const hasExplicitDate = typeof data.date === 'string' && data.date.trim().length > 0;
+    const hasAdHocOffsets = rawCheckpoints.some((cp) => typeof cp.offset_minutes_from_start === 'number');
+    const isAdHocDay = Boolean(!hasExplicitDate || (hasAdHocOffsets && !rawCheckpoints.some((cp) => typeof cp.target_time === 'string' && cp.target_time.trim())));
+
     parsedDays.push({
       dayNumber: 1,
       date,
@@ -144,8 +150,11 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       waypoints,
       origin: originName,
       destination: destinationName,
+      isAdHoc: isAdHocDay,
     });
   }
+
+  const isTripAdHoc = !isMultiDay && Boolean(parsedDays[0]?.isAdHoc);
 
   let dates: { start: string; end: string } | undefined;
   if (data.dates && typeof data.dates === 'object') {
@@ -153,7 +162,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     if (typeof dObj.start === 'string' && typeof dObj.end === 'string') {
       dates = { start: dObj.start, end: dObj.end };
     }
-  } else if (parsedDays.length > 0) {
+  } else if (parsedDays.length > 0 && !isTripAdHoc) {
     dates = {
       start: parsedDays[0].date,
       end: parsedDays[parsedDays.length - 1].date,
@@ -166,6 +175,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     isMultiDay,
     dates,
     days: parsedDays,
+    isAdHoc: isTripAdHoc,
   };
 }
 
@@ -241,6 +251,7 @@ function convertRawCheckpointToWaypoint(
     lat,
     lng,
     target_time,
+    offset_minutes_from_start: typeof cp.offset_minutes_from_start === 'number' ? cp.offset_minutes_from_start : undefined,
     dwell_minutes,
     trigger_radius_miles,
     notification,
@@ -270,7 +281,7 @@ function normalizeTimeString(timeStr: string): string {
   return timeStr;
 }
 
-function serializeCheckpoint(w: Waypoint, idx?: number, total?: number): Record<string, unknown> {
+function serializeCheckpoint(w: Waypoint, idx?: number, total?: number, isAdHoc?: boolean): Record<string, unknown> {
   const isLast = total !== undefined && idx !== undefined ? idx === total - 1 : false;
   const isOvernightOrFinalDest = isLast && (w.type === 'lodging' || w.type === 'destination');
   const dwellMinutes = isOvernightOrFinalDest ? 0 : Math.max(0, Math.round(w.dwell_minutes || 0));
@@ -285,8 +296,12 @@ function serializeCheckpoint(w: Waypoint, idx?: number, total?: number): Record<
     trigger_radius_miles: w.trigger_radius_miles ?? 2.0,
   };
 
-  if (w.target_time) {
+  if (w.target_time && !isAdHoc) {
     cp.target_time = w.target_time;
+  }
+
+  if (w.offset_minutes_from_start !== undefined) {
+    cp.offset_minutes_from_start = Math.max(0, Math.round(w.offset_minutes_from_start));
   }
 
   if (w.notification && (w.notification.title || w.notification.message || w.notification.speech)) {
@@ -338,7 +353,9 @@ function serializeCheckpoint(w: Waypoint, idx?: number, total?: number): Record<
  * Serializes an in-memory ParsedTrip back into standard Android-compatible JSON.
  * Synchronizes target times with the dynamic schedule cascade to eliminate stale draft times.
  */
-export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, unknown> {
+export function serializeTripToItineraryJson(trip: ParsedTrip, options?: { isAdHoc?: boolean }): Record<string, unknown> {
+  const isAdHoc = Boolean(options?.isAdHoc ?? trip.isAdHoc);
+
   if (trip.isMultiDay) {
     return {
       trip_name: trip.tripName,
@@ -378,7 +395,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
           checkpoints: day.waypoints.map((w, idx) => {
             const cascadedTarget = cascadedStops[idx]?.arrivalTime;
             const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
-            return serializeCheckpoint(updatedWp, idx, day.waypoints.length);
+            return serializeCheckpoint(updatedWp, idx, day.waypoints.length, false);
           }),
         };
       }),
@@ -400,6 +417,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
         baseDate: singleDay.date,
         departureTime: singleDay.departureTime || '09:00:00',
         waypoints: singleDay.waypoints,
+        isAdHoc,
       });
       cascadedStops = cascade.stops;
     }
@@ -407,9 +425,8 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
     // fallback
   }
 
-  return {
+  const result: Record<string, unknown> = {
     trip_name: trip.tripName,
-    date: singleDay.date,
     timezone: singleDay.timezone || 'America/Phoenix',
     metadata: {
       version: '2.0.0',
@@ -419,9 +436,21 @@ export function serializeTripToItineraryJson(trip: ParsedTrip): Record<string, u
     origin: singleDay.origin,
     destination: singleDay.destination,
     checkpoints: singleDay.waypoints.map((w, idx) => {
-      const cascadedTarget = cascadedStops[idx]?.arrivalTime;
-      const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
-      return serializeCheckpoint(updatedWp, idx, singleDay.waypoints.length);
+      const cascadedStop = cascadedStops[idx];
+      const cascadedTarget = cascadedStop?.arrivalTime;
+      const offsetMin = cascadedStop?.offsetMinutesFromStart ?? w.offset_minutes_from_start ?? (idx * 15);
+      const updatedWp: Waypoint = {
+        ...w,
+        target_time: isAdHoc ? undefined : (cascadedTarget || w.target_time),
+        offset_minutes_from_start: offsetMin,
+      };
+      return serializeCheckpoint(updatedWp, idx, singleDay.waypoints.length, isAdHoc);
     }),
   };
+
+  if (!isAdHoc) {
+    result.date = singleDay.date;
+  }
+
+  return result;
 }

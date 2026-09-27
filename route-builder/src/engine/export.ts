@@ -97,6 +97,7 @@ export interface FormatSingleRouteOptions {
   destination?: string;
   waypoints?: Waypoint[];
   scheduledStops?: ScheduledStop[];
+  isAdHoc?: boolean;
 }
 
 /**
@@ -125,6 +126,7 @@ export function formatCheckpointV2(
   options?: {
     targetTime?: string;
     offsetMinutesFromStart?: number;
+    omitTargetTime?: boolean;
   }
 ): CheckpointV2 {
   const isScheduled = 'arrivalTime' in item;
@@ -142,12 +144,21 @@ export function formatCheckpointV2(
     trigger_radius_miles: normalizeTriggerRadius(item.trigger_radius_miles),
   };
 
-  if (targetTime) {
+  if (targetTime && !options?.omitTargetTime) {
     checkpoint.target_time = targetTime;
   }
 
-  if (options?.offsetMinutesFromStart !== undefined) {
-    checkpoint.offset_minutes_from_start = Math.max(0, Math.round(options.offsetMinutesFromStart));
+  const offsetMinutes =
+    options?.offsetMinutesFromStart !== undefined
+      ? options.offsetMinutesFromStart
+      : 'offsetMinutesFromStart' in item && typeof item.offsetMinutesFromStart === 'number'
+      ? item.offsetMinutesFromStart
+      : 'offset_minutes_from_start' in item && typeof item.offset_minutes_from_start === 'number'
+      ? item.offset_minutes_from_start
+      : undefined;
+
+  if (offsetMinutes !== undefined) {
+    checkpoint.offset_minutes_from_start = Math.max(0, Math.round(offsetMinutes));
   }
 
   if (item.notification && (item.notification.title || item.notification.message || item.notification.speech)) {
@@ -238,28 +249,33 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
  * Formats a single-day or ad-hoc test run route into a single-route V2 itinerary.
  */
 export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): SingleRouteItineraryV2 {
+  const isAdHoc = Boolean(options.isAdHoc);
   let checkpoints: CheckpointV2[] = [];
 
   if (options.scheduledStops && options.scheduledStops.length > 0) {
     const startEpochMs = options.scheduledStops[0].arrivalEpochMs;
     checkpoints = options.scheduledStops.map((stop) => {
       const offsetMinutes = Math.max(0, Math.round((stop.arrivalEpochMs - startEpochMs) / 60000));
-      return formatCheckpointV2(stop, { offsetMinutesFromStart: offsetMinutes });
+      return formatCheckpointV2(stop, {
+        offsetMinutesFromStart: offsetMinutes,
+        omitTargetTime: isAdHoc,
+      });
     });
   } else if (options.waypoints && options.waypoints.length > 0) {
     checkpoints = options.waypoints.map((wp, idx) => {
-      // If waypoint doesn't have an explicit offset, estimate 15 minutes per segment
-      const offset = idx * 15;
-      return formatCheckpointV2(wp, { offsetMinutesFromStart: offset });
+      const offset = wp.offset_minutes_from_start ?? idx * 15;
+      return formatCheckpointV2(wp, {
+        offsetMinutesFromStart: offset,
+        omitTargetTime: isAdHoc,
+      });
     });
   }
 
   const firstStopName = checkpoints[0]?.name;
   const lastStopName = checkpoints[checkpoints.length - 1]?.name;
 
-  return {
+  const result: SingleRouteItineraryV2 = {
     trip_name: options.tripName,
-    date: options.date || new Date().toISOString().split('T')[0],
     timezone: options.timezone || 'America/Phoenix',
     metadata: {
       version: '2.0.0',
@@ -271,6 +287,12 @@ export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): S
     destination: options.destination || lastStopName || 'Destination',
     checkpoints,
   };
+
+  if (!isAdHoc) {
+    result.date = options.date || new Date().toISOString().split('T')[0];
+  }
+
+  return result;
 }
 
 /**

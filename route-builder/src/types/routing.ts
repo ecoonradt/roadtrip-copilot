@@ -31,6 +31,7 @@ export interface Waypoint {
   lat: number;
   lng: number;
   target_time?: string;
+  offset_minutes_from_start?: number;
   dwell_minutes: number;
   trigger_radius_miles: number;
   notification?: WaypointNotification;
