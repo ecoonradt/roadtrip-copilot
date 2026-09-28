@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
+  Navigation,
 } from 'lucide-react';
 
 import type { Waypoint, WaypointType, GeocodeResult } from '../types/routing';
@@ -486,13 +487,32 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             <span className="text-xs font-bold text-white truncate">
                               {stop.name}
                             </span>
-                            {!isFirst && !isLast && originalWp?.is_route_anchor && (originalWp.dwell_minutes === 0 || originalWp.type === 'scenic_drive_by') && (
-                              <span
-                                className="text-[10px] text-amber-300 bg-amber-950/70 border border-amber-800/80 px-1 py-0.2 rounded font-semibold shrink-0"
-                                title="Route-Forcing Anchor in Google Maps (Forces scenic highway corridor)"
-                              >
-                                ⚓ Anchor
-                              </span>
+                            {!isFirst && !isLast && (originalWp?.dwell_minutes === 0 || originalWp?.type === 'scenic_drive_by') && (
+                              originalWp?.is_route_anchor ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateWaypoint(stop.id, { is_route_anchor: false });
+                                  }}
+                                  className="text-[10px] text-amber-300 bg-amber-950/70 hover:bg-amber-900/80 border border-amber-800/80 px-1.5 py-0.2 rounded font-semibold shrink-0 transition-colors cursor-pointer"
+                                  title="Route-Forcing Anchor in Google Maps. Click to switch to In-Car Audio Only."
+                                >
+                                  ⚓ Anchor
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateWaypoint(stop.id, { is_route_anchor: true, dwell_minutes: 0 });
+                                  }}
+                                  className="text-[10px] text-slate-300 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 px-1.5 py-0.2 rounded font-medium shrink-0 transition-colors cursor-pointer"
+                                  title="In-car spoken audio cue only. Click to make Route Anchor in Google Maps."
+                                >
+                                  🚗 Audio
+                                </button>
+                              )
                             )}
                             <span className="text-[10px] text-slate-400 capitalize bg-slate-900/60 px-1.5 py-0.2 rounded border border-slate-800 shrink-0">
                               {stop.type.replace(/_/g, ' ')}
@@ -630,6 +650,8 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                               const updates: Partial<Waypoint> = { type: newType };
                               if (isLast && (newType === 'lodging' || newType === 'destination')) {
                                 updates.dwell_minutes = 0;
+                              } else if (newType === 'scenic_drive_by') {
+                                updates.dwell_minutes = 0;
                               }
                               onUpdateWaypoint(stop.id, updates);
                             }}
@@ -655,11 +677,14 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           ) : (
                             <select
                               value={stop.dwell_minutes}
-                              onChange={(e) =>
-                                onUpdateWaypoint(stop.id, {
-                                  dwell_minutes: parseInt(e.target.value, 10) || 0,
-                                })
-                              }
+                              onChange={(e) => {
+                                const newDwell = parseInt(e.target.value, 10) || 0;
+                                const updates: Partial<Waypoint> = { dwell_minutes: newDwell };
+                                if (newDwell > 0 && originalWp?.is_route_anchor) {
+                                  updates.is_route_anchor = false;
+                                }
+                                onUpdateWaypoint(stop.id, updates);
+                              }}
                               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-sky-500"
                             >
                               {[0, 15, 30, 45, 60, 90, 120].map((m) => (
@@ -671,6 +696,65 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {/* Google Maps Navigation Role (Intermediate stops only) */}
+                      {!isFirst && !isLast && (
+                        <div className="p-2.5 bg-slate-950/60 border border-slate-800 rounded-lg space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                              <Navigation className="w-3.5 h-3.5 text-sky-400" />
+                              Google Maps Navigation Role
+                            </span>
+                            <span className="text-[10px] text-slate-500">1-click toggle</span>
+                          </div>
+
+                          {(stop.dwell_minutes === 0 || stop.type === 'scenic_drive_by') ? (
+                            <>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateWaypoint(stop.id, { is_route_anchor: true, dwell_minutes: 0 })}
+                                  className={`px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                    originalWp?.is_route_anchor
+                                      ? 'bg-amber-950/80 border border-amber-600 text-amber-200 shadow-sm'
+                                      : 'bg-slate-800/90 border border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                                  }`}
+                                  title="Forces Google Maps to navigate along this scenic road instead of an interstate"
+                                >
+                                  <span>⚓ Maps Route Anchor</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateWaypoint(stop.id, { is_route_anchor: false })}
+                                  className={`px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                                    !originalWp?.is_route_anchor
+                                      ? 'bg-sky-950/80 border border-sky-600 text-sky-200 shadow-sm'
+                                      : 'bg-slate-800/90 border border-slate-700/80 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                                  }`}
+                                  title="Excluded from Google Maps navigation; app speaks offline audio alert"
+                                >
+                                  <span>🚗 Audio Only</span>
+                                </button>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-tight">
+                                {originalWp?.is_route_anchor
+                                  ? '⚓ Included in Google Maps to force this scenic highway corridor.'
+                                  : '🚗 Co-Pilot speaks upcoming scenic notes; excluded from Google Maps navigation.'}
+                              </p>
+                            </>
+                          ) : (
+                            <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px]">
+                              <span className="text-slate-300 flex items-center gap-1.5">
+                                <span className="text-emerald-400 font-bold">✓</span>
+                                <span className="font-semibold">Physical Stop</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                Automatically included as Google Maps destination
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Status Chips Row */}
                       <div className="flex flex-wrap items-center gap-1.5 py-0.5 text-[11px]">
@@ -752,23 +836,6 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             title="No Google Place ID configured. Click to add or verify."
                           >
                             No Place ID
-                          </span>
-                        )}
-
-                        {!isFirst && !isLast && originalWp?.is_route_anchor && (originalWp.dwell_minutes === 0 || originalWp.type === 'scenic_drive_by') && (
-                          <span
-                            onClick={() => {
-                              setSelectedModal({
-                                waypoint: modalWp,
-                                initialTab: 'details',
-                                isFirst,
-                                isLast,
-                              });
-                            }}
-                            className="px-2 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/70 text-[10px] font-semibold cursor-pointer hover:bg-amber-900/80 transition-colors"
-                            title="Route-forcing pass-through anchor. Click to configure."
-                          >
-                            ⚓ Route Anchor
                           </span>
                         )}
 

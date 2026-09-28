@@ -133,6 +133,9 @@ describe('Route Scout Service & Prompts', () => {
 
       const domainPrompt = buildScoutDomainPrompt(request);
       expect(domainPrompt).toContain('GOOGLE MAPS NAVIGATION AUDITING & ROUTE ANCHORS');
+      expect(domainPrompt).toContain('OPERATIONAL "ONE ANCHOR PER CORRIDOR" RULE');
+      expect(domainPrompt).toContain('DIVERGENT SCENIC BYWAY');
+      expect(domainPrompt).toContain('AUDIO COMMENTARY ONLY');
       expect(domainPrompt).toContain('DIVIDED HIGHWAY HAZARDS');
       expect(domainPrompt).toContain('AUTHENTIC ENTRANCES FOR PHYSICAL STOPS');
       expect(domainPrompt).toContain('Address: "AZ-179 at Bell Rock Blvd, Sedona, AZ"');

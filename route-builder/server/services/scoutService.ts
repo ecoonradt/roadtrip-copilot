@@ -150,11 +150,12 @@ GUIDELINES:
      * Flag these contradictions clearly to the driver and emit an "update_waypoint" card with the corrected "newId" and updated "notification" copy to resolve the discrepancy.
 12. GOOGLE MAPS NAVIGATION AUDITING & ROUTE ANCHORS:
    - When the driver asks to audit waypoints for Google Maps navigation, in-car accuracy, or route glitches (e.g. "some waypoints cause U-turns", "snapping to wrong side of divided highway", "wrong hotel entrance"):
-     * STRICT ROUTE-FORCING ANCHOR DISCIPLINE (is_route_anchor):
-       - A Route Anchor is an INFREQUENTLY used feature. It is ONLY for in-transit pass-through milestones (0m dwell, scenic_drive_by or highway junction via-points) whose sole purpose is to steer Google Maps along a scenic highway corridor (e.g. AZ-179 through Sedona) instead of an interstate bypass (I-17).
-       - NEVER set "is_route_anchor": true on Origin or Destination (they are already the start and end of navigation).
-       - NEVER set "is_route_anchor": true on Physical Stops (lodging, meals, fuel, overlooks with dwell > 0). They are physical stopping places, already included as destinations in navigation.
-       - Pure audio commentary cues along an already locked corridor should have "is_route_anchor": false so they do not clutter Google Maps.
+     * ROUTE-FORCING ANCHORS VS SCENIC DRIVE-BYS (is_route_anchor):
+       - A Route Anchor is specifically for in-transit pass-through milestones (dwell: 0m, scenic_drive_by) whose purpose is to steer Google Maps along a scenic highway corridor (e.g. AZ-179 through Sedona, Historic Route 66, US-89A) instead of an interstate bypass (I-17 or I-40).
+       - OPERATIONAL "ONE ANCHOR PER CORRIDOR" RULE:
+         1. DIVERGENT SCENIC BYWAY: When suggesting or auditing waypoints along a scenic byway, secondary highway, or mountain pass that runs parallel to or diverges from a faster freeway/interstate, mark the FIRST in-transit milestone entering that corridor with "is_route_anchor": true (dwell: 0m). This forces Google Maps to navigate via the scenic road.
+         2. AUDIO COMMENTARY ONLY: Any subsequent scenic drive-bys, vistas, or audio cues along that SAME highway corridor must have "is_route_anchor": false (dwell: 0m). They will trigger in-car audio commentary and heads-up alerts from Roadtrip Co-Pilot without cluttering Google Maps navigation or consuming its 9-waypoint limit.
+         3. PHYSICAL STOPS & ENDPOINTS: Never set "is_route_anchor": true on Physical Stops (lodging, meals, fuel, overlooks with dwell > 0) or Origin/Destination. They are physical stopping destinations, already included in Google Maps navigation. Always set "is_route_anchor": false on them.
      * DIVIDED HIGHWAY HAZARDS:
        - Divided highways with central medians will force Google Maps into unwanted U-turns at roundabouts if an in-transit coordinate is placed slightly closer to the opposing curb or opposite storefront.
        - To fix this, place the anchor coordinate directly at a neutral roundabout center node or major highway intersection where traffic naturally flows through without U-turns, and set "is_route_anchor": true if it serves as a corridor pass-through milestone.
@@ -173,22 +174,20 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
 [
   {
     "action": "add_waypoint",
-    "name": "Human-Friendly Stop Name",
-    "place_name": "Clean Establishment Name",
-    "type": "scenic_pull_off",
-    "lat": 35.1234,
-    "lng": -111.5678,
-    "dwell_minutes": 20,
+    "name": "AZ-179 / Red Rock Scenic Byway",
+    "place_name": "Red Rock Scenic Byway",
+    "type": "scenic_drive_by",
+    "lat": 34.7891,
+    "lng": -111.7654,
+    "dwell_minutes": 0,
     "trigger_radius_miles": 2.0,
-    "address": "123 Scenic Hwy, City, ST 12345",
-    "google_place_id": "ChIJ...",
-    "is_route_anchor": false,
+    "is_route_anchor": true,
     "insertAfterWaypointId": "optional_preceding_waypoint_id",
-    "reason": "Clear explanation of why this stop is recommended.",
+    "reason": "Locks Google Maps along scenic AZ-179 corridor instead of I-17 bypass.",
     "notification": {
-      "title": "Short Title (<=30 chars)",
-      "message": "Heads-up alert text (<=2 lines)",
-      "speech": "Natural conversational spoken TTS audio (15-25 words, ~10s)"
+      "title": "Red Rock Scenic Byway",
+      "message": "Approaching AZ-179 scenic corridor into Sedona.",
+      "speech": "Approaching Red Rock Scenic Byway on Highway one seventy-nine ahead."
     }
   },
   {
