@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -9,7 +9,7 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
-import { X, Compass, Trash2 } from 'lucide-react';
+import { X, Compass, Trash2, Maximize2 } from 'lucide-react';
 import type { Waypoint, RouteResponse } from '../types/routing';
 
 export interface ScoutPreviewPin {
@@ -96,30 +96,85 @@ const MapResizeHandler: React.FC<{ isScoutOpen?: boolean }> = ({ isScoutOpen }) 
   return null;
 };
 
-// Auto-adjust map viewport to contain all waypoints and route path
+// Auto-adjust map viewport to contain all waypoints and route path (signature-gated to preserve zoom on save)
 const MapViewportManager: React.FC<{
   waypoints: Waypoint[];
   routeCoordinates: [number, number][];
-  isScoutOpen?: boolean;
-}> = ({ waypoints, routeCoordinates, isScoutOpen }) => {
+}> = ({ waypoints, routeCoordinates }) => {
   const map = useMap();
+  const lastSignatureRef = useRef<string>('');
 
   useEffect(() => {
-    if (waypoints.length === 0) return;
+    if (waypoints.length === 0) {
+      lastSignatureRef.current = '';
+      return;
+    }
+
+    // Generate a spatial signature based on coordinates and route availability
+    const coordsSignature = waypoints
+      .map((w) => `${w.lat.toFixed(5)},${w.lng.toFixed(5)}`)
+      .join(';');
+    const hasRoute = routeCoordinates.length > 0;
+    const currentSignature = `${coordsSignature}:${hasRoute}`;
+
+    // Preserve user zoom and pan if the route geometry and coordinates have not changed
+    if (currentSignature === lastSignatureRef.current) {
+      return;
+    }
+
+    lastSignatureRef.current = currentSignature;
 
     // Ensure Leaflet has up-to-date viewport dimensions before fitting bounds
     map.invalidateSize({ pan: false });
 
-    if (routeCoordinates.length > 0) {
+    if (hasRoute) {
       const bounds = L.latLngBounds(routeCoordinates);
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
     } else {
       const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
     }
-  }, [map, waypoints, routeCoordinates, isScoutOpen]);
+  }, [map, waypoints, routeCoordinates]);
 
   return null;
+};
+
+// 1-Click floating "Fit Route" control to re-frame the trip at any time
+const FitRouteButton: React.FC<{
+  waypoints: Waypoint[];
+  routeCoordinates: [number, number][];
+}> = ({ waypoints, routeCoordinates }) => {
+  const map = useMap();
+
+  if (waypoints.length === 0) return null;
+
+  const handleFit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    map.invalidateSize({ pan: false });
+    if (routeCoordinates.length > 0) {
+      const bounds = L.latLngBounds(routeCoordinates);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+    } else if (waypoints.length > 0) {
+      const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+    }
+  };
+
+  return (
+    <div className="absolute top-4 left-4 z-[1000] pointer-events-auto">
+      <button
+        type="button"
+        onClick={handleFit}
+        onDoubleClick={(e) => e.stopPropagation()}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 shadow-xl backdrop-blur-md text-xs font-medium transition-all cursor-pointer select-none"
+        title="Fit route to screen"
+        aria-label="Fit route to screen"
+      >
+        <Maximize2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+        <span>Fit Route</span>
+      </button>
+    </div>
+  );
 };
 
 // Map click listener helper
@@ -197,7 +252,10 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         <MapViewportManager
           waypoints={waypoints}
           routeCoordinates={polylineCoords}
-          isScoutOpen={isScoutOpen}
+        />
+        <FitRouteButton
+          waypoints={waypoints}
+          routeCoordinates={polylineCoords}
         />
         <MapClickHandler onMapClick={onMapClick} />
         <ScoutPreviewFlyTo previewPin={scoutPreviewPin} />

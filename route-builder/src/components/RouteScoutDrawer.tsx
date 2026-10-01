@@ -158,41 +158,41 @@ function InvestigationActivityLog({ activities }: { activities: ScoutActivity[] 
 // Markdown formatter for assistant responses powered by react-markdown + remark-gfm
 function FormattedAssistantText({ text }: { text: string }) {
   return (
-    <div className="space-y-1.5 text-xs text-slate-200 leading-relaxed select-text cursor-text">
+    <div className="space-y-2 text-sm text-slate-200 leading-relaxed select-text cursor-text">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => (
-            <h2 className="text-sm font-bold text-white mt-3.5 mb-1.5 border-b border-slate-750 pb-1">
+            <h2 className="text-base font-bold text-white mt-3.5 mb-1.5 border-b border-slate-750 pb-1">
               {children}
             </h2>
           ),
           h2: ({ children }) => (
-            <h3 className="text-xs font-bold text-white mt-3 mb-1">{children}</h3>
+            <h3 className="text-sm font-bold text-white mt-3 mb-1">{children}</h3>
           ),
           h3: ({ children }) => (
-            <h4 className="text-xs font-bold text-cyan-300 mt-2.5 mb-1 flex items-center gap-1.5">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-300 mt-2.5 mb-1 flex items-center gap-1.5">
               <span className="w-1 h-3 bg-cyan-400 rounded-full shrink-0" />
               <span>{children}</span>
             </h4>
           ),
           h4: ({ children }) => (
-            <h5 className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider mt-2 mb-0.5">
+            <h5 className="text-xs font-bold text-cyan-300 uppercase tracking-wider mt-2 mb-0.5">
               {children}
             </h5>
           ),
-          p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
+          p: ({ children }) => <p className="my-1.5 leading-relaxed">{children}</p>,
           strong: ({ children }) => (
             <strong className="text-white font-semibold">{children}</strong>
           ),
           em: ({ children }) => <em className="text-slate-200 italic">{children}</em>,
           code: ({ children }) => (
-            <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-750 font-mono text-[11px] text-cyan-200">
+            <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-750 font-mono text-xs text-cyan-200">
               {children}
             </code>
           ),
           pre: ({ children }) => (
-            <pre className="p-2 rounded-lg bg-slate-900 border border-slate-750 overflow-x-auto text-[11px] font-mono my-1.5 text-cyan-200">
+            <pre className="p-2 rounded-lg bg-slate-900 border border-slate-750 overflow-x-auto text-xs font-mono my-1.5 text-cyan-200">
               {children}
             </pre>
           ),
@@ -202,22 +202,22 @@ function FormattedAssistantText({ text }: { text: string }) {
             </blockquote>
           ),
           ul: ({ children }) => (
-            <ul className="list-disc list-inside space-y-1 my-1 pl-1 marker:text-cyan-400">
+            <ul className="list-disc list-inside space-y-1.5 my-1.5 pl-1 marker:text-cyan-400">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal list-inside space-y-1 my-1 pl-1 marker:text-cyan-400 marker:font-mono">
+            <ol className="list-decimal list-inside space-y-1.5 my-1.5 pl-1 marker:text-cyan-400 marker:font-mono">
               {children}
             </ol>
           ),
           li: ({ children }) => (
-            <li className="text-slate-200 leading-snug">{children}</li>
+            <li className="text-slate-200 leading-relaxed">{children}</li>
           ),
           hr: () => <hr className="border-slate-700/80 my-2" />,
           table: ({ children }) => (
             <div className="overflow-x-auto my-2">
-              <table className="min-w-full text-left border-collapse border border-slate-750 text-[11px]">
+              <table className="min-w-full text-left border-collapse border border-slate-750 text-xs">
                 {children}
               </table>
             </div>
@@ -955,16 +955,16 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         {/* Empty state & Quick Prompts */}
         {currentMessages.length === 0 && (
           <div className="space-y-4 py-2">
-            <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-2xl">
+            <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl">
               <div className="flex items-center gap-2 mb-1.5">
                 <Sparkles className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-xs font-bold text-white">
+                <h3 className="text-sm font-bold text-white">
                   {scope.type === 'day'
                     ? 'Day Corridor Advisor'
                     : 'Waypoint Verification & Advice'}
                 </h3>
               </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed">
+              <p className="text-xs text-slate-300 leading-relaxed">
                 {scope.type === 'day'
                   ? `Ask about overlooks, vetted lunch spots, or fuel stops along Day ${
                       scope.dayNumber ?? activeDayIndex + 1
@@ -978,7 +978,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             {/* Quick Prompts */}
             {quickPrompts.length > 0 && (
               <div className="space-y-1.5">
-                <div className="text-[11px] font-semibold text-slate-400 px-1">
+                <div className="text-xs font-semibold text-slate-400 px-1">
                   Suggested Questions:
                 </div>
                 <div className="space-y-1.5">
@@ -987,7 +987,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       key={i}
                       onClick={aiAvailable ? () => handleSendMessage(prompt) : undefined}
                       disabled={!aiAvailable}
-                      className={`w-full text-left p-2 rounded-xl border text-xs transition-all flex items-center justify-between group ${
+                      className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-center justify-between group ${
                         !aiAvailable
                           ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                           : 'bg-slate-800/70 hover:bg-slate-800 border-slate-700/60 hover:border-cyan-500/50 text-cyan-200 cursor-pointer'
@@ -999,7 +999,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       }
                     >
                       <span>{prompt}</span>
-                      <Send className="w-3 h-3 text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2" />
+                      <Send className="w-3.5 h-3.5 text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2" />
                     </button>
                   ))}
                 </div>
@@ -1018,17 +1018,17 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           >
             {msg.role === 'user' ? (
               // User message bubble
-              <div className="max-w-[85%] bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm px-3 py-2 text-xs shadow-md select-text cursor-text">
+              <div className="max-w-[85%] bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm shadow-md select-text cursor-text leading-relaxed">
                 {msg.content}
               </div>
             ) : (
               // Assistant message bubble
               <div className="w-full space-y-2 select-text cursor-text">
-                <div className="w-full bg-slate-850 border border-slate-750 rounded-2xl rounded-tl-sm p-3 shadow-md">
+                <div className="w-full bg-slate-850 border border-slate-750 rounded-2xl rounded-tl-sm p-3.5 shadow-md">
                   <div className="flex items-center justify-between gap-1 mb-2 select-none">
                     <div className="flex items-center gap-1.5 text-cyan-400">
                       <Compass className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider">
+                      <span className="text-[11px] font-bold uppercase tracking-wider">
                         Route Scout
                       </span>
                       {msg.engine && (
@@ -1058,10 +1058,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                   {msg.activities && msg.activities.length > 0 ? (
                     <InvestigationActivityLog activities={msg.activities} />
                   ) : msg.thought ? (
-                    <div className="mb-2 px-2.5 py-1.5 bg-slate-800/80 border border-slate-700/60 rounded-xl text-[11px] text-slate-300 flex items-start gap-2">
+                    <div className="mb-2 px-3 py-2 bg-slate-800/80 border border-slate-700/60 rounded-xl text-xs text-slate-300 flex items-start gap-2">
                       <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
                       <div className="leading-snug">
-                        <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block font-mono">
+                        <span className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider block font-mono">
                           Scout Investigation
                         </span>
                         <span className="italic text-slate-300">{msg.thought}</span>
@@ -1089,8 +1089,8 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                 {/* Structured Suggestion Action Cards */}
                 {msg.suggestions && msg.suggestions.length > 0 && (
                   <div className="space-y-2 pt-1">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 flex items-center gap-1">
-                      <Layers className="w-3 h-3 text-cyan-400" />
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-cyan-400" />
                       <span>Actionable Suggestions ({msg.suggestions.length})</span>
                     </div>
 
@@ -1105,32 +1105,32 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       return (
                         <div
                           key={sug.id}
-                          className="bg-slate-950/85 border border-slate-800 hover:border-slate-700 rounded-xl p-2.5 space-y-2 transition-colors shadow-lg"
+                          className="bg-slate-950/85 border border-slate-800 hover:border-slate-700 rounded-xl p-3 space-y-2 transition-colors shadow-lg"
                         >
                           {/* Card Header: Type Badge & Name */}
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <div className="flex items-center gap-1.5 mb-0.5">
-                                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider bg-slate-800 text-cyan-300 font-mono">
+                                <span className="text-[11px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-slate-800 text-cyan-300 font-mono">
                                   {sug.type.replace(/_/g, ' ')}
                                 </span>
-                                <span className="text-[10px] text-slate-400 font-mono">
+                                <span className="text-[11px] text-slate-400 font-mono">
                                   {sug.action === 'add_waypoint' ? 'New Stop' : 'Update'}
                                 </span>
                               </div>
-                              <h4 className="text-xs font-bold text-white leading-snug">
+                              <h4 className="text-sm font-bold text-white leading-snug">
                                 {sug.name}
                               </h4>
                             </div>
                           </div>
 
                           {/* Reason */}
-                          <p className="text-[11px] text-slate-300 leading-relaxed italic">
+                          <p className="text-xs text-slate-300 leading-relaxed italic">
                             &ldquo;{sug.reason}&rdquo;
                           </p>
 
                           {/* Metadata row */}
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono bg-slate-900/80 px-2 py-1 rounded-lg">
+                          <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono bg-slate-900/80 px-2 py-1 rounded-lg">
                             <span>
                               {sug.lat.toFixed(4)}, {sug.lng.toFixed(4)}
                             </span>
@@ -1146,7 +1146,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
                           {/* Sync ID Badge */}
                           {sug.newId && (
-                            <div className="flex items-center gap-1.5 text-[10px] text-cyan-300 font-mono px-0.5">
+                            <div className="flex items-center gap-1.5 text-[11px] text-cyan-300 font-mono px-0.5">
                               <span className="text-slate-400">Sync ID:</span>
                               <span className="bg-slate-900 border border-cyan-800/60 px-1.5 py-0.5 rounded text-cyan-200">
                                 {sug.newId}
@@ -1156,7 +1156,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
                           {/* Navigation & Address Metadata Badges */}
                           {(sug.is_route_anchor || sug.address || sug.google_place_id || sug.place_name) && (
-                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono px-0.5">
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono px-0.5">
                               {sug.place_name && sug.place_name !== sug.name && (
                                 <span className="inline-flex items-center gap-1 bg-teal-950/70 border border-teal-800/80 text-teal-300 px-1.5 py-0.5 rounded" title={`Google Maps Query: ${sug.place_name}`}>
                                   🗺️ {sug.place_name}
@@ -1182,13 +1182,13 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
                           {/* Alert & Audio Notification Preview */}
                           {sug.notification && (
-                            <div className="bg-slate-900/80 border border-slate-800/90 rounded-lg p-2 space-y-1 text-[11px]">
-                              <div className="flex items-center gap-1.5 text-cyan-300 font-semibold text-[10px] uppercase tracking-wider">
+                            <div className="bg-slate-900/80 border border-slate-800/90 rounded-lg p-2 space-y-1 text-xs">
+                              <div className="flex items-center gap-1.5 text-cyan-300 font-semibold text-[11px] uppercase tracking-wider">
                                 <Volume2 className="w-3 h-3 text-cyan-400 shrink-0" />
                                 <span className="truncate">Alert: {sug.notification.title}</span>
                               </div>
                               {sug.notification.speech && (
-                                <p className="text-slate-300 text-[10px] italic leading-snug line-clamp-2">
+                                <p className="text-slate-300 text-[11px] italic leading-snug line-clamp-2">
                                   &ldquo;{sug.notification.speech}&rdquo;
                                 </p>
                               )}
@@ -1338,8 +1338,8 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       scope.waypointName || 'this stop'
                     }...`
               }
-              style={{ minHeight: '38px', maxHeight: '120px' }}
-              className={`w-full resize-none overflow-y-auto border rounded-xl px-3 py-2 text-xs transition-colors focus:outline-none ${
+              style={{ minHeight: '42px', maxHeight: '120px' }}
+              className={`w-full resize-none overflow-y-auto border rounded-xl px-3.5 py-2.5 text-sm transition-colors focus:outline-none ${
                 !aiAvailable
                   ? 'bg-slate-850 border-slate-800 text-slate-500 placeholder-slate-600 cursor-not-allowed'
                   : 'bg-slate-800 border-slate-700 text-white placeholder-slate-500 focus:border-cyan-500'
@@ -1367,7 +1367,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             )}
           </button>
         </form>
-        <div className="mt-1 text-[10px] text-slate-500 text-center">
+        <div className="mt-1.5 text-[11px] text-slate-500 text-center">
           Press Enter to send &bull; Suggestions can be previewed or added in 1-click
         </div>
       </div>

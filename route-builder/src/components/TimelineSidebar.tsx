@@ -507,7 +507,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                     e.stopPropagation();
                                     onUpdateWaypoint(stop.id, { is_route_anchor: false });
                                   }}
-                                  className="text-[10px] text-amber-300 bg-amber-950/70 hover:bg-amber-900/80 border border-amber-800/80 px-1.5 py-0.2 rounded font-semibold shrink-0 transition-colors cursor-pointer"
+                                  className="text-[11px] text-amber-300 bg-amber-950/70 hover:bg-amber-900/80 border border-amber-800/80 px-1.5 py-0.5 rounded font-semibold shrink-0 transition-colors cursor-pointer"
                                   title="Route-Forcing Anchor in Google Maps. Click to switch to In-Car Audio Only."
                                 >
                                   ⚓ Anchor
@@ -519,14 +519,14 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                     e.stopPropagation();
                                     onUpdateWaypoint(stop.id, { is_route_anchor: true, dwell_minutes: 0 });
                                   }}
-                                  className="text-[10px] text-slate-300 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 px-1.5 py-0.2 rounded font-medium shrink-0 transition-colors cursor-pointer"
+                                  className="text-[11px] text-slate-300 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 px-1.5 py-0.5 rounded font-medium shrink-0 transition-colors cursor-pointer"
                                   title="In-car spoken audio cue only. Click to make Route Anchor in Google Maps."
                                 >
                                   🚗 Audio
                                 </button>
                               )
                             )}
-                            <span className="text-[10px] text-slate-400 capitalize bg-slate-900/60 px-1.5 py-0.2 rounded border border-slate-800 shrink-0">
+                            <span className="text-[11px] text-slate-400 capitalize bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800 shrink-0">
                               {stop.type.replace(/_/g, ' ')}
                             </span>
                           </div>
@@ -688,7 +688,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           {isLast ? (
                             <div className="px-2 py-1.5 bg-amber-950/40 border border-amber-800/60 rounded-lg text-xs text-amber-300 font-mono flex items-center justify-between">
                               <span>🌙 Overnight</span>
-                              <span className="text-[10px] text-amber-400/80">0m</span>
+                              <span className="text-[11px] text-amber-400/80">0m</span>
                             </div>
                           ) : (
                             <select
@@ -721,7 +721,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                               <Navigation className="w-3.5 h-3.5 text-sky-400" />
                               Google Maps Navigation Role
                             </span>
-                            <span className="text-[10px] text-slate-500">1-click toggle</span>
+                            <span className="text-[11px] text-slate-500">1-click toggle</span>
                           </div>
 
                           {(stop.dwell_minutes === 0 || stop.type === 'scenic_drive_by') ? (
@@ -752,7 +752,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                   <span>🚗 Audio Only</span>
                                 </button>
                               </div>
-                              <p className="text-[10px] text-slate-400 leading-tight">
+                              <p className="text-[11px] text-slate-400 leading-tight">
                                 {originalWp?.is_route_anchor
                                   ? '⚓ Included in Google Maps to force this scenic highway corridor.'
                                   : '🚗 Co-Pilot speaks upcoming scenic notes; excluded from Google Maps navigation.'}
@@ -764,7 +764,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                 <span className="text-emerald-400 font-bold">✓</span>
                                 <span className="font-semibold">Physical Stop</span>
                               </span>
-                              <span className="text-[10px] text-slate-400">
+                              <span className="text-[11px] text-slate-400">
                                 Automatically included as Google Maps destination
                               </span>
                             </div>
@@ -784,7 +784,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                 isLast,
                               });
                             }}
-                            className="px-2 py-0.5 rounded bg-teal-950/70 text-teal-300 border border-teal-800/60 font-mono text-[10px] cursor-pointer hover:bg-teal-900/80 transition-colors truncate max-w-[180px]"
+                            className="px-2 py-0.5 rounded bg-teal-950/70 text-teal-300 border border-teal-800/60 font-mono text-[11px] cursor-pointer hover:bg-teal-900/80 transition-colors truncate max-w-[180px]"
                             title={`Google Maps Establishment Name: ${originalWp.place_name}. Click to view or edit.`}
                           >
                             🗺️ {originalWp.place_name}
@@ -833,7 +833,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                 isLast,
                               });
                             }}
-                            className="px-2 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono text-[10px] cursor-pointer hover:bg-emerald-900/80 transition-colors"
+                            className="px-2 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono text-[11px] cursor-pointer hover:bg-emerald-900/80 transition-colors"
                             title={`Google Place ID: ${originalWp.google_place_id}. Click to view or clear.`}
                           >
                             ✓ Place ID
@@ -848,7 +848,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                 isLast,
                               });
                             }}
-                            className="px-2 py-0.5 rounded bg-amber-950/40 text-amber-400/80 border border-amber-900/50 text-[10px] cursor-pointer hover:bg-amber-900/60 transition-colors"
+                            className="px-2 py-0.5 rounded bg-amber-950/40 text-amber-400/80 border border-amber-900/50 text-[11px] cursor-pointer hover:bg-amber-900/60 transition-colors"
                             title="No Google Place ID configured. Click to add or verify."
                           >
                             No Place ID
@@ -871,7 +871,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             🔔 {stop.notification.title}
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded bg-slate-800/50 text-slate-500 border border-slate-800 text-[10px]">
+                          <span className="px-2 py-0.5 rounded bg-slate-800/50 text-slate-500 border border-slate-800 text-[11px]">
                             No audio alert
                           </span>
                         )}

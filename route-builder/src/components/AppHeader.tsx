@@ -150,7 +150,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     : 'bg-emerald-400'
                 }`}
               />
-              <span className="text-[10px]">
+              <span className="text-[11px]">
                 {isLoadingRoute
                   ? 'Calculating...'
                   : routeError
@@ -171,7 +171,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             title="Switch itinerary, import JSON file, or start a new route"
           >
             <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            <span className="font-semibold text-white truncate max-w-[130px] sm:max-w-[190px]">
+            <span className="text-sm font-semibold text-white truncate max-w-[130px] sm:max-w-[190px]">
               {currentTripName}
             </span>
             <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
@@ -304,7 +304,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     <div className="font-semibold text-white">
                       Must Depart: {backwardInfo.requiredDepartureTime.slice(0, 5)} ({backwardInfo.originTimezone.split('/')[1]})
                     </div>
-                    <div className="text-[10px] text-indigo-300 mt-0.5">
+                    <div className="text-[11px] text-indigo-300 mt-0.5">
                       To reach destination by {targetArrivalTime.slice(0, 5)} ({backwardInfo.destinationTimezone.split('/')[1]}).
                     </div>
                   </div>
@@ -390,7 +390,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                           <div className="text-xs font-semibold text-white truncate">
                             {leg.title}
                           </div>
-                          <div className="text-[10px] text-slate-400 font-mono">
+                          <div className="text-[11px] text-slate-400 font-mono">
                             {leg.waypointCount} points
                           </div>
                         </div>

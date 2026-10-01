@@ -567,7 +567,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                       <Navigation className="w-3.5 h-3.5" />
                       <span>Test on Google Maps ↗</span>
                     </button>
-                    <span className="text-[10px] text-slate-500">
+                    <span className="text-[11px] text-slate-500">
                       Verifies address / place ID in browser
                     </span>
                   </div>
@@ -680,7 +680,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                         Card Title (max 30 chars)
                       </label>
                       <span
-                        className={`text-[10px] font-mono ${
+                        className={`text-[11px] font-mono ${
                           title.length > 30 ? 'text-rose-400 font-bold' : 'text-slate-500'
                         }`}
                       >
