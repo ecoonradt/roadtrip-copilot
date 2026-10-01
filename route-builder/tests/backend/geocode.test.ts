@@ -176,7 +176,7 @@ describe('Nominatim Geocoding Proxy (/api/routing/geocode)', () => {
       name: 'PetSmart',
       placeName: 'PetSmart',
       address: '1700 Willow Pass Road, Concord, CA 94520',
-      category: 'scenic_pull_off',
+      category: 'stop',
     });
   });
 

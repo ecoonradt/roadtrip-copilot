@@ -43,6 +43,23 @@ export function inferWaypointType(name: string, id: string, index: number, total
   if (lower.includes('fuel') || lower.includes('gas') || lower.includes('chevron') || lower.includes('shell') || lower.includes('charge')) {
     return 'fuel';
   }
+  if (
+    lower.includes('grocery') ||
+    lower.includes('safeway') ||
+    lower.includes('trader joe') ||
+    lower.includes('walmart') ||
+    lower.includes('target') ||
+    lower.includes('supermarket') ||
+    lower.includes('costco') ||
+    lower.includes('market') ||
+    lower.includes('pharmacy') ||
+    lower.includes('walgreens') ||
+    lower.includes('cvs') ||
+    lower.includes('errand') ||
+    lower.includes('store')
+  ) {
+    return 'stop';
+  }
   if (lower.includes('scenic') || lower.includes('vista') || lower.includes('pull-off') || lower.includes('overlook') || lower.includes('canyon') || lower.includes('monument') || lower.includes('pass')) {
     return 'scenic_pull_off';
   }
@@ -209,9 +226,11 @@ function convertRawCheckpointToWaypoint(
     'meal',
     'fuel',
     'lodging',
+    'stop',
   ];
 
-  const rawType = typeof cp.type === 'string' ? (cp.type as WaypointType) : undefined;
+  const normalizedInputType = cp.type === 'general_stop' ? 'stop' : cp.type;
+  const rawType = typeof normalizedInputType === 'string' ? (normalizedInputType as WaypointType) : undefined;
   const type: WaypointType = rawType && validTypes.includes(rawType)
     ? rawType
     : inferWaypointType(name, id, idx, total);

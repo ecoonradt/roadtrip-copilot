@@ -122,7 +122,27 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     expect(inferWaypointType('Hampton Inn Flagstaff', 'id2', 1, 4)).toBe('lodging');
     expect(inferWaypointType('Lumberyard Brewing Company', 'id3', 2, 4)).toBe('meal');
     expect(inferWaypointType('Shell Gas Station', 'id4', 2, 4)).toBe('fuel');
-    expect(inferWaypointType('Final Dropoff', 'id5', 3, 4)).toBe('destination');
+    expect(inferWaypointType('Safeway Supermarket', 'id5', 2, 5)).toBe('stop');
+    expect(inferWaypointType("Trader Joe's Grocery", 'id6', 2, 5)).toBe('stop');
+    expect(inferWaypointType('Walgreens Pharmacy', 'id7', 2, 5)).toBe('stop');
+    expect(inferWaypointType('Final Dropoff', 'id8', 4, 5)).toBe('destination');
+  });
+
+  it('correctly handles stop and general_stop types in parsed itineraries', () => {
+    const raw = {
+      trip_name: 'Errand Route',
+      checkpoints: [
+        { id: '1', name: 'Start', type: 'origin', lat: 34.0, lng: -111.0 },
+        { id: '2', name: 'Whole Foods Market', type: 'stop', lat: 34.1, lng: -111.1, dwell_minutes: 25 },
+        { id: '3', name: 'Target Errand', type: 'general_stop', lat: 34.2, lng: -111.2 },
+        { id: '4', name: 'End', type: 'destination', lat: 34.3, lng: -111.3 },
+      ],
+    };
+    const trip = parseItineraryJson(raw);
+    expect(trip.days[0].waypoints[1].type).toBe('stop');
+    expect(trip.days[0].waypoints[1].dwell_minutes).toBe(25);
+    expect(trip.days[0].waypoints[2].type).toBe('stop'); // normalized from general_stop
+    expect(trip.days[0].waypoints[2].dwell_minutes).toBe(20); // default dwell
   });
 
   it('serializes ParsedTrip back to valid JSON round-trip', () => {

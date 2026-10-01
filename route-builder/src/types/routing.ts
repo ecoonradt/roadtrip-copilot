@@ -5,7 +5,8 @@ export type WaypointType =
   | 'scenic_drive_by'
   | 'meal'
   | 'fuel'
-  | 'lodging';
+  | 'lodging'
+  | 'stop';
 
 export interface GeocodeResult {
   lat: number;

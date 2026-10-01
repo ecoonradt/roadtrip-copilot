@@ -181,4 +181,77 @@ class LocationTrackerLoopRouteTest {
         assertEquals("dest_home", lastResult!!.alerts[0].id)
         assertNull("All waypoints completed after skip", lastResult!!.nextCheckpoint)
     }
+
+    @Test
+    fun testGenericStopIsSilentAndUpdatesPaceAndMilestones() {
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+
+        val routeWithGenericStop = listOf(
+            Checkpoint(
+                id = "origin_start",
+                name = "Home Departure",
+                lat = 42.65260,
+                lng = -73.7870,
+                type = "origin",
+                triggerRadiusMiles = 0.3,
+                offsetMinutesFromStart = 0,
+                notification = CheckpointNotification(
+                    title = "Starting Trip",
+                    message = "Departing now.",
+                    speech = "Starting your trip."
+                )
+            ),
+            Checkpoint(
+                id = "grocery_errand",
+                name = "Trader Joe's Grocery Stop",
+                lat = 42.7400,
+                lng = -73.7350,
+                type = "stop",
+                dwellMinutes = 20,
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 10,
+                notification = null // Silent generic stop
+            ),
+            Checkpoint(
+                id = "destination_end",
+                name = "Weekend Cabin",
+                lat = 42.7800,
+                lng = -73.7100,
+                type = "destination",
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 45,
+                notification = CheckpointNotification(
+                    title = "Arrived at Cabin",
+                    message = "Trip complete.",
+                    speech = "Welcome to your cabin."
+                )
+            )
+        )
+
+        val startTime = System.currentTimeMillis()
+        tracker.setCheckpoints(routeWithGenericStop, startTime)
+
+        // 1. Departure triggers origin alert
+        tracker.evaluate(42.65260, -73.7870, 0.0)
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("origin_start", lastResult!!.alerts[0].id)
+        assertEquals("grocery_errand", lastResult!!.nextCheckpoint?.id)
+
+        // 2. Arriving at grocery errand (type = "stop")
+        tracker.evaluate(42.7400, -73.7350, 10.0)
+        // MUST be completely silent: zero alerts generated!
+        assertTrue("Generic stop must NOT produce any in-car alerts", lastResult!!.alerts.isEmpty())
+        // Next checkpoint must advance to the cabin destination
+        assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
+        // Schedule pace telemetry delta must still be resolved and tracked
+        assertNotNull("Pace telemetry must still be recorded for silent stops", lastResult!!.scheduleDelta)
+
+        // 3. Arriving at destination triggers destination alert
+        tracker.evaluate(42.7800, -73.7100, 10.0)
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("destination_end", lastResult!!.alerts[0].id)
+        assertNull("All stops completed", lastResult!!.nextCheckpoint)
+    }
 }

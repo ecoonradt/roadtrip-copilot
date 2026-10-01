@@ -50,6 +50,7 @@ const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
   { value: 'meal', label: 'Meal / Food' },
   { value: 'fuel', label: 'Fuel / Charging' },
   { value: 'lodging', label: 'Hotel / Lodging' },
+  { value: 'stop', label: 'Stop (Generic / Errand)' },
   { value: 'destination', label: 'Destination' },
 ];
 
@@ -189,7 +190,18 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     setBatchProgress(`Generating alerts for ${waypoints.length} stops...`);
 
     try {
-      const contexts: WaypointContext[] = cascadeResult.stops.map((stop) => {
+      const eligibleStops = cascadeResult.stops.filter((stop) => stop.type !== 'stop');
+
+      if (eligibleStops.length === 0) {
+        setBatchProgress('No alert-eligible stops to generate (generic stops are silent).');
+        setTimeout(() => setBatchProgress(null), 3000);
+        setIsBatchGenerating(false);
+        return;
+      }
+
+      setBatchProgress(`Generating alerts for ${eligibleStops.length} stops...`);
+
+      const contexts: WaypointContext[] = eligibleStops.map((stop) => {
         const original = waypoints.find((w) => w.id === stop.id);
         return {
           id: stop.id,
@@ -652,6 +664,10 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                                 updates.dwell_minutes = 0;
                               } else if (newType === 'scenic_drive_by') {
                                 updates.dwell_minutes = 0;
+                              } else if (newType === 'stop') {
+                                updates.dwell_minutes = stop.dwell_minutes > 0 ? stop.dwell_minutes : 15;
+                                updates.notification = undefined;
+                                updates.is_route_anchor = false;
                               }
                               onUpdateWaypoint(stop.id, updates);
                             }}

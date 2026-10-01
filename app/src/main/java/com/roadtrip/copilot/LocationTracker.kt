@@ -173,30 +173,34 @@ class LocationTracker(
 
                     val paceSpeech = delta?.formatForSpeech() ?: ""
 
-                    val titleText = if (delta != null && delta.statusText.isNotBlank()) {
-                        "${notif?.title ?: cp.name} • ${delta.statusText}"
+                    if (cp.shouldAlert) {
+                        val titleText = if (delta != null && delta.statusText.isNotBlank()) {
+                            "${notif?.title ?: cp.name} • ${delta.statusText}"
+                        } else {
+                            notif?.title ?: cp.name
+                        }
+
+                        val msgText = if (delta != null && delta.statusText.isNotBlank()) {
+                            "${notif?.message ?: "Approaching ${cp.name}"}\nPace: ${delta.statusText}"
+                        } else {
+                            notif?.message ?: "Approaching ${cp.name}"
+                        }
+
+                        val speechText = (notif?.speech ?: "Approaching ${cp.name}") + paceSpeech
+
+                        val alert = TriggeredAlert(
+                            id = cp.id,
+                            name = cp.name,
+                            distanceMiles = dist,
+                            title = titleText,
+                            message = msgText,
+                            speech = speechText
+                        )
+                        newAlerts.add(alert)
+                        Log.i(TAG, "Geofence triggered for: ${cp.name} (dist: %.2f mi, pace: $paceSpeech)".format(dist))
                     } else {
-                        notif?.title ?: cp.name
+                        Log.i(TAG, "Milestone reached (silent stop): ${cp.name} (dist: %.2f mi, pace: $paceSpeech)".format(dist))
                     }
-
-                    val msgText = if (delta != null && delta.statusText.isNotBlank()) {
-                        "${notif?.message ?: "Approaching ${cp.name}"}\nPace: ${delta.statusText}"
-                    } else {
-                        notif?.message ?: "Approaching ${cp.name}"
-                    }
-
-                    val speechText = (notif?.speech ?: "Approaching ${cp.name}") + paceSpeech
-
-                    val alert = TriggeredAlert(
-                        id = cp.id,
-                        name = cp.name,
-                        distanceMiles = dist,
-                        title = titleText,
-                        message = msgText,
-                        speech = speechText
-                    )
-                    newAlerts.add(alert)
-                    Log.i(TAG, "Geofence triggered for: ${cp.name} (dist: %.2f mi, pace: $paceSpeech)".format(dist))
                     break // Single milestone trigger per evaluation cycle
                 }
             }

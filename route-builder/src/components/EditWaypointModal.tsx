@@ -26,6 +26,7 @@ export const STOP_TYPE_OPTIONS: { value: WaypointType; label: string }[] = [
   { value: 'lodging', label: 'Lodging / Hotel' },
   { value: 'meal', label: 'Meal / Dining' },
   { value: 'fuel', label: 'Fuel / Rest Area' },
+  { value: 'stop', label: 'Stop (Generic / Errand)' },
   { value: 'scenic_pull_off', label: 'Scenic Pull-Off' },
   { value: 'scenic_drive_by', label: 'Scenic Drive-By' },
 ];
@@ -262,6 +263,8 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
       };
       updates.notification = alert;
       onApply?.(waypoint.id, alert);
+    } else {
+      updates.notification = undefined;
     }
 
     onSave(waypoint.id, updates);
@@ -605,6 +608,20 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
           ) : (
             /* TAB 2: In-Car Alert & Audio Configuration */
             <div className="space-y-4">
+              {type === 'stop' && (
+                <div className="p-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
+                  <div className="p-1 rounded-md bg-slate-800 text-slate-400 shrink-0 mt-0.5">
+                    <VolumeX className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-white">Silent Stop (No In-Car Voice or Heads-Up Cards)</span>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      Generic stops do not trigger Android Auto heads-up popups or duck car audio while driving. Your scheduled arrival time, dwell time cascade, and Google Maps navigation route remain active.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {!aiAvailable && (
                 <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />

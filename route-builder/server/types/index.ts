@@ -5,7 +5,7 @@ export interface GeocodeResult {
   name?: string;
   placeName?: string;
   address?: string;
-  category?: 'origin' | 'destination' | 'scenic_pull_off' | 'scenic_drive_by' | 'meal' | 'fuel' | 'lodging';
+  category?: 'origin' | 'destination' | 'scenic_pull_off' | 'scenic_drive_by' | 'meal' | 'fuel' | 'lodging' | 'stop';
   boundingBox?: [number, number, number, number]; // [south, north, west, east]
 }
 

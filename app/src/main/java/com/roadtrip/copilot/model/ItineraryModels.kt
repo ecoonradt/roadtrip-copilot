@@ -33,7 +33,13 @@ data class Checkpoint(
     val isRouteAnchor: Boolean? = null,
     var targetEpochMillis: Long? = null,
     var formattedTargetTime: String? = null
-)
+) {
+    val isSilentStop: Boolean
+        get() = type.equals("stop", ignoreCase = true) || type.equals("general_stop", ignoreCase = true)
+
+    val shouldAlert: Boolean
+        get() = !isSilentStop && (notification != null || type == null)
+}
 
 data class Day(
     val day: Int,

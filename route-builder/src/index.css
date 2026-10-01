@@ -68,6 +68,10 @@ html, body, #root {
   background-color: #06b6d4; /* Cyan */
 }
 
+.pin-stop {
+  background-color: #64748b; /* Slate */
+}
+
 /* Scout Preview Marker Pin */
 .scout-preview-pin {
   display: flex;

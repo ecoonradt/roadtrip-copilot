@@ -214,7 +214,7 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
 ]
 \`\`\`
 
-Allowed types: "origin", "destination", "scenic_pull_off", "scenic_drive_by", "meal", "fuel", "lodging".
+Allowed types: "origin", "destination", "scenic_pull_off", "scenic_drive_by", "meal", "fuel", "lodging", "stop".
 
 ${contextBlock}
 ${conversationHistory}

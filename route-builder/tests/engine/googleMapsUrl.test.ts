@@ -473,5 +473,35 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       // Destination lodging (even with 0m dwell) SHOULD include its name and address
       expect(url).toContain(encodeURIComponent('Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ 86004'));
     });
+
+    it('Scenario 6: Includes generic stops (type: stop) with dwell time as physical stopping locations in navigation URLs', () => {
+      const origin: CoordinateLocation = {
+        lat: 33.4357,
+        lng: -112.0152,
+        name: 'PHX Airport',
+        type: 'origin',
+      };
+      const groceryStop: CoordinateLocation = {
+        lat: 34.8697,
+        lng: -111.7609,
+        name: 'Safeway Sedona',
+        type: 'stop',
+        dwellMinutes: 25,
+        address: '2300 W State Rte 89A, Sedona, AZ 86336',
+      };
+      const dest: CoordinateLocation = {
+        lat: 35.1901,
+        lng: -111.6207,
+        name: 'Flagstaff Hotel',
+        type: 'destination',
+      };
+
+      const result = generateGoogleMapsUrls([origin, groceryStop, dest]);
+      expect(result.legs).toHaveLength(1);
+      const leg = result.legs[0];
+      expect(leg.intermediateWaypoints).toHaveLength(1);
+      expect(leg.intermediateWaypoints[0].name).toBe('Safeway Sedona');
+      expect(leg.url).toContain(encodeURIComponent('Safeway Sedona, 2300 W State Rte 89A, Sedona, AZ 86336'));
+    });
   });
 });

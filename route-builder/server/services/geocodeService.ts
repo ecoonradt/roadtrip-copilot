@@ -26,6 +26,13 @@ function resolveCategory(osmClass?: string, osmType?: string): GeocodeResult['ca
   ) {
     return 'scenic_pull_off';
   }
+  if (
+    osmClass === 'shop' ||
+    osmClass === 'commercial' ||
+    (osmClass === 'amenity' && ['pharmacy', 'bank', 'post_office', 'marketplace'].includes(osmType || ''))
+  ) {
+    return 'stop';
+  }
   return 'scenic_pull_off';
 }
 
