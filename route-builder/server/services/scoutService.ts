@@ -385,11 +385,12 @@ export function parseScoutResponse(
                 ? item.isRouteAnchor
                 : undefined;
 
-            // Physical stops (lodging, meal, fuel, origin, destination, or dwell > 0) are NEVER pass-through anchors
+            // Physical stops (lodging, meal, fuel, stop, origin, destination, or dwell > 0) are NEVER pass-through anchors
             const isPhysical =
               item.type === 'lodging' ||
               item.type === 'meal' ||
               item.type === 'fuel' ||
+              item.type === 'stop' ||
               item.type === 'origin' ||
               item.type === 'destination' ||
               (typeof item.dwell_minutes === 'number' && item.dwell_minutes > 0);

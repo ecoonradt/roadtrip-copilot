@@ -263,6 +263,42 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions[0].dwell_minutes).toBe(45);
     });
 
+    it('parses add_waypoint suggestion with type: "stop" for grocery and errand stops', () => {
+      const rawModelOutput = `I recommend a quick supply stop at Safeway in Sedona before continuing into Oak Creek Canyon.
+
+\`\`\`json:suggestions
+[
+  {
+    "action": "add_waypoint",
+    "name": "Safeway Sedona Grocery Stop",
+    "place_name": "Safeway",
+    "type": "stop",
+    "lat": 34.8697,
+    "lng": -111.7609,
+    "dwell_minutes": 25,
+    "trigger_radius_miles": 0.5,
+    "address": "2300 W State Rte 89A, Sedona, AZ 86336",
+    "is_route_anchor": true,
+    "reason": "Restock snacks, drinks, and ice before remote scenic driving."
+  }
+]
+\`\`\``;
+
+      const { reply, suggestions } = parseScoutResponse(rawModelOutput);
+      expect(reply).toContain('quick supply stop at Safeway');
+      expect(suggestions).toHaveLength(1);
+      expect(suggestions[0].action).toBe('add_waypoint');
+      expect(suggestions[0].name).toBe('Safeway Sedona Grocery Stop');
+      expect(suggestions[0].place_name).toBe('Safeway');
+      expect(suggestions[0].type).toBe('stop');
+      expect(suggestions[0].lat).toBe(34.8697);
+      expect(suggestions[0].lng).toBe(-111.7609);
+      expect(suggestions[0].dwell_minutes).toBe(25);
+      expect(suggestions[0].address).toBe('2300 W State Rte 89A, Sedona, AZ 86336');
+      // Must enforce is_route_anchor = false because stop is a physical stop
+      expect(suggestions[0].is_route_anchor).toBe(false);
+    });
+
     it('extracts update_waypoint suggestion for coordinate correction', () => {
       const rawModelOutput = `Your current pin for Shiprock Peak is located 8 miles west of the highway on tribal land. I suggest shifting the coordinate to the paved highway pull-off.
 

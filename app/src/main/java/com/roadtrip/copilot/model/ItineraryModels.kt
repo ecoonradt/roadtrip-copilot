@@ -38,7 +38,7 @@ data class Checkpoint(
         get() = type.equals("stop", ignoreCase = true) || type.equals("general_stop", ignoreCase = true)
 
     val shouldAlert: Boolean
-        get() = !isSilentStop && (notification != null || type == null)
+        get() = !isSilentStop
 }
 
 data class Day(

@@ -113,8 +113,11 @@ export function generateTemplateAlert(waypoint: WaypointContext): CopilotAlert {
     case 'origin':
     case 'destination':
     case 'lodging':
-    case 'stop':
       tip = 'Check-in and arrival destination.';
+      radius = 0.5;
+      break;
+    case 'stop':
+      tip = 'Scheduled stop and errand destination.';
       radius = 0.5;
       break;
     case 'meal':

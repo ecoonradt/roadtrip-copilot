@@ -215,6 +215,17 @@ class LocationTrackerLoopRouteTest {
                 notification = null // Silent generic stop
             ),
             Checkpoint(
+                id = "fuel_stop",
+                name = "Shell Station",
+                lat = 42.7600,
+                lng = -73.7250,
+                type = "fuel",
+                dwellMinutes = 10,
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 30,
+                notification = null // Non-stop type with null notification preserves fallback alert
+            ),
+            Checkpoint(
                 id = "destination_end",
                 name = "Weekend Cabin",
                 lat = 42.7800,
@@ -243,12 +254,20 @@ class LocationTrackerLoopRouteTest {
         tracker.evaluate(42.7400, -73.7350, 10.0)
         // MUST be completely silent: zero alerts generated!
         assertTrue("Generic stop must NOT produce any in-car alerts", lastResult!!.alerts.isEmpty())
-        // Next checkpoint must advance to the cabin destination
-        assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
+        // Next checkpoint must advance to the fuel station
+        assertEquals("fuel_stop", lastResult!!.nextCheckpoint?.id)
         // Schedule pace telemetry delta must still be resolved and tracked
         assertNotNull("Pace telemetry must still be recorded for silent stops", lastResult!!.scheduleDelta)
 
-        // 3. Arriving at destination triggers destination alert
+        // 3. Arriving at fuel stop (type = "fuel", notification = null)
+        tracker.evaluate(42.7600, -73.7250, 10.0)
+        // Non-stop types must preserve fallback announcement behavior even when notification is null
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("fuel_stop", lastResult!!.alerts[0].id)
+        assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Shell Station"))
+        assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
+
+        // 4. Arriving at destination triggers destination alert
         tracker.evaluate(42.7800, -73.7100, 10.0)
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("destination_end", lastResult!!.alerts[0].id)
