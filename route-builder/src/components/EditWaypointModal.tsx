@@ -240,13 +240,14 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
   // Determine whether an in-car alert is meaningfully configured
   const hasActiveAlert = useMemo(() => {
+    if (type === 'stop') return false;
     const currentName = (name || waypoint?.name || '').trim().toLowerCase();
     const currentTitle = title.trim();
     const hasSpeech = Boolean(speech.trim());
     const hasMessage = Boolean(message.trim());
     const hasDistinctTitle = Boolean(currentTitle && currentTitle.toLowerCase() !== currentName);
     return hasSpeech || hasMessage || hasDistinctTitle;
-  }, [speech, message, title, name, waypoint?.name]);
+  }, [type, speech, message, title, name, waypoint?.name]);
 
   const handleClearAlert = () => {
     setTitle('');
@@ -257,8 +258,9 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   const handleSave = () => {
     if (!waypoint) return;
 
+    const isSilentStop = type === 'stop';
     const isOvernightOrFinalDest = isLast && (type === 'lodging' || type === 'destination');
-    const finalDwell = isOvernightOrFinalDest ? 0 : dwellMinutes;
+    const finalDwell = isOvernightOrFinalDest ? 0 : isSilentStop ? (dwellMinutes > 0 ? dwellMinutes : 15) : dwellMinutes;
 
     const updates: Partial<Waypoint> = {
       name: name.trim() || waypoint.name,
@@ -267,11 +269,11 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
       dwell_minutes: finalDwell,
       address: address.trim() || undefined,
       google_place_id: googlePlaceId.trim() || undefined,
-      is_route_anchor: isRouteAnchor,
+      is_route_anchor: isSilentStop ? false : isRouteAnchor,
       trigger_radius_miles: radius,
     };
 
-    if (hasActiveAlert) {
+    if (!isSilentStop && hasActiveAlert) {
       const alert: CopilotAlert = {
         title: title.trim() || name.trim() || waypoint.name,
         message: message.trim(),
@@ -371,7 +373,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
               <span className="w-2 h-2 rounded-full bg-emerald-400" title="In-car alert armed" />
             ) : (
               <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                None
+                {type === 'stop' ? 'Silent' : 'None'}
               </span>
             )}
           </button>
@@ -413,6 +415,14 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                       setType(newType);
                       if (isLast && (newType === 'lodging' || newType === 'destination')) {
                         setDwellMinutes(0);
+                      } else if (newType === 'scenic_drive_by') {
+                        setDwellMinutes(0);
+                      } else if (newType === 'stop') {
+                        setDwellMinutes((prev) => (prev > 0 ? prev : 15));
+                        setTitle('');
+                        setMessage('');
+                        setSpeech('');
+                        setIsRouteAnchor(false);
                       }
                     }}
                     className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500"
@@ -651,7 +661,9 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                 </div>
               ) : null}
 
-              {!aiAvailable && (
+              {type !== 'stop' && (
+                <>
+                  {!aiAvailable && (
                 <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
@@ -820,42 +832,48 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     )}
                   </button>
 
-                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                    <Info className="w-3 h-3 text-sky-400" />
-                    <span>Ducks Spotify car audio during utterance, restoring volume on completion.</span>
+                    <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                      <Info className="w-3 h-3 text-sky-400" />
+                      <span>Ducks Spotify car audio during utterance, restoring volume on completion.</span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </>
+            )}
 
-              {/* CARD 3: Alert Distance (Geofence Trigger) */}
-              <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Sliders className="w-3.5 h-3.5 text-sky-400" />
-                    <span className="text-xs font-semibold text-slate-300">
-                      Heads-Up Alert Distance (Geofence Trigger)
-                    </span>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-sky-400 bg-sky-950/70 border border-sky-800/80 px-2 py-0.5 rounded">
-                    {radius.toFixed(1)} miles before stop
+            {/* CARD 3: Alert Distance (Geofence Trigger) */}
+            <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-sky-400" />
+                  <span className="text-xs font-semibold text-slate-300">
+                    {type === 'stop'
+                      ? 'Milestone Arrival Distance (Geofence Trigger)'
+                      : 'Heads-Up Alert Distance (Geofence Trigger)'}
                   </span>
                 </div>
+                <span className="text-xs font-mono font-bold text-sky-400 bg-sky-950/70 border border-sky-800/80 px-2 py-0.5 rounded">
+                  {radius.toFixed(1)} miles before stop
+                </span>
+              </div>
 
-                <input
-                  type="range"
-                  min="0.3"
-                  max="6.0"
-                  step="0.1"
-                  value={radius}
-                  onChange={(e) => setRadius(parseFloat(e.target.value))}
-                  className="w-full accent-sky-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                />
+              <input
+                type="range"
+                min="0.3"
+                max="6.0"
+                step="0.1"
+                value={radius}
+                onChange={(e) => setRadius(parseFloat(e.target.value))}
+                className="w-full accent-sky-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+              />
 
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span>0.3 mi (City / Overlook)</span>
-                  <span className="text-sky-300/80 italic">{radiusTip}</span>
-                  <span>6.0 mi (Interstate)</span>
-                </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>0.3 mi (City / Overlook)</span>
+                <span className="text-sky-300/80 italic">
+                  {type === 'stop' ? 'Milestone arrival detection radius' : radiusTip}
+                </span>
+                <span>6.0 mi (Interstate)</span>
+              </div>
 
                 <div className="flex flex-wrap items-center gap-1.5">
                   {RADIUS_PRESETS.map((r) => (

@@ -155,11 +155,11 @@ GUIDELINES:
        - OPERATIONAL "ONE ANCHOR PER CORRIDOR" RULE:
          1. DIVERGENT SCENIC BYWAY: When suggesting or auditing waypoints along a scenic byway, secondary highway, or mountain pass that runs parallel to or diverges from a faster freeway/interstate, mark the FIRST in-transit milestone entering that corridor with "is_route_anchor": true (dwell: 0m). This forces Google Maps to navigate via the scenic road.
          2. AUDIO COMMENTARY ONLY: Any subsequent scenic drive-bys, vistas, or audio cues along that SAME highway corridor must have "is_route_anchor": false (dwell: 0m). They will trigger in-car audio commentary and heads-up alerts from Roadtrip Co-Pilot without cluttering Google Maps navigation or consuming its 9-waypoint limit.
-         3. PHYSICAL STOPS & ENDPOINTS: Never set "is_route_anchor": true on Physical Stops (lodging, meals, fuel, overlooks with dwell > 0) or Origin/Destination. They are physical stopping destinations, already included in Google Maps navigation. Always set "is_route_anchor": false on them.
+         3. PHYSICAL STOPS & ENDPOINTS: Never set "is_route_anchor": true on Physical Stops (lodging, meals, fuel, stop, overlooks with dwell > 0) or Origin/Destination. They are physical stopping destinations, already included in Google Maps navigation. Always set "is_route_anchor": false on them. Note that generic stops ("stop") are silent supply or errand milestones; do not generate heads-up notification copy or spoken prompts for them.
      * DIVIDED HIGHWAY HAZARDS:
        - Divided highways with central medians will force Google Maps into unwanted U-turns at roundabouts if an in-transit coordinate is placed slightly closer to the opposing curb or opposite storefront.
        - To fix this, place the anchor coordinate directly at a neutral roundabout center node or major highway intersection where traffic naturally flows through without U-turns, and set "is_route_anchor": true if it serves as a corridor pass-through milestone.
-     * AUTHENTIC ENTRANCES FOR PHYSICAL STOPS (HOTELS, MEALS, FUEL, OVERLOOKS):
+     * AUTHENTIC ENTRANCES FOR PHYSICAL STOPS (HOTELS, MEALS, FUEL, STOPS, OVERLOOKS):
        - ALWAYS provide clean establishment names in "place_name" for physical stops (lodging, meals, fuel, visitor centers) and POIs. While "name" is the human-facing display title (e.g. "Maverik (West Main St)", "Flagstaff / Little America Hotel"), "place_name" MUST be the clean, exact establishment title without parenthetical qualifiers or slash prefixes (e.g. "Maverik", "Little America Hotel", "Red Rock Park"). Google Maps navigation links rely on "place_name" to prevent ambiguous search prompts ("Did you mean:").
        - ALWAYS provide the verified street address in "address".
        - GOOGLE PLACE IDS: When researching via web search or official venue listings, if you discover an authentic Google Maps listing or URL containing a Place ID or 0x...:0x... entity, include the authentic "google_place_id". Never invent or guess arbitrary Place IDs from memory. The app automatically validates all Place IDs against Google's binary protobuf schema before accepting them.
@@ -418,6 +418,7 @@ export function parseScoutResponse(
               google_place_id: validatedPlaceId,
               is_route_anchor,
               notification:
+                item.type !== 'stop' &&
                 typeof item.notification === 'object' && item.notification !== null
                   ? {
                       title: typeof item.notification.title === 'string' ? item.notification.title : '',

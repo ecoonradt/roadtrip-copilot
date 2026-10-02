@@ -132,6 +132,28 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       const cp = formatCheckpointV2(stopWithClearedAlert);
       expect(cp.notification).toBeUndefined();
     });
+
+    it('omits notification and enforces is_route_anchor false for generic stops (type: "stop")', () => {
+      const genericStopWithAlert: Waypoint = {
+        id: 'wp_safeway',
+        name: 'Safeway Sedona',
+        type: 'stop',
+        lat: 34.869,
+        lng: -111.761,
+        dwell_minutes: 20,
+        trigger_radius_miles: 0.5,
+        is_route_anchor: true,
+        notification: {
+          title: 'Safeway Sedona',
+          message: 'Grocery run',
+          speech: 'Approaching Safeway for groceries',
+        },
+      };
+
+      const cp = formatCheckpointV2(genericStopWithAlert);
+      expect(cp.notification).toBeUndefined();
+      expect(cp.is_route_anchor).toBe(false);
+    });
   });
 
   describe('Multi-Day Itinerary Export (Schema v2.0.0)', () => {

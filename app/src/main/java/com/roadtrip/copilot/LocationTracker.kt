@@ -175,18 +175,18 @@ class LocationTracker(
 
                     if (cp.shouldAlert) {
                         val titleText = if (delta != null && delta.statusText.isNotBlank()) {
-                            "${notif?.title ?: cp.name} • ${delta.statusText}"
+                            "${notif?.title?.ifBlank { null } ?: cp.name} • ${delta.statusText}"
                         } else {
-                            notif?.title ?: cp.name
+                            notif?.title?.ifBlank { null } ?: cp.name
                         }
 
                         val msgText = if (delta != null && delta.statusText.isNotBlank()) {
-                            "${notif?.message ?: "Approaching ${cp.name}"}\nPace: ${delta.statusText}"
+                            "${notif?.message?.ifBlank { null } ?: "Approaching ${cp.name}"}\nPace: ${delta.statusText}"
                         } else {
-                            notif?.message ?: "Approaching ${cp.name}"
+                            notif?.message?.ifBlank { null } ?: "Approaching ${cp.name}"
                         }
 
-                        val speechText = (notif?.speech ?: "Approaching ${cp.name}") + paceSpeech
+                        val speechText = (notif?.speech?.ifBlank { null } ?: "Approaching ${cp.name}") + paceSpeech
 
                         val alert = TriggeredAlert(
                             id = cp.id,

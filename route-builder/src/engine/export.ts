@@ -163,7 +163,8 @@ export function formatCheckpointV2(
   }
 
   const hasNotificationContent = Boolean(
-    item.notification &&
+    item.type !== 'stop' &&
+      item.notification &&
       (item.notification.speech?.trim() ||
         item.notification.message?.trim() ||
         (item.notification.title?.trim() &&
@@ -191,7 +192,7 @@ export function formatCheckpointV2(
   }
 
   if (item.is_route_anchor !== undefined) {
-    checkpoint.is_route_anchor = item.is_route_anchor;
+    checkpoint.is_route_anchor = item.type === 'stop' ? false : item.is_route_anchor;
   }
 
   if (item.approachHighway) {

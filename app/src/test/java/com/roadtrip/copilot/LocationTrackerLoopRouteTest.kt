@@ -392,4 +392,46 @@ class LocationTrackerLoopRouteTest {
         assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Scenic Overlook"))
         assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
     }
+
+    @Test
+    fun testBlankSpeechNotificationFallsBackToApproachingName() {
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+
+        val routeWithBlankSpeech = listOf(
+            Checkpoint(
+                id = "origin_start",
+                name = "Home",
+                lat = 42.65260,
+                lng = -73.7870,
+                type = "origin",
+                triggerRadiusMiles = 0.3,
+                offsetMinutesFromStart = 0,
+                notification = CheckpointNotification("Start", "Departing", "Starting trip.")
+            ),
+            Checkpoint(
+                id = "scenic_blank_speech",
+                name = "Lookout Point",
+                lat = 42.7500,
+                lng = -73.7300,
+                type = "scenic_pull_off",
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 20,
+                notification = CheckpointNotification("Lookout Point", "Scenic view ahead", "") // Blank speech
+            )
+        )
+
+        val startTime = System.currentTimeMillis()
+        tracker.setCheckpoints(routeWithBlankSpeech, startTime)
+
+        // 1. Departure
+        tracker.evaluate(42.65260, -73.7870, 0.0)
+
+        // 2. Arriving at lookout point
+        tracker.evaluate(42.7500, -73.7300, 10.0)
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("scenic_blank_speech", lastResult!!.alerts[0].id)
+        assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Lookout Point"))
+    }
 }

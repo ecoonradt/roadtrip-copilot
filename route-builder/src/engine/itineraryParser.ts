@@ -260,7 +260,7 @@ function convertRawCheckpointToWaypoint(
       : 2.0;
 
   let notification: Waypoint['notification'] = undefined;
-  if (cp.notification && typeof cp.notification === 'object') {
+  if (type !== 'stop' && cp.notification && typeof cp.notification === 'object') {
     const n = cp.notification as Record<string, unknown>;
     if (typeof n.title === 'string' && typeof n.speech === 'string') {
       notification = {
@@ -293,7 +293,7 @@ function convertRawCheckpointToWaypoint(
     place_name: typeof cp.place_name === 'string' ? cp.place_name : undefined,
     address: typeof cp.address === 'string' ? cp.address : undefined,
     google_place_id: typeof cp.google_place_id === 'string' ? cp.google_place_id : undefined,
-    is_route_anchor: typeof cp.is_route_anchor === 'boolean' ? cp.is_route_anchor : undefined,
+    is_route_anchor: type === 'stop' ? false : (typeof cp.is_route_anchor === 'boolean' ? cp.is_route_anchor : undefined),
   };
 }
 

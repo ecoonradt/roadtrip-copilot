@@ -297,6 +297,8 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions[0].address).toBe('2300 W State Rte 89A, Sedona, AZ 86336');
       // Must enforce is_route_anchor = false because stop is a physical stop
       expect(suggestions[0].is_route_anchor).toBe(false);
+      // Must suppress notification because generic stops are silent
+      expect(suggestions[0].notification).toBeUndefined();
     });
 
     it('extracts update_waypoint suggestion for coordinate correction', () => {

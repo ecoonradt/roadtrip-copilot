@@ -460,7 +460,8 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
             };
 
             const hasActiveAlert = Boolean(
-              stop.notification &&
+              stop.type !== 'stop' &&
+                stop.notification &&
                 (stop.notification.speech?.trim() ||
                   stop.notification.message?.trim() ||
                   (stop.notification.title?.trim() &&
@@ -863,7 +864,22 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           </span>
                         )}
 
-                        {hasActiveAlert ? (
+                        {stop.type === 'stop' ? (
+                          <span
+                            onClick={() => {
+                              setSelectedModal({
+                                waypoint: modalWp,
+                                initialTab: 'alert',
+                                isFirst,
+                                isLast,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-800/50 text-slate-400 border border-slate-700/60 text-[11px] cursor-pointer hover:bg-slate-750"
+                            title="Silent generic stop. Click to view arrival distance."
+                          >
+                            Silent stop
+                          </span>
+                        ) : hasActiveAlert ? (
                           <span
                             className="px-2 py-0.5 rounded bg-sky-950/70 text-sky-300 border border-sky-800/60 truncate max-w-[180px] cursor-pointer hover:bg-sky-900/80"
                             onClick={() => {

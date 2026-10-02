@@ -133,7 +133,16 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
       trip_name: 'Errand Route',
       checkpoints: [
         { id: '1', name: 'Start', type: 'origin', lat: 34.0, lng: -111.0 },
-        { id: '2', name: 'Whole Foods Market', type: 'stop', lat: 34.1, lng: -111.1, dwell_minutes: 25 },
+        {
+          id: '2',
+          name: 'Whole Foods Market',
+          type: 'stop',
+          lat: 34.1,
+          lng: -111.1,
+          dwell_minutes: 25,
+          is_route_anchor: true,
+          notification: { title: 'Whole Foods', message: 'Snacks', speech: 'Buy snacks' },
+        },
         { id: '3', name: 'Target Errand', type: 'general_stop', lat: 34.2, lng: -111.2 },
         { id: '4', name: 'End', type: 'destination', lat: 34.3, lng: -111.3 },
       ],
@@ -141,6 +150,8 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     const trip = parseItineraryJson(raw);
     expect(trip.days[0].waypoints[1].type).toBe('stop');
     expect(trip.days[0].waypoints[1].dwell_minutes).toBe(25);
+    expect(trip.days[0].waypoints[1].notification).toBeUndefined();
+    expect(trip.days[0].waypoints[1].is_route_anchor).toBe(false);
     expect(trip.days[0].waypoints[2].type).toBe('stop'); // normalized from general_stop
     expect(trip.days[0].waypoints[2].dwell_minutes).toBe(20); // default dwell
   });
