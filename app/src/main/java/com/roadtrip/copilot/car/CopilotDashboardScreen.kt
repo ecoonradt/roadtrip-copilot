@@ -52,7 +52,7 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
         if (!isRunning) {
             row1Builder.setTitle("Co-Pilot Standby")
             val targetStr = if (!targetTime.isNullOrBlank()) " • Target: $targetTime" else ""
-            val nextDesc = if (nextCp != null) "Next: ${nextCp.name}$targetStr" else "Tap 'Start Service' below to begin tracking."
+            val nextDesc = if (nextCp != null) "Next: ${nextCp.name}$targetStr" else "Tap 'Start Trip' below to begin tracking."
             row1Builder.addText(nextDesc)
         } else if (nextCp != null) {
             row1Builder.setTitle("Next: ${nextCp.name}")
@@ -78,14 +78,14 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
         // Row 3: Active Route & Day
         val row3Builder = Row.Builder()
             .setTitle(activeRoute)
-            .addText(if (isRunning) "Service Active • Tracking milestones" else "Inactive • Tap 'Start Service' below")
+            .addText(if (isRunning) "Trip Active • Tracking milestones" else "Standby • Tap 'Start Trip' below")
         paneBuilder.addRow(row3Builder.build())
 
         // Actions in the pane
         if (isRunning) {
             paneBuilder.addAction(
                 Action.Builder()
-                    .setTitle("Stop Service")
+                    .setTitle("End Trip")
                     .setBackgroundColor(CarColor.RED)
                     .setOnClickListener {
                         CopilotService.stopRoute(carContext)
@@ -95,7 +95,7 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
         } else {
             paneBuilder.addAction(
                 Action.Builder()
-                    .setTitle("Start Service")
+                    .setTitle("Start Trip")
                     .setBackgroundColor(CarColor.GREEN)
                     .setOnClickListener {
                         val routeFile = CopilotService.activeRouteFile.value

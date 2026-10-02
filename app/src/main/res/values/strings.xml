@@ -1,13 +1,24 @@
 <resources>
     <string name="app_name">Roadtrip Co-Pilot</string>
-    <string name="status_idle">Service Idle (Standby)</string>
-    <string name="status_running">Co-Pilot Active &amp; Tracking</string>
-    <string name="btn_start">Start Co-Pilot Service</string>
-    <string name="btn_stop">Stop Co-Pilot Service</string>
+    <string name="status_idle">Ready to Drive</string>
+    <string name="status_running">Trip Active &amp; Tracking</string>
+    <string name="btn_start">Start Trip</string>
+    <string name="btn_stop">End Trip</string>
+    <string name="btn_scan_qr">Scan Route QR</string>
+    <string name="btn_browse_file">Browse Itinerary File (JSON)</string>
+    <string name="title_in_car_audio">In-Car Audio &amp; Calibration</string>
+    <string name="title_activity_log">Activity &amp; Diagnostics Log</string>
+    <string name="audio_match_volume">Match Car Volume Knob (Media channel)</string>
+    <string name="audio_mute_music">Mute music completely during alerts (Default: Duck)</string>
+    <string name="btn_test_audio">Test Audio Speech</string>
+    <string name="btn_test_alert">Test Heads-Up Card &amp; Ducking</string>
+    <string name="btn_calibrate">Calibrate Car Volume (12s Loop)</string>
+    <string name="btn_clear_log">Clear Log</string>
     <string name="route_phx_abq">Phoenix to Albuquerque (Oct 9–12)</string>
     <string name="route_ny_test">Albany to Nassau (NY 19-mi Test)</string>
     <string name="channel_status_name">Roadtrip Status Service</string>
     <string name="channel_status_desc">Persistent background notification keeping the co-pilot alive.</string>
     <string name="channel_alert_name">Roadtrip Scenic &amp; Waypoint Alerts</string>
     <string name="channel_alert_desc">High priority heads-up cards for upcoming waypoints.</string>
+    <string name="btn_open_google_maps">Navigate in Google Maps</string>
 </resources>

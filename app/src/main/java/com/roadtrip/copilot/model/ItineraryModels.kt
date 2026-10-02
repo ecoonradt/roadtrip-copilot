@@ -51,6 +51,8 @@ data class Day(
     val title: String? = null,
     val origin: String? = null,
     val destination: String? = null,
+    @SerializedName("google_maps_url")
+    val googleMapsUrl: String? = null,
     val checkpoints: List<Checkpoint> = emptyList()
 )
 
@@ -59,9 +61,19 @@ data class Itinerary(
     val tripName: String,
     val date: String? = null,
     val timezone: String? = null,
+    @SerializedName("google_maps_url")
+    val googleMapsUrl: String? = null,
     val days: List<Day>? = null,
     val checkpoints: List<Checkpoint>? = null
 ) {
+    /**
+     * Resolves the Google Maps navigation link for a given day (or root itinerary URL fallback).
+     */
+    fun getGoogleMapsUrlForDay(dayNumber: Int): String? {
+        val dayUrl = days?.find { it.day == dayNumber }?.googleMapsUrl
+        return dayUrl ?: googleMapsUrl
+    }
+
     /**
      * Resolves the list of active checkpoints depending on whether this is
      * a multi-day itinerary (e.g. PHX -> ABQ) or a single-route itinerary (e.g. NY Test).

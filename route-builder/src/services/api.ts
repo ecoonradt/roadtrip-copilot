@@ -121,36 +121,6 @@ export async function generateBatchCopilotAlerts(
   return (await res.json()) as BatchAlertResult;
 }
 
-export async function fetchDeviceStatus(): Promise<{ connected: boolean; devices: string[] }> {
-  const res = await fetch('/api/device/status');
-  if (!res.ok) {
-    const errorData = (await res.json().catch(() => ({ error: 'Failed to check device status' }))) as {
-      error?: string;
-    };
-    throw new Error(errorData.error || `Device status check failed with HTTP ${res.status}`);
-  }
-  return (await res.json()) as { connected: boolean; devices: string[] };
-}
-
-export async function pushItineraryToDevice(
-  itinerary: unknown,
-  fileName?: string
-): Promise<{ success: boolean; message?: string; error?: string }> {
-  const res = await fetch('/api/device/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ itinerary, fileName }),
-  });
-
-  const data = (await res.json().catch(() => ({ success: false, error: 'Push request failed' }))) as {
-    success: boolean;
-    message?: string;
-    error?: string;
-  };
-
-  return data;
-}
-
 export async function stageItinerary(
   itinerary: unknown,
   fileName?: string

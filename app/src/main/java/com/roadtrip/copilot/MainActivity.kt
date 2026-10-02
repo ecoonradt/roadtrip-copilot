@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -23,6 +24,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.roadtrip.copilot.databinding.ActivityMainBinding
 import com.roadtrip.copilot.model.RouteOption
 import com.roadtrip.copilot.model.RouteRepository
@@ -32,6 +36,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -61,6 +67,10 @@ class MainActivity : AppCompatActivity() {
     private var tripAdapter: ArrayAdapter<TripGroup>? = null
     private var dayAdapter: ArrayAdapter<RouteOption>? = null
 
+    private var isAudioSetupExpanded = false
+    private var isEventLogExpanded = false
+    private var eventCount = 0
+
     private val importLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -76,7 +86,7 @@ class MainActivity : AppCompatActivity() {
             isBound = true
             copilotService?.setPauseMusicInsteadOfDuck(binding.switchPauseMusic.isChecked)
             copilotService?.setUseMediaStreamChannel(binding.switchUseMediaChannel.isChecked)
-            handleTestAction(intent)
+            handleIncomingIntent(intent)
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -88,7 +98,20 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
         handleTestAction(intent)
+
+        if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+            val uri = intent.data!!
+            intent.data = null
+            intent.action = null
+            appendLog("Opened from link / camera scan: $uri")
+            handleScannedContent(uri.toString())
+        }
     }
 
     private fun handleTestAction(intent: Intent?) {
@@ -138,6 +161,103 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startQrScanner() {
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+        val scanner = GmsBarcodeScanning.getClient(this, options)
+        scanner.startScan()
+            .addOnSuccessListener { barcode ->
+                val rawValue = barcode.rawValue
+                if (!rawValue.isNullOrBlank()) {
+                    handleScannedContent(rawValue)
+                } else {
+                    Toast.makeText(this, "Empty QR code detected.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .addOnCanceledListener {
+                // User closed scanner sheet
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "QR scan error", e)
+                Toast.makeText(this, "QR Scanner error: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    private fun handleScannedContent(raw: String) {
+        val trimmed = raw.trim()
+        val targetUrl = when {
+            trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+            trimmed.startsWith("roadtrip-copilot://", ignoreCase = true) || trimmed.startsWith("roadtrip://", ignoreCase = true) -> {
+                val parsed = Uri.parse(trimmed)
+                parsed.getQueryParameter("url") ?: trimmed.substringAfter("://")
+            }
+            else -> null
+        }
+
+        if (targetUrl != null && (targetUrl.startsWith("http://", ignoreCase = true) || targetUrl.startsWith("https://", ignoreCase = true))) {
+            downloadAndImportItinerary(targetUrl)
+        } else if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            importItineraryFromJsonString(trimmed, "scanned_itinerary.json")
+        } else {
+            Toast.makeText(this, "Unrecognized QR code format: $trimmed", Toast.LENGTH_LONG).show()
+            appendLog("Warning: Unrecognized QR code content: $trimmed")
+        }
+    }
+
+    private fun downloadAndImportItinerary(url: String) {
+        binding.tvStatusBadge.text = "Downloading Route..."
+        appendLog("Downloading itinerary from: $url")
+        Toast.makeText(this, "Downloading route...", Toast.LENGTH_SHORT).show()
+
+        lifecycleScope.launch {
+            try {
+                val (jsonContent, suggestedFileName) = withContext(Dispatchers.IO) {
+                    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 8000
+                        readTimeout = 12000
+                        requestMethod = "GET"
+                        instanceFollowRedirects = true
+                    }
+                    try {
+                        val code = conn.responseCode
+                        if (code !in 200..299) {
+                            throw java.io.IOException("HTTP $code ${conn.responseMessage}")
+                        }
+
+                        var headerFileName: String? = null
+                        val disp = conn.getHeaderField("Content-Disposition")
+                        if (!disp.isNullOrBlank() && disp.contains("filename=")) {
+                            headerFileName = disp.substringAfter("filename=").trim('"', ' ', '\'')
+                        }
+                        if (headerFileName.isNullOrBlank()) {
+                            headerFileName = url.substringAfterLast('/').substringBefore('?')
+                        }
+                        val cleanFileName = if (!headerFileName.isNullOrBlank() && headerFileName.endsWith(".json", ignoreCase = true)) {
+                            File(headerFileName).name
+                        } else {
+                            "imported_trip.json"
+                        }
+
+                        val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        Pair(text, cleanFileName)
+                    } finally {
+                        conn.disconnect()
+                    }
+                }
+
+                importItineraryFromJsonString(jsonContent, suggestedFileName)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to download route from $url", e)
+                Toast.makeText(this@MainActivity, "Download failed: ${e.localizedMessage ?: e.message}", Toast.LENGTH_LONG).show()
+                appendLog("Error downloading route: ${e.message}")
+                val isRunning = CopilotService.isRunning.value
+                binding.tvStatusBadge.text = if (isRunning) getString(R.string.status_running) else getString(R.string.status_idle)
+            }
+        }
+    }
+
     private fun resolveFileName(uri: Uri): String {
         var name: String? = null
         if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
@@ -166,19 +286,36 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val fileName = resolveFileName(uri)
+                val jsonContent = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { inputStream ->
+                        inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } ?: throw IllegalStateException("Could not read itinerary from selected file")
+                }
+                importItineraryFromJsonString(jsonContent, fileName)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Permission denied importing itinerary", e)
+                Toast.makeText(this@MainActivity, "Permission denied accessing file: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                appendLog("Error: Permission denied reading file.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to import itinerary", e)
+                Toast.makeText(this@MainActivity, "Import failed: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
+                appendLog("Error importing itinerary: ${e.message}")
+            }
+        }
+    }
+
+    private fun importItineraryFromJsonString(jsonContent: String, fileName: String) {
+        lifecycleScope.launch {
+            try {
                 val targetDir = File(filesDir, "itineraries")
                 if (!targetDir.exists()) {
                     targetDir.mkdirs()
                 }
-                val targetFile = File(targetDir, fileName)
+                val safeFileName = if (fileName.endsWith(".json", ignoreCase = true)) File(fileName).name else "${File(fileName).name}.json"
+                val targetFile = File(targetDir, safeFileName)
 
                 val importedOption = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.use { inputStream ->
-                        targetFile.outputStream().use { outputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    } ?: throw IllegalStateException("Could not read itinerary from selected file")
-
+                    targetFile.writeText(jsonContent, Charsets.UTF_8)
                     val repo = RouteRepository.getInstance(applicationContext)
                     val updatedRoutes = repo.refreshRoutes()
                     updatedRoutes.find { it.routeFile == targetFile.name }
@@ -192,24 +329,20 @@ class MainActivity : AppCompatActivity() {
                         importedOption.dayNumber,
                         autoRestartIfRunning = isRunning
                     )
-                    Toast.makeText(this@MainActivity, "Imported: ${importedOption.title}", Toast.LENGTH_SHORT).show()
-                    appendLog("Imported custom itinerary: ${importedOption.title} (${importedOption.routeFile})")
+                    Toast.makeText(this@MainActivity, "Trip Loaded: ${importedOption.title}", Toast.LENGTH_SHORT).show()
+                    appendLog("Trip loaded: ${importedOption.title} (${importedOption.routeFile})")
                 } else {
                     Toast.makeText(
                         this@MainActivity,
-                        "File $fileName imported, but contained no valid waypoints.",
+                        "File $safeFileName saved, but contains no valid waypoints.",
                         Toast.LENGTH_LONG
                     ).show()
-                    appendLog("Warning: $fileName imported but contains no valid checkpoints or days.")
+                    appendLog("Warning: $safeFileName saved but contains no valid checkpoints or days.")
                 }
-            } catch (e: SecurityException) {
-                Log.e(TAG, "Permission denied importing itinerary", e)
-                Toast.makeText(this@MainActivity, "Permission denied accessing file: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                appendLog("Error: Permission denied reading file.")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to import itinerary", e)
-                Toast.makeText(this@MainActivity, "Import failed: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
-                appendLog("Error importing itinerary: ${e.message}")
+                Log.e(TAG, "Failed to save itinerary", e)
+                Toast.makeText(this@MainActivity, "Save failed: ${e.localizedMessage ?: e.message}", Toast.LENGTH_LONG).show()
+                appendLog("Error saving itinerary: ${e.message}")
             }
         }
     }
@@ -223,7 +356,7 @@ class MainActivity : AppCompatActivity() {
         setupRouteSpinner()
         setupListeners()
         observeServiceState()
-        handleTestAction(intent)
+        handleIncomingIntent(intent)
 
         lifecycleScope.launch {
             RouteRepository.getInstance(this@MainActivity).refreshRoutes()
@@ -407,7 +540,41 @@ class MainActivity : AppCompatActivity() {
         syncSelectionFromServiceState()
     }
 
+    private fun toggleAudioSetup() {
+        isAudioSetupExpanded = !isAudioSetupExpanded
+        binding.layoutAudioBody.visibility = if (isAudioSetupExpanded) View.VISIBLE else View.GONE
+        binding.ivAudioChevron.animate().rotation(if (isAudioSetupExpanded) 180f else 0f).setDuration(200).start()
+    }
+
+    private fun toggleEventLog() {
+        isEventLogExpanded = !isEventLogExpanded
+        binding.layoutLogBody.visibility = if (isEventLogExpanded) View.VISIBLE else View.GONE
+        binding.ivLogChevron.animate().rotation(if (isEventLogExpanded) 180f else 0f).setDuration(200).start()
+    }
+
+    private fun updateLogCount() {
+        binding.tvLogCount.text = "$eventCount events"
+    }
+
     private fun setupListeners() {
+        binding.btnScanQr.setOnClickListener {
+            startQrScanner()
+        }
+
+        binding.layoutAudioHeader.setOnClickListener {
+            toggleAudioSetup()
+        }
+
+        binding.layoutLogHeader.setOnClickListener {
+            toggleEventLog()
+        }
+
+        binding.btnClearLog.setOnClickListener {
+            binding.tvEventLog.text = ""
+            eventCount = 0
+            updateLogCount()
+        }
+
         binding.btnToggleService.setOnClickListener {
             if (CopilotService.isRunning.value) {
                 stopCopilotService()
@@ -429,7 +596,7 @@ class MainActivity : AppCompatActivity() {
                     putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNum)
                 }
                 ContextCompat.startForegroundService(this, intent)
-                Toast.makeText(this, "Starting service for audio test...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Starting co-pilot for audio test...", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -446,7 +613,7 @@ class MainActivity : AppCompatActivity() {
                     putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNum)
                 }
                 ContextCompat.startForegroundService(this, intent)
-                Toast.makeText(this, "Starting service for alert test...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Starting co-pilot for alert test...", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -541,16 +708,18 @@ class MainActivity : AppCompatActivity() {
                     CopilotService.isRunning.collectLatest { running ->
                         if (running) {
                             binding.tvStatusBadge.text = getString(R.string.status_running)
-                            binding.tvStatusBadge.setBackgroundColor(getColor(R.color.success))
+                            binding.tvStatusBadge.backgroundTintList = ColorStateList.valueOf(getColor(R.color.success))
                             binding.tvStatusBadge.setTextColor(getColor(R.color.bg_dark))
                             binding.btnToggleService.text = getString(R.string.btn_stop)
-                            binding.btnToggleService.setBackgroundColor(getColor(R.color.danger))
+                            binding.btnToggleService.backgroundTintList = ColorStateList.valueOf(getColor(R.color.danger))
+                            binding.btnToggleService.setIconResource(0)
                         } else {
                             binding.tvStatusBadge.text = getString(R.string.status_idle)
-                            binding.tvStatusBadge.setBackgroundColor(0xFF334155.toInt())
+                            binding.tvStatusBadge.backgroundTintList = ColorStateList.valueOf(0xFF334155.toInt())
                             binding.tvStatusBadge.setTextColor(getColor(R.color.text_light))
                             binding.btnToggleService.text = getString(R.string.btn_start)
-                            binding.btnToggleService.setBackgroundColor(getColor(R.color.accent))
+                            binding.btnToggleService.backgroundTintList = ColorStateList.valueOf(getColor(R.color.accent))
+                            binding.btnToggleService.setIconResource(R.drawable.ic_navigation)
                         }
                     }
                 }
@@ -611,6 +780,12 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    CopilotService.activeGoogleMapsUrl.collectLatest { url ->
+                        updateGoogleMapsButton(url)
+                    }
+                }
+
+                launch {
                     kotlinx.coroutines.flow.combine(
                         CopilotService.activeRouteFile,
                         CopilotService.activeDayNumber
@@ -622,10 +797,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateGoogleMapsButton(serviceUrl: String?) {
+        val selectedOption = getSelectedRouteOption()
+        val url = serviceUrl ?: selectedOption?.googleMapsUrl
+        if (!url.isNullOrBlank()) {
+            binding.btnOpenGoogleMaps.visibility = View.VISIBLE
+            binding.btnOpenGoogleMaps.setOnClickListener {
+                openGoogleMapsNavigation(url)
+            }
+        } else {
+            binding.btnOpenGoogleMaps.visibility = View.GONE
+            binding.btnOpenGoogleMaps.setOnClickListener(null)
+        }
+    }
+
+    private fun openGoogleMapsNavigation(url: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                setPackage("com.google.android.apps.maps")
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                startActivity(browserIntent)
+            } catch (fallbackEx: Exception) {
+                Toast.makeText(this, "Could not open Google Maps navigation: ${fallbackEx.message}", Toast.LENGTH_SHORT).show()
+                Log.e(TAG, "Failed to launch maps url: $url", fallbackEx)
+            }
+        }
+    }
+
     private fun appendLog(msg: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
         val currentText = binding.tvEventLog.text.toString()
         binding.tvEventLog.text = "[$time] $msg\n$currentText"
+        eventCount++
+        updateLogCount()
     }
 
     companion object {

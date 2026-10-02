@@ -298,6 +298,7 @@ class RouteRepository(
                     val destination = day.destination
                     if (!origin.isNullOrBlank() && !destination.isNullOrBlank()) "$origin → $destination" else null
                 }
+                val gmapsUrl = day.googleMapsUrl ?: itinerary.googleMapsUrl
                 results.add(
                     RouteOption(
                         title = title,
@@ -306,7 +307,8 @@ class RouteRepository(
                         isAsset = isAsset,
                         absolutePath = absolutePath,
                         subtitle = subtitle,
-                        tripName = tripName
+                        tripName = tripName,
+                        googleMapsUrl = gmapsUrl
                     )
                 )
             }
@@ -317,6 +319,7 @@ class RouteRepository(
                 fileName.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
             }
             val subtitle = "${itinerary.checkpoints.size} checkpoints"
+            val gmapsUrl = itinerary.googleMapsUrl
             results.add(
                 RouteOption(
                     title = title,
@@ -325,7 +328,8 @@ class RouteRepository(
                     isAsset = isAsset,
                     absolutePath = absolutePath,
                     subtitle = subtitle,
-                    tripName = title
+                    tripName = title,
+                    googleMapsUrl = gmapsUrl
                 )
             )
         }

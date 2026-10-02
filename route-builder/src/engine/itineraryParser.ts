@@ -1,6 +1,7 @@
 import type { Waypoint, WaypointType } from '../types/routing';
 import { detectTimezone, calculateTimelineCascade } from './cascade';
-import type { ScheduledStop } from './types';
+import type { ScheduledStop, CoordinateLocation } from './types';
+import { generateGoogleMapsUrls } from './googleMapsUrl';
 
 export interface ParsedDay {
   dayNumber: number;
@@ -13,6 +14,7 @@ export interface ParsedDay {
   destination?: string;
   notes?: string;
   isAdHoc?: boolean;
+  google_maps_url?: string;
 }
 
 export interface ParsedTrip {
@@ -20,6 +22,7 @@ export interface ParsedTrip {
   tripName: string;
   isMultiDay: boolean;
   dates?: { start: string; end: string };
+  google_maps_url?: string;
   days: ParsedDay[];
   isAdHoc?: boolean;
 }
@@ -125,6 +128,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
         waypoints,
         origin: typeof d.origin === 'string' ? d.origin : undefined,
         destination: typeof d.destination === 'string' ? d.destination : undefined,
+        google_maps_url: typeof d.google_maps_url === 'string' ? d.google_maps_url : undefined,
       });
     }
   } else {
@@ -176,6 +180,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       origin: originName,
       destination: destinationName,
       isAdHoc: isAdHocDay,
+      google_maps_url: typeof data.google_maps_url === 'string' ? data.google_maps_url : undefined,
     });
   }
 
@@ -199,6 +204,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     tripName,
     isMultiDay,
     dates,
+    google_maps_url: typeof data.google_maps_url === 'string' ? data.google_maps_url : parsedDays[0]?.google_maps_url,
     days: parsedDays,
     isAdHoc: isTripAdHoc,
   };
@@ -384,48 +390,66 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: { isAdH
   const isAdHoc = Boolean(options?.isAdHoc ?? trip.isAdHoc);
 
   if (trip.isMultiDay) {
+    const days = trip.days.map((day) => {
+      let cascadedStops: ScheduledStop[] = [];
+      try {
+        if (day.waypoints && day.waypoints.length > 0) {
+          const cascade = calculateTimelineCascade({
+            baseDate: day.date,
+            departureTime: day.departureTime || '09:00:00',
+            waypoints: day.waypoints,
+          });
+          cascadedStops = cascade.stops;
+        }
+      } catch {
+        // fallback
+      }
+
+      const navLocations: CoordinateLocation[] = day.waypoints.map((w) => ({
+        lat: w.lat,
+        lng: w.lng,
+        name: w.name,
+        placeName: w.place_name,
+        address: w.address,
+        placeId: w.google_place_id,
+        type: w.type,
+        dwellMinutes: w.dwell_minutes,
+        isRouteAnchor: w.is_route_anchor,
+      }));
+      const gmapsResult = generateGoogleMapsUrls(navLocations);
+      const dayGoogleMapsUrl = gmapsResult.primaryUrl || undefined;
+
+      return {
+        day: day.dayNumber,
+        date: day.date,
+        timezone: day.timezone || 'America/Phoenix',
+        title: day.title,
+        origin: day.origin,
+        destination: day.destination,
+        departure_time: day.departureTime,
+        ...(dayGoogleMapsUrl ? { google_maps_url: dayGoogleMapsUrl } : {}),
+        ...(day.notes ? { notes: day.notes } : {}),
+        checkpoints: day.waypoints.map((w, idx) => {
+          const cascadedTarget = cascadedStops[idx]?.arrivalTime;
+          const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
+          return serializeCheckpoint(updatedWp, idx, day.waypoints.length, false);
+        }),
+      };
+    });
+
     return {
       trip_name: trip.tripName,
       dates: trip.dates || {
         start: trip.days[0]?.date || '',
         end: trip.days[trip.days.length - 1]?.date || '',
       },
+      ...(days[0]?.google_maps_url ? { google_maps_url: days[0].google_maps_url } : {}),
       metadata: {
         version: '2.0.0',
         author: 'Roadtrip Co-Pilot Studio',
         created_at: new Date().toISOString(),
       },
-      days: trip.days.map((day) => {
-        let cascadedStops: ScheduledStop[] = [];
-        try {
-          if (day.waypoints && day.waypoints.length > 0) {
-            const cascade = calculateTimelineCascade({
-              baseDate: day.date,
-              departureTime: day.departureTime || '09:00:00',
-              waypoints: day.waypoints,
-            });
-            cascadedStops = cascade.stops;
-          }
-        } catch {
-          // fallback
-        }
-
-        return {
-          day: day.dayNumber,
-          date: day.date,
-          timezone: day.timezone || 'America/Phoenix',
-          title: day.title,
-          origin: day.origin,
-          destination: day.destination,
-          departure_time: day.departureTime,
-          ...(day.notes ? { notes: day.notes } : {}),
-          checkpoints: day.waypoints.map((w, idx) => {
-            const cascadedTarget = cascadedStops[idx]?.arrivalTime;
-            const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
-            return serializeCheckpoint(updatedWp, idx, day.waypoints.length, false);
-          }),
-        };
-      }),
+      days,
     };
   }
 
@@ -452,9 +476,24 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: { isAdH
     // fallback
   }
 
+  const navLocations: CoordinateLocation[] = singleDay.waypoints.map((w) => ({
+    lat: w.lat,
+    lng: w.lng,
+    name: w.name,
+    placeName: w.place_name,
+    address: w.address,
+    placeId: w.google_place_id,
+    type: w.type,
+    dwellMinutes: w.dwell_minutes,
+    isRouteAnchor: w.is_route_anchor,
+  }));
+  const gmapsResult = generateGoogleMapsUrls(navLocations);
+  const singleGoogleMapsUrl = gmapsResult.primaryUrl || undefined;
+
   const result: Record<string, unknown> = {
     trip_name: trip.tripName,
     timezone: singleDay.timezone || 'America/Phoenix',
+    ...(singleGoogleMapsUrl ? { google_maps_url: singleGoogleMapsUrl } : {}),
     metadata: {
       version: '2.0.0',
       author: 'Roadtrip Co-Pilot Studio',

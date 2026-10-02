@@ -2,18 +2,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
-  Smartphone,
   QrCode,
   Download,
   Check,
-  AlertTriangle,
   Loader2,
   Share2,
   ExternalLink,
   Copy,
-  RefreshCw,
   FileJson,
   Navigation,
+  Smartphone,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import type { Waypoint } from '../types/routing';
@@ -26,8 +24,6 @@ import {
   type ItineraryExportModel,
 } from '../engine/export';
 import {
-  fetchDeviceStatus,
-  pushItineraryToDevice,
   stageItinerary,
 } from '../services/api';
 
@@ -74,15 +70,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setFileName(defaultFileName);
   }, [defaultFileName]);
   const [copiedJson, setCopiedJson] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedLegIndex, setCopiedLegIndex] = useState<number | null>(null);
 
-  // ADB Push State
-  const [deviceStatus, setDeviceStatus] = useState<{ connected: boolean; devices: string[] } | null>(null);
-  const [isCheckingDevice, setIsCheckingDevice] = useState(false);
-  const [isPushingAdb, setIsPushingAdb] = useState(false);
-  const [adbResult, setAdbResult] = useState<{ success: boolean; message?: string; error?: string } | null>(null);
-
-  // Wi-Fi QR Code State
+  // Phone QR Code State
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [stagedDownloadUrl, setStagedDownloadUrl] = useState<string | null>(null);
   const [isStaging, setIsStaging] = useState(false);
@@ -119,19 +110,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const jsonString = useMemo(() => {
     return exportItineraryToJson(itineraryData, 2);
   }, [itineraryData]);
-
-  // Check ADB device status
-  const checkStatus = async () => {
-    setIsCheckingDevice(true);
-    try {
-      const status = await fetchDeviceStatus();
-      setDeviceStatus(status);
-    } catch {
-      setDeviceStatus({ connected: false, devices: [] });
-    } finally {
-      setIsCheckingDevice(false);
-    }
-  };
 
   // Stage itinerary and generate Wi-Fi QR code
   const setupWifiQr = async () => {
@@ -194,30 +172,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   // Initialize when opened
   useEffect(() => {
     if (isOpen) {
-      checkStatus();
       setupWifiQr();
-      setAdbResult(null);
     }
   }, [isOpen, fileName, itineraryData]);
-
-  // Execute 1-Click ADB Push
-  const handleAdbPush = async () => {
-    setIsPushingAdb(true);
-    setAdbResult(null);
-    try {
-      const result = await pushItineraryToDevice(itineraryData, fileName);
-      setAdbResult(result);
-      if (result.success) {
-        // Refresh device status
-        checkStatus();
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'ADB push request failed';
-      setAdbResult({ success: false, error: msg });
-    } finally {
-      setIsPushingAdb(false);
-    }
-  };
 
   // Download locally
   const handleDownloadFile = () => {
@@ -232,6 +189,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setTimeout(() => setCopiedJson(false), 2000);
     } catch {
       setCopiedJson(false);
+    }
+  };
+
+  // Copy Staged Download URL
+  const handleCopyUrl = async () => {
+    if (!stagedDownloadUrl) return;
+    try {
+      await navigator.clipboard.writeText(stagedDownloadUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    } catch {
+      setCopiedUrl(false);
     }
   };
 
@@ -278,10 +247,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                Export & Phone Handoff
+                Export &amp; Phone Handoff
               </h2>
               <p className="text-xs text-slate-400">
-                1-Click ADB Push, Wi-Fi QR Code Download & Navigation Links
+                Instant QR Code Sync, Google Maps Links &amp; JSON File Export
               </p>
             </div>
           </div>
@@ -303,8 +272,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>Phone Handoff (ADB & Wi-Fi)</span>
+            <QrCode className="w-3.5 h-3.5" />
+            <span>Sync to Phone (QR Code)</span>
           </button>
           <button
             onClick={() => setActiveTab('gmaps')}
@@ -326,7 +295,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             }`}
           >
             <FileJson className="w-3.5 h-3.5" />
-            <span>JSON Preview & File</span>
+            <span>JSON Preview &amp; File</span>
           </button>
         </div>
 
@@ -355,139 +324,89 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </button>
           </div>
 
-          {/* TAB 1: PHONE HANDOFF (ADB & WI-FI QR) */}
+          {/* TAB 1: PHONE HANDOFF (INSTANT QR SYNC) */}
           {activeTab === 'handoff' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Option A: 1-Click ADB Push */}
-              <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 flex flex-col justify-between space-y-3">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Smartphone className="w-4 h-4 text-sky-400" />
-                      <h3 className="text-sm font-bold text-white">1-Click ADB Push</h3>
-                    </div>
-                    <button
-                      onClick={checkStatus}
-                      disabled={isCheckingDevice}
-                      className="p-1 text-slate-400 hover:text-slate-200 transition-colors"
-                      title="Refresh ADB status"
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 ${isCheckingDevice ? 'animate-spin' : ''}`}
-                      />
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Directly transfers the itinerary file into the Roadtrip Co-Pilot app directory on
-                    your connected phone over USB or wireless ADB.
-                  </p>
-
-                  {/* Device Connection Badge */}
-                  <div className="mt-3 p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-xs flex items-center gap-2">
-                    {deviceStatus?.connected ? (
-                      <>
-                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                        <span className="text-emerald-300 font-mono font-medium truncate">
-                          Connected: {deviceStatus.devices.join(', ')}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
-                        <span className="text-amber-300">
-                          {isCheckingDevice ? 'Checking ADB...' : 'No ADB device connected'}
-                        </span>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Result Feedback */}
-                  {adbResult && (
-                    <div
-                      className={`mt-3 p-2.5 rounded-lg border text-xs flex items-start gap-2 ${
-                        adbResult.success
-                          ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-200'
-                          : 'bg-rose-950/70 border-rose-800/80 text-rose-200'
-                      }`}
-                    >
-                      {adbResult.success ? (
-                        <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                      )}
-                      <div className="leading-snug">
-                        {adbResult.success ? adbResult.message : adbResult.error}
-                      </div>
-                    </div>
-                  )}
+            <div className="bg-slate-800/60 border border-slate-700/80 rounded-2xl p-6 flex flex-col items-center text-center space-y-5">
+              <div className="space-y-1 max-w-md">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-950/80 border border-sky-800/80 text-sky-300 text-xs font-semibold mb-1">
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Instant 1-Scan Phone Sync</span>
                 </div>
-
-                <button
-                  onClick={handleAdbPush}
-                  disabled={isPushingAdb || isCheckingDevice}
-                  className={`w-full py-2.5 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2 shadow-lg ${
-                    deviceStatus?.connected
-                      ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-600/25'
-                      : 'bg-slate-700 hover:bg-slate-650 text-slate-200 cursor-pointer'
-                  }`}
-                >
-                  {isPushingAdb ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Pushing to Device via ADB...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Smartphone className="w-4 h-4" />
-                      <span>Push to Phone via ADB</span>
-                    </>
-                  )}
-                </button>
+                <h3 className="text-base font-bold text-white">
+                  Scan to Load Route into Roadtrip Co-Pilot
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Open the Android app and tap <strong>&ldquo;Scan Route QR&rdquo;</strong> (or scan with your phone camera). The route will automatically download, save, and activate!
+                </p>
               </div>
 
-              {/* Option B: Wi-Fi QR Code Download */}
-              <div className="bg-slate-800/60 border border-slate-700/80 rounded-xl p-4 flex flex-col items-center justify-between text-center space-y-3">
-                <div>
-                  <div className="flex items-center justify-center gap-2 mb-1">
-                    <QrCode className="w-4 h-4 text-indigo-400" />
-                    <h3 className="text-sm font-bold text-white">Local Wi-Fi QR Code</h3>
+              {/* QR Code Container */}
+              <div className="bg-white p-3.5 rounded-2xl shadow-xl flex items-center justify-center min-h-[220px] min-w-[220px] ring-4 ring-sky-500/20">
+                {isStaging ? (
+                  <div className="flex flex-col items-center gap-2.5 text-slate-800 text-xs p-6">
+                    <Loader2 className="w-7 h-7 animate-spin text-sky-600" />
+                    <span className="font-medium">Staging route and generating QR...</span>
                   </div>
-                  <p className="text-xs text-slate-400">
-                    Scan with your phone camera while on the same Wi-Fi network to download directly.
-                  </p>
-                </div>
-
-                {/* QR Code Display */}
-                <div className="bg-white p-2 rounded-xl shadow-inner flex items-center justify-center min-h-[160px] min-w-[160px]">
-                  {isStaging ? (
-                    <div className="flex flex-col items-center gap-2 text-slate-800 text-xs">
-                      <Loader2 className="w-6 h-6 animate-spin text-sky-600" />
-                      <span>Generating QR...</span>
-                    </div>
-                  ) : qrDataUrl ? (
-                    <img
-                      src={qrDataUrl}
-                      alt="Wi-Fi Download QR Code"
-                      className="w-40 h-40 object-contain rounded-lg"
-                    />
-                  ) : (
-                    <div className="text-rose-600 text-xs p-2">
-                      {stagingError || 'Failed to generate QR'}
-                    </div>
-                  )}
-                </div>
-
-                {stagedDownloadUrl && (
-                  <div className="w-full">
-                    <div className="text-[10px] font-mono text-slate-400 truncate bg-slate-900/80 px-2 py-1 rounded border border-slate-800">
-                      {stagedDownloadUrl}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      Then tap &ldquo;Import Itinerary&rdquo; in the Android app.
-                    </p>
+                ) : qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="Roadtrip Co-Pilot Sync QR Code"
+                    className="w-48 h-48 object-contain rounded-lg"
+                  />
+                ) : (
+                  <div className="text-rose-600 text-xs p-4 max-w-xs font-medium">
+                    {stagingError || 'Failed to generate sync QR code'}
                   </div>
                 )}
               </div>
+
+              {/* Step Walkthrough */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg text-left text-xs">
+                <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 flex gap-2.5 items-start">
+                  <div className="w-5 h-5 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">
+                    1
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">Tap &ldquo;Scan Route QR&rdquo;</div>
+                    <div className="text-slate-400 text-[11px]">In the Roadtrip Co-Pilot app on your Android phone</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3 flex gap-2.5 items-start">
+                  <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">
+                    2
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white">Instant Activation</div>
+                    <div className="text-slate-400 text-[11px]">Downloads &amp; selects the route automatically. Ready to drive!</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Direct Staged Link */}
+              {stagedDownloadUrl && (
+                <div className="w-full max-w-lg bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-400 text-[11px] font-mono truncate pl-1">
+                    {stagedDownloadUrl}
+                  </span>
+                  <button
+                    onClick={handleCopyUrl}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                  >
+                    {copiedUrl ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Link</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

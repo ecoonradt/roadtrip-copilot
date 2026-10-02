@@ -548,7 +548,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                               {isLast ? (
                                 <>
                                   <span className="text-slate-500">&bull;</span>
-                                  <span className="text-amber-300 font-normal">🌙 Overnight Stay</span>
+                                  <span className="text-amber-300 font-normal whitespace-nowrap">
+                                    {stop.type === 'lodging' ? '🌙 Overnight Stay' : '🏁 Final Stop'}
+                                  </span>
                                 </>
                               ) : stop.dwell_minutes > 0 ? (
                                 <>
@@ -696,7 +698,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           </label>
                           {isLast ? (
                             <div className="px-2 py-1.5 bg-amber-950/40 border border-amber-800/60 rounded-lg text-xs text-amber-300 font-mono flex items-center justify-between">
-                              <span>🌙 Overnight</span>
+                              <span className="whitespace-nowrap">
+                                {stop.type === 'lodging' ? '🌙 Overnight' : '🏁 Final Stop'}
+                              </span>
                               <span className="text-[11px] text-amber-400/80">0m</span>
                             </div>
                           ) : (

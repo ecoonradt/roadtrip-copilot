@@ -423,4 +423,34 @@ class ItineraryTest {
         assertFalse(legacyUntyped.isSilentStop)
         assertTrue(legacyUntyped.shouldAlert)
     }
+
+    @Test
+    fun testParseGoogleMapsUrl() {
+        val json = """
+            {
+                "trip_name": "Test Navigation Trip",
+                "google_maps_url": "https://www.google.com/maps/dir/?api=1&origin=PHX&destination=FLG",
+                "days": [
+                    {
+                        "day": 1,
+                        "date": "2026-10-09",
+                        "title": "Day 1",
+                        "google_maps_url": "https://www.google.com/maps/dir/?api=1&origin=PHX&destination=SEDONA",
+                        "checkpoints": []
+                    },
+                    {
+                        "day": 2,
+                        "date": "2026-10-10",
+                        "title": "Day 2",
+                        "checkpoints": []
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val itinerary = Gson().fromJson(json, Itinerary::class.java)
+        assertEquals("https://www.google.com/maps/dir/?api=1&origin=PHX&destination=SEDONA", itinerary.getGoogleMapsUrlForDay(1))
+        // Day 2 has no day-level URL, so falls back to root itinerary URL
+        assertEquals("https://www.google.com/maps/dir/?api=1&origin=PHX&destination=FLG", itinerary.getGoogleMapsUrlForDay(2))
+    }
 }

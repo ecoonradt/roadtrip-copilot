@@ -176,9 +176,11 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     const serialized = serializeTripToItineraryJson(trip);
 
     expect(serialized.trip_name).toBe('Round Trip Test');
+    expect(serialized.google_maps_url).toContain('https://www.google.com/maps/dir/?api=1');
     expect(Array.isArray((serialized as { days: unknown[] }).days)).toBe(true);
-    const serializedDays = (serialized as { days: Array<{ checkpoints: Array<{ lat: number }> }> }).days;
+    const serializedDays = (serialized as { days: Array<{ checkpoints: Array<{ lat: number }>; google_maps_url?: string }> }).days;
     expect(serializedDays[0].checkpoints[0].lat).toBe(34.123457);
+    expect(serializedDays[0].google_maps_url).toBe(serialized.google_maps_url);
   });
 
   it('preserves address, google_place_id, is_route_anchor, notes, and approachHighway when serializing', () => {

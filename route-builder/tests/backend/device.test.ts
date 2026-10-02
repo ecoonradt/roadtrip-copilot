@@ -1,112 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as os from 'node:os';
 import { DeviceService } from '../../server/services/deviceService.js';
 import { createApp } from '../../server/app.js';
 
 describe('Backend Device & Handoff Service (deviceService.ts & routes/device.ts)', () => {
   describe('DeviceService Unit Tests', () => {
-    it('detects connected devices when ADB reports device state', async () => {
-      const mockAdb = vi.fn().mockResolvedValue({
-        stdout: `List of devices attached
-28251JEHN01234\tdevice
-emulator-5554\tdevice
-`,
-        stderr: '',
-      });
-
-      const service = new DeviceService({ adbExecutor: mockAdb });
-      const status = await service.getConnectedDevices();
-
-      expect(status.connected).toBe(true);
-      expect(status.devices).toEqual(['28251JEHN01234', 'emulator-5554']);
-      expect(mockAdb).toHaveBeenCalledWith('adb devices', { timeout: 3000 });
-    });
-
-    it('ignores unauthorized or offline devices in ADB output', async () => {
-      const mockAdb = vi.fn().mockResolvedValue({
-        stdout: `List of devices attached
-emulator-5554\toffline
-unauth_device_123\tunauthorized
-`,
-        stderr: '',
-      });
-
-      const service = new DeviceService({ adbExecutor: mockAdb });
-      const status = await service.getConnectedDevices();
-
-      expect(status.connected).toBe(false);
-      expect(status.devices).toEqual([]);
-    });
-
-    it('handles ADB command failure gracefully without throwing or hanging', async () => {
-      const mockAdb = vi.fn().mockRejectedValue(new Error('spawn adb ENOENT'));
-
-      const service = new DeviceService({ adbExecutor: mockAdb });
-      const status = await service.getConnectedDevices();
-
-      expect(status.connected).toBe(false);
-      expect(status.devices).toEqual([]);
-    });
-
-    it('Invariant: ADB push returns clean error immediately if no device is connected without hanging', async () => {
-      const mockAdb = vi.fn().mockResolvedValue({
-        stdout: 'List of devices attached\n\n',
-        stderr: '',
-      });
-
-      const service = new DeviceService({ adbExecutor: mockAdb });
-      const result = await service.pushItinerary({ test: true }, 'test.json');
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('No connected Android device found via ADB');
-      // Should not have attempted mkdir or push commands
-      expect(mockAdb).toHaveBeenCalledTimes(1);
-      expect(mockAdb).toHaveBeenCalledWith('adb devices', { timeout: 3000 });
-    });
-
-    it('executes push correctly when a device is connected', async () => {
-      const commandsExecuted: string[] = [];
-      const mockAdb = vi.fn().mockImplementation(async (cmd: string) => {
-        commandsExecuted.push(cmd);
-        if (cmd === 'adb devices') {
-          return { stdout: 'List of devices attached\nPixel7Pro_001\tdevice\n', stderr: '' };
-        }
-        return { stdout: '', stderr: '' };
-      });
-
-      const service = new DeviceService({ adbExecutor: mockAdb });
-      const result = await service.pushItinerary(
-        { trip_name: 'Test Route' },
-        'my_route.json'
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.message).toContain('Successfully pushed my_route.json to device (Pixel7Pro_001)');
-      expect(commandsExecuted.length).toBe(3);
-      expect(commandsExecuted[0]).toBe('adb devices');
-      expect(commandsExecuted[1]).toContain('shell mkdir -p /sdcard/Android/data/com.roadtrip.copilot/files/itineraries/');
-      expect(commandsExecuted[2]).toContain('push');
-      expect(commandsExecuted[2]).toContain('/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/my_route.json');
-    });
-
-    it('handles ADB push failure gracefully and returns clean error', async () => {
-      const mockAdb = vi.fn().mockImplementation(async (cmd: string) => {
-        if (cmd === 'adb devices') {
-          return { stdout: 'List of devices attached\nPixel7Pro_001\tdevice\n', stderr: '' };
-        }
-        if (cmd.includes('push')) {
-          throw new Error('remote secure_mkdirs failed: Permission denied');
-        }
-        return { stdout: '', stderr: '' };
-      });
-
-      const service = new DeviceService({ adbExecutor: mockAdb });
-      const result = await service.pushItinerary({ trip_name: 'Test' }, 'test.json');
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Permission denied');
-    });
-
     it('resolves local Wi-Fi IP address prioritizing wireless network interfaces', () => {
       const mockInterfaces = () =>
         ({
@@ -161,88 +59,6 @@ unauth_device_123\tunauthorized
   });
 
   describe('Device & Handoff Fastify Route Endpoints', () => {
-    it('GET /api/device/status returns device list and connection status', async () => {
-      const mockService = new DeviceService({
-        adbExecutor: vi.fn().mockResolvedValue({
-          stdout: 'List of devices attached\nPixel_Device_1\tdevice\n',
-          stderr: '',
-        }),
-      });
-
-      const app = createApp({ deviceService: mockService });
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/device/status',
-      });
-
-      expect(response.statusCode).toBe(200);
-      const data = response.json();
-      expect(data.connected).toBe(true);
-      expect(data.devices).toEqual(['Pixel_Device_1']);
-    });
-
-    it('POST /api/device/push rejects with 400 when itinerary body is missing', async () => {
-      const app = createApp();
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/device/push',
-        payload: {},
-      });
-
-      expect(response.statusCode).toBe(400);
-      expect(response.json().error).toContain('Missing required "itinerary"');
-    });
-
-    it('POST /api/device/push returns 503 with clean error when no device is connected', async () => {
-      const mockService = new DeviceService({
-        adbExecutor: vi.fn().mockResolvedValue({
-          stdout: 'List of devices attached\n\n',
-          stderr: '',
-        }),
-      });
-
-      const app = createApp({ deviceService: mockService });
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/device/push',
-        payload: {
-          itinerary: { trip_name: 'Test Itinerary' },
-          fileName: 'itinerary.json',
-        },
-      });
-
-      expect(response.statusCode).toBe(503);
-      const data = response.json();
-      expect(data.success).toBe(false);
-      expect(data.error).toContain('No connected Android device found via ADB');
-    });
-
-    it('POST /api/device/push returns 200 when device push succeeds', async () => {
-      const mockService = new DeviceService({
-        adbExecutor: vi.fn().mockImplementation(async (cmd: string) => {
-          if (cmd === 'adb devices') {
-            return { stdout: 'List of devices attached\nPixel_1\tdevice\n', stderr: '' };
-          }
-          return { stdout: '', stderr: '' };
-        }),
-      });
-
-      const app = createApp({ deviceService: mockService });
-      const response = await app.inject({
-        method: 'POST',
-        url: '/api/device/push',
-        payload: {
-          itinerary: { trip_name: 'Test Itinerary' },
-          fileName: 'route.json',
-        },
-      });
-
-      expect(response.statusCode).toBe(200);
-      const data = response.json();
-      expect(data.success).toBe(true);
-      expect(data.message).toContain('Successfully pushed route.json to device');
-    });
-
     it('GET /api/device/network-info returns IP address and port', async () => {
       const mockService = new DeviceService({
         networkInterfacesProvider: () => ({
@@ -308,6 +124,18 @@ unauth_device_123\tunauthorized
       });
       expect(notFoundResponse.statusCode).toBe(404);
       expect(notFoundResponse.json().error).toContain('not found or expired');
+    });
+
+    it('POST /api/device/stage rejects with 400 when itinerary is missing', async () => {
+      const app = createApp();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/device/stage',
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toContain('Missing required "itinerary"');
     });
   });
 });

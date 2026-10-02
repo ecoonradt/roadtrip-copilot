@@ -1,6 +1,7 @@
 import type { Waypoint, WaypointType } from '../types/routing';
-import type { ScheduledStop } from './types';
+import type { ScheduledStop, CoordinateLocation } from './types';
 import { detectTimezone } from './cascade';
+import { generateGoogleMapsUrls } from './googleMapsUrl';
 
 export interface ItineraryNotificationV2 {
   title: string;
@@ -35,6 +36,7 @@ export interface DayV2 {
   origin?: string;
   destination?: string;
   departure_time?: string;
+  google_maps_url?: string;
   checkpoints: CheckpointV2[];
 }
 
@@ -53,6 +55,7 @@ export interface ItineraryMetadataV2 {
 export interface MultiDayItineraryV2 {
   trip_name: string;
   dates?: ItineraryDatesV2;
+  google_maps_url?: string;
   metadata: ItineraryMetadataV2;
   days: DayV2[];
 }
@@ -61,6 +64,7 @@ export interface SingleRouteItineraryV2 {
   trip_name: string;
   date?: string;
   timezone?: string;
+  google_maps_url?: string;
   metadata: ItineraryMetadataV2;
   origin?: string;
   destination?: string;
@@ -226,6 +230,20 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
     const inferredDayTz = firstCp ? detectTimezone(firstCp.lat, firstCp.lng) : 'America/Phoenix';
     const dayTz = dayInput.timezone && dayInput.timezone !== 'America/Phoenix' ? dayInput.timezone : inferredDayTz;
 
+    const navLocations: CoordinateLocation[] = checkpoints.map((cp) => ({
+      lat: cp.lat,
+      lng: cp.lng,
+      name: cp.name,
+      placeName: cp.place_name,
+      address: cp.address,
+      placeId: cp.google_place_id,
+      type: cp.type as WaypointType,
+      dwellMinutes: cp.dwell_minutes,
+      isRouteAnchor: cp.is_route_anchor,
+    }));
+    const gmapsResult = generateGoogleMapsUrls(navLocations);
+    const dayGoogleMapsUrl = gmapsResult.primaryUrl || undefined;
+
     const dayObj: DayV2 = {
       day: dayInput.dayNumber,
       date: dayInput.date,
@@ -234,6 +252,7 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
       origin: dayInput.origin || firstStopName || 'Origin',
       destination: dayInput.destination || lastStopName || 'Destination',
       departure_time: dayInput.departureTime || checkpoints[0]?.target_time || '08:00:00',
+      ...(dayGoogleMapsUrl ? { google_maps_url: dayGoogleMapsUrl } : {}),
       checkpoints,
     };
 
@@ -249,6 +268,7 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
       start: startDate,
       end: endDate,
     },
+    ...(days[0]?.google_maps_url ? { google_maps_url: days[0].google_maps_url } : {}),
     metadata: {
       version: '2.0.0',
       author: options.author || 'Roadtrip Co-Pilot Route Builder',
@@ -292,9 +312,24 @@ export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): S
   const inferredTz = firstCp ? detectTimezone(firstCp.lat, firstCp.lng) : 'America/Phoenix';
   const resolvedTimezone = options.timezone && options.timezone !== 'America/Phoenix' ? options.timezone : inferredTz;
 
+  const navLocations: CoordinateLocation[] = checkpoints.map((cp) => ({
+    lat: cp.lat,
+    lng: cp.lng,
+    name: cp.name,
+    placeName: cp.place_name,
+    address: cp.address,
+    placeId: cp.google_place_id,
+    type: cp.type as WaypointType,
+    dwellMinutes: cp.dwell_minutes,
+    isRouteAnchor: cp.is_route_anchor,
+  }));
+  const gmapsResult = generateGoogleMapsUrls(navLocations);
+  const singleGoogleMapsUrl = gmapsResult.primaryUrl || undefined;
+
   const result: SingleRouteItineraryV2 = {
     trip_name: options.tripName,
     timezone: resolvedTimezone,
+    ...(singleGoogleMapsUrl ? { google_maps_url: singleGoogleMapsUrl } : {}),
     metadata: {
       version: '2.0.0',
       author: options.author || 'Roadtrip Co-Pilot Route Builder',

@@ -61,7 +61,7 @@ route-builder/
 │   ├── routes/
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
 │   │   ├── ai.ts               # /api/copilot/generate & /api/ai/status
-│   │   ├── device.ts           # /api/device (status, push, download, staging)
+│   │   ├── device.ts           # /api/device (network-info, staging, download)
 │   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
 │   │   └── scout.ts            # /api/ai/scout (conversational assistant & quick prompts)
 │   ├── services/
@@ -71,7 +71,7 @@ route-builder/
 │   │   ├── promptBuilder.ts    # Prompt contract generator
 │   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
 │   │   ├── aiService.ts        # Pluggable AI adapters (Agy, Gemini API) & availability status
-│   │   ├── deviceService.ts    # ADB subprocess management and local IP Wi-Fi discovery
+│   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
 │   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
 │   │   └── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
 │   └── types/                  # Strict server TypeScript types (routing, ai, scout)

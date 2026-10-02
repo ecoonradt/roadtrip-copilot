@@ -314,21 +314,21 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
               <MapPin className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white truncate max-w-md">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-white truncate max-w-[260px] sm:max-w-md">
                   {name || waypoint.name}
                 </h2>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono capitalize">
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono capitalize whitespace-nowrap shrink-0">
                   {type.replace(/_/g, ' ')}
                 </span>
                 {isFirst && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800 text-emerald-300 font-medium">
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800 text-emerald-300 font-medium whitespace-nowrap shrink-0">
                     🟢 Origin
                   </span>
                 )}
                 {isLast && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 border border-amber-800 text-amber-300 font-medium">
-                    🌙 Final Stop
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 border border-amber-800 text-amber-300 font-medium whitespace-nowrap shrink-0">
+                    {type === 'lodging' ? '🌙 Overnight Stay' : '🏁 Final Stop'}
                   </span>
                 )}
               </div>
@@ -452,9 +452,9 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
                 {isLast && (
                   <div className="p-2.5 bg-amber-950/30 border border-amber-800/50 rounded-lg text-xs text-amber-200/90 flex items-start gap-2">
-                    <span className="text-amber-400 text-sm">🌙</span>
+                    <span className="text-amber-400 text-sm">{type === 'lodging' ? '🌙' : '🏁'}</span>
                     <div>
-                      <span className="font-semibold text-amber-300">Final Destination / Overnight Stay:</span>{' '}
+                      <span className="font-semibold text-amber-300">{type === 'lodging' ? 'Overnight Stay:' : 'Final Stop:'}</span>{' '}
                       Keeping dwell at 0m marks this as the day&apos;s end without scheduling a false departure time.
                     </div>
                   </div>

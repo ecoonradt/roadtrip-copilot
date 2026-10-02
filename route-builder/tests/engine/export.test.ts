@@ -274,6 +274,8 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       expect(itinerary.days[0].checkpoints[0].target_time).toBe('09:00:00');
       expect(itinerary.days[0].checkpoints[1].target_time).toBe('10:15:00');
       expect(itinerary.days[0].checkpoints[1].dwell_minutes).toBe(20);
+      expect(itinerary.days[0].google_maps_url).toContain('https://www.google.com/maps/dir/?api=1');
+      expect(itinerary.google_maps_url).toBe(itinerary.days[0].google_maps_url);
     });
   });
 
@@ -288,6 +290,7 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
 
       expect(itinerary.trip_name).toBe('Test Run: Albany to Nassau');
       expect(itinerary.checkpoints).toHaveLength(3);
+      expect(itinerary.google_maps_url).toContain('https://www.google.com/maps/dir/?api=1');
       expect(itinerary.checkpoints[0].offset_minutes_from_start).toBe(0);
       expect(itinerary.checkpoints[1].offset_minutes_from_start).toBe(15);
       expect(itinerary.checkpoints[2].offset_minutes_from_start).toBe(30);

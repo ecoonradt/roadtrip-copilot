@@ -57,6 +57,9 @@ class CopilotService : Service() {
         private val _activeCheckpoints = MutableStateFlow<List<com.roadtrip.copilot.model.Checkpoint>>(emptyList())
         val activeCheckpoints = _activeCheckpoints.asStateFlow()
 
+        private val _activeGoogleMapsUrl = MutableStateFlow<String?>(null)
+        val activeGoogleMapsUrl = _activeGoogleMapsUrl.asStateFlow()
+
         const val PREFS_NAME = "copilot_prefs"
         const val PREF_ROUTE_FILE = "pref_route_file"
         const val PREF_DAY_NUMBER = "pref_day_number"
@@ -107,9 +110,12 @@ class CopilotService : Service() {
                     val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
                     val title = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
 
+                    val googleMapsUrl = itinerary.getGoogleMapsUrlForDay(dayNumber)
+
                     withContext(Dispatchers.Main) {
                         _activeRouteTitle.value = title
                         _activeCheckpoints.value = checkpoints
+                        _activeGoogleMapsUrl.value = googleMapsUrl
 
                         val service = instance
                         if (_isRunning.value && service != null && autoRestartIfRunning) {
@@ -306,6 +312,7 @@ class CopilotService : Service() {
                 val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
                 _activeRouteTitle.value = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
                 _activeCheckpoints.value = checkpoints
+                _activeGoogleMapsUrl.value = itinerary.getGoogleMapsUrlForDay(dayNumber)
 
                 emitLog("Loaded ${checkpoints.size} waypoints for ${itinerary.tripName} (Day $dayNumber).")
             } catch (e: Exception) {
