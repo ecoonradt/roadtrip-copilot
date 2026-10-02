@@ -103,7 +103,8 @@ function getInitialRouteInfo(): { file: string; day: number } {
 
 export function App() {
   const [trip, setTrip] = useState<ParsedTrip>(INITIAL_FALLBACK_TRIP);
-  const [activeDayIndex, setActiveDayIndex] = useState<number>(0);
+  const [activeDayIndex, setActiveDayIndex] = useState<number>(() => getInitialRouteInfo().day);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
 
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
@@ -168,6 +169,7 @@ export function App() {
           setLastSavedTripJson(JSON.stringify(parsed));
           const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
           setActiveDayIndex(validDay);
+          setRoute(null);
           if (parsed.isAdHoc || parsed.days[validDay]?.isAdHoc) {
             setSchedulingMode('adhoc');
           }
@@ -177,6 +179,7 @@ export function App() {
           url.searchParams.set('route', file);
           url.searchParams.set('day', String(validDay));
           window.history.replaceState({}, '', url.toString());
+          setIsInitializing(false);
           return;
         }
       } catch {
@@ -189,6 +192,7 @@ export function App() {
               setTrip(parsed);
               setLastSavedTripJson(JSON.stringify(parsed));
               setActiveDayIndex(0);
+              setRoute(null);
               if (parsed.isAdHoc || parsed.days[0]?.isAdHoc) {
                 setSchedulingMode('adhoc');
               }
@@ -198,6 +202,7 @@ export function App() {
               url.searchParams.set('route', 'sample_itinerary.json');
               url.searchParams.set('day', '0');
               window.history.replaceState({}, '', url.toString());
+              setIsInitializing(false);
               return;
             }
           } catch {
@@ -207,6 +212,8 @@ export function App() {
       }
       if (isSubscribed) {
         setLastSavedTripJson(JSON.stringify(INITIAL_FALLBACK_TRIP));
+        setRoute(null);
+        setIsInitializing(false);
       }
     };
 
@@ -258,10 +265,12 @@ export function App() {
 
   // Compute OSRM route whenever coordinate sequence of the active day changes
   useEffect(() => {
-    if (waypoints.length < 2) {
-      setRoute(null);
-      setRouteError(null);
-      setIsLoadingRoute(false);
+    if (isInitializing || waypoints.length < 2) {
+      if (!isInitializing) {
+        setRoute(null);
+        setRouteError(null);
+        setIsLoadingRoute(false);
+      }
       return;
     }
 
@@ -294,7 +303,7 @@ export function App() {
     return () => {
       isSubscribed = false;
     };
-  }, [coordKey]);
+  }, [coordKey, isInitializing]);
 
   // Extract pairwise driving durations and distances from OSRM route
   const { driveDurationsSeconds, driveDistancesMiles } = useMemo(() => {
@@ -639,8 +648,12 @@ export function App() {
     localStorage.setItem('copilot_active_day', String(index));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(index));
+    const fileName = trip.fileName || localStorage.getItem('copilot_active_file');
+    if (fileName) {
+      url.searchParams.set('route', fileName);
+    }
     window.history.replaceState({}, '', url.toString());
-  }, [trip.days]);
+  }, [trip.days, trip.fileName]);
 
   const handleAddDay = useCallback(() => {
     setTrip((prev) => {
@@ -685,8 +698,12 @@ export function App() {
     localStorage.setItem('copilot_active_day', String(nextIdx));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(nextIdx));
+    const fileName = trip.fileName || localStorage.getItem('copilot_active_file');
+    if (fileName) {
+      url.searchParams.set('route', fileName);
+    }
     window.history.replaceState({}, '', url.toString());
-  }, [trip.days]);
+  }, [trip.days, trip.fileName]);
 
   const handleDeleteDay = useCallback((index: number) => {
     if (trip.days.length <= 1) return;
@@ -703,8 +720,12 @@ export function App() {
     localStorage.setItem('copilot_active_day', String(nextIdx));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(nextIdx));
+    const fileName = trip.fileName || localStorage.getItem('copilot_active_file');
+    if (fileName) {
+      url.searchParams.set('route', fileName);
+    }
     window.history.replaceState({}, '', url.toString());
-  }, [activeDayIndex, trip.days.length]);
+  }, [activeDayIndex, trip.days.length, trip.fileName]);
 
   const handleSelectTrip = useCallback((newTrip: ParsedTrip) => {
     setTrip(newTrip);
@@ -769,8 +790,10 @@ export function App() {
       setLastSavedTripJson(JSON.stringify(updatedTrip));
       setSaveSuccess(true);
       localStorage.setItem('copilot_active_file', fileName);
+      localStorage.setItem('copilot_active_day', String(activeDayIndex));
       const url = new URL(window.location.href);
       url.searchParams.set('route', fileName);
+      url.searchParams.set('day', String(activeDayIndex));
       window.history.replaceState({}, '', url.toString());
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: unknown) {
@@ -880,6 +903,7 @@ export function App() {
             waypoints={waypoints}
             route={route}
             activeDayIndex={activeDayIndex}
+            isInitializing={isInitializing}
             onMapClick={handleMapClick}
             onDeleteWaypoint={handleDeleteWaypoint}
             onSelectWaypoint={(id) => setSelectedWaypointId(id)}

@@ -22,6 +22,7 @@ export interface MapCanvasProps {
   waypoints: Waypoint[];
   route: RouteResponse | null;
   activeDayIndex?: number;
+  isInitializing?: boolean;
   onMapClick?: (lat: number, lng: number) => void;
   onDeleteWaypoint?: (id: string) => void;
   onSelectWaypoint?: (id: string) => void;
@@ -102,13 +103,13 @@ const MapViewportManager: React.FC<{
   waypoints: Waypoint[];
   routeCoordinates: [number, number][];
   activeDayIndex?: number;
-}> = ({ waypoints, routeCoordinates, activeDayIndex = 0 }) => {
+  isInitializing?: boolean;
+}> = ({ waypoints, routeCoordinates, activeDayIndex = 0, isInitializing = false }) => {
   const map = useMap();
   const lastSignatureRef = useRef<string>('');
 
   useEffect(() => {
-    if (waypoints.length === 0) {
-      lastSignatureRef.current = '';
+    if (isInitializing || waypoints.length === 0) {
       return;
     }
 
@@ -141,7 +142,7 @@ const MapViewportManager: React.FC<{
       const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
     }
-  }, [map, waypoints, routeCoordinates, activeDayIndex]);
+  }, [map, waypoints, routeCoordinates, activeDayIndex, isInitializing]);
 
   return null;
 };
@@ -202,6 +203,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   waypoints,
   route,
   activeDayIndex = 0,
+  isInitializing = false,
   onMapClick,
   onDeleteWaypoint,
   onSelectWaypoint,
@@ -219,8 +221,13 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     return route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
   }, [route]);
 
-  // Default center around Arizona / New Mexico road trip corridor
-  const defaultCenter: [number, number] = [34.8, -111.8];
+  // Default center around current waypoints or Arizona / New Mexico corridor
+  const defaultCenter = useMemo<[number, number]>(() => {
+    if (waypoints.length > 0) {
+      return [waypoints[0].lat, waypoints[0].lng];
+    }
+    return [34.8, -111.8];
+  }, [waypoints]);
 
   return (
     <div className="relative w-full h-full">
@@ -261,6 +268,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           waypoints={waypoints}
           routeCoordinates={polylineCoords}
           activeDayIndex={activeDayIndex}
+          isInitializing={isInitializing}
         />
         <FitRouteButton
           waypoints={waypoints}
