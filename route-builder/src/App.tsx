@@ -269,6 +269,7 @@ export function App() {
     const updateRoute = async () => {
       setIsLoadingRoute(true);
       setRouteError(null);
+      setRoute(null);
       try {
         const coords = waypoints.map((w) => ({ lat: w.lat, lng: w.lng }));
         const routeData = await fetchRoute(coords);
@@ -626,6 +627,7 @@ export function App() {
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
     setActiveDayIndex(index);
+    setRoute(null);
     const targetDay = trip.days[index];
     if (targetDay) {
       setScoutScope({
@@ -877,6 +879,7 @@ export function App() {
           <MapCanvas
             waypoints={waypoints}
             route={route}
+            activeDayIndex={activeDayIndex}
             onMapClick={handleMapClick}
             onDeleteWaypoint={handleDeleteWaypoint}
             onSelectWaypoint={(id) => setSelectedWaypointId(id)}

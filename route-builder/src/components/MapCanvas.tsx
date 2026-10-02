@@ -21,6 +21,7 @@ export interface ScoutPreviewPin {
 export interface MapCanvasProps {
   waypoints: Waypoint[];
   route: RouteResponse | null;
+  activeDayIndex?: number;
   onMapClick?: (lat: number, lng: number) => void;
   onDeleteWaypoint?: (id: string) => void;
   onSelectWaypoint?: (id: string) => void;
@@ -100,7 +101,8 @@ const MapResizeHandler: React.FC<{ isScoutOpen?: boolean }> = ({ isScoutOpen }) 
 const MapViewportManager: React.FC<{
   waypoints: Waypoint[];
   routeCoordinates: [number, number][];
-}> = ({ waypoints, routeCoordinates }) => {
+  activeDayIndex?: number;
+}> = ({ waypoints, routeCoordinates, activeDayIndex = 0 }) => {
   const map = useMap();
   const lastSignatureRef = useRef<string>('');
 
@@ -110,14 +112,19 @@ const MapViewportManager: React.FC<{
       return;
     }
 
-    // Generate a spatial signature based on coordinates and route availability
+    // Generate a spatial signature based on active day, waypoint coordinates, and route geometry
     const coordsSignature = waypoints
       .map((w) => `${w.lat.toFixed(5)},${w.lng.toFixed(5)}`)
       .join(';');
-    const hasRoute = routeCoordinates.length > 0;
-    const currentSignature = `${coordsSignature}:${hasRoute}`;
 
-    // Preserve user zoom and pan if the route geometry and coordinates have not changed
+    const routeSignature =
+      routeCoordinates.length > 0
+        ? `${routeCoordinates.length}:${routeCoordinates[0][0].toFixed(3)},${routeCoordinates[0][1].toFixed(3)}->${routeCoordinates[routeCoordinates.length - 1][0].toFixed(3)},${routeCoordinates[routeCoordinates.length - 1][1].toFixed(3)}`
+        : 'none';
+
+    const currentSignature = `day:${activeDayIndex}|coords:${coordsSignature}|route:${routeSignature}`;
+
+    // Preserve user zoom and pan if the day, route geometry, and coordinates have not changed
     if (currentSignature === lastSignatureRef.current) {
       return;
     }
@@ -127,14 +134,14 @@ const MapViewportManager: React.FC<{
     // Ensure Leaflet has up-to-date viewport dimensions before fitting bounds
     map.invalidateSize({ pan: false });
 
-    if (hasRoute) {
+    if (routeCoordinates.length > 0) {
       const bounds = L.latLngBounds(routeCoordinates);
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
     } else {
       const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
     }
-  }, [map, waypoints, routeCoordinates]);
+  }, [map, waypoints, routeCoordinates, activeDayIndex]);
 
   return null;
 };
@@ -194,6 +201,7 @@ const MapClickHandler: React.FC<{
 export const MapCanvas: React.FC<MapCanvasProps> = ({
   waypoints,
   route,
+  activeDayIndex = 0,
   onMapClick,
   onDeleteWaypoint,
   onSelectWaypoint,
@@ -252,6 +260,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         <MapViewportManager
           waypoints={waypoints}
           routeCoordinates={polylineCoords}
+          activeDayIndex={activeDayIndex}
         />
         <FitRouteButton
           waypoints={waypoints}
