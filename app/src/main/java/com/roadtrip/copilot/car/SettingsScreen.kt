@@ -15,32 +15,11 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
 
     override fun onGetTemplate(): Template {
         val prefs = carContext.getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
-        val useMediaStream = prefs.getBoolean("pref_use_media_stream", true)
         val pauseMusic = prefs.getBoolean("pref_pause_music", false)
 
         val listBuilder = ItemList.Builder()
 
-        // 1. Media Channel Toggle
-        val mediaToggle = Toggle.Builder { isChecked ->
-            prefs.edit().putBoolean("pref_use_media_stream", isChecked).apply()
-            CopilotService.getInstance()?.setUseMediaStreamChannel(isChecked)
-            invalidate()
-        }.setChecked(useMediaStream).build()
-
-        listBuilder.addItem(
-            Row.Builder()
-                .setTitle("Use Media Channel (Car Stereo Volume)")
-                .addText(
-                    if (useMediaStream)
-                        "ON: Pegged to music volume knob (pauses music)"
-                    else
-                        "OFF: Pegged to Navigation Guidance volume"
-                )
-                .setToggle(mediaToggle)
-                .build()
-        )
-
-        // 2. Pause Music Completely Toggle
+        // 1. Pause Music Completely Toggle
         val pauseToggle = Toggle.Builder { isChecked ->
             prefs.edit().putBoolean("pref_pause_music", isChecked).apply()
             CopilotService.getInstance()?.setPauseMusicInsteadOfDuck(isChecked)
@@ -51,9 +30,7 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
             Row.Builder()
                 .setTitle("Pause Music Completely")
                 .addText(
-                    if (useMediaStream)
-                        "Enforced while on Media Channel"
-                    else if (pauseMusic)
+                    if (pauseMusic)
                         "ON: Pauses music completely during announcements"
                     else
                         "OFF: Ducks volume smoothly (Google Maps style)"

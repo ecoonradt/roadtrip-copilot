@@ -26,11 +26,12 @@
 ### B. Audio Ducking, Stream Routing & Calibration
 * When approaching a waypoint, the app ducks or optionally pauses whatever audio is playing (Spotify, podcasts) rather than talking over it.
 * Uses Android's `AudioManager` with `AudioFocusRequest`:
-  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (default) or `AUDIOFOCUS_GAIN_TRANSIENT` (when "Pause music completely" is toggled).
-  * Audio Usage: `AudioAttributes.USAGE_MEDIA` (default, pegged to the car stereo's volume knob) or `AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` (car navigation guidance channel).
+  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (default, Google Maps style smooth ducking) or `AUDIOFOCUS_GAIN_TRANSIENT` (when "Pause music completely" is toggled).
+  * Audio Usage: `AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` (car navigation guidance channel, matching Android Auto projection requirements).
   * Content Type: `AudioAttributes.CONTENT_TYPE_SPEECH`.
-* Provides a 12-second continuous calibration speech loop so the driver can adjust the car volume knob in real time before driving.
+* Provides a 12-second continuous calibration speech loop so the driver can adjust the car guidance volume knob in real time before driving.
 * Focus must be abandoned immediately upon speech completion (`TextToSpeech.OnUtteranceProgressListener.onDone`) so music smoothly returns to 100% volume.
+* Heads-up waypoint alert notifications use a dedicated silent channel (`setSound(null, null)`) to prevent notification chime collisions with simultaneous TTS speech.
 
 ### C. Android Auto Heads-Up Notifications & Requirements
 * Approaching waypoints triggers an immediate high-priority heads-up notification projected onto the car screen over Google Maps.

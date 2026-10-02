@@ -8,8 +8,7 @@
     <string name="btn_browse_file">Browse Itinerary File (JSON)</string>
     <string name="title_in_car_audio">In-Car Audio &amp; Calibration</string>
     <string name="title_activity_log">Activity &amp; Diagnostics Log</string>
-    <string name="audio_match_volume">Match Car Volume Knob (Media channel)</string>
-    <string name="audio_mute_music">Mute music completely during alerts (Default: Duck)</string>
+    <string name="audio_mute_music">Pause music completely during alerts (Default: Duck volume)</string>
     <string name="btn_test_audio">Test Audio Speech</string>
     <string name="btn_test_alert">Test Heads-Up Card &amp; Ducking</string>
     <string name="btn_calibrate">Calibrate Car Volume (12s Loop)</string>

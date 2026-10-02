@@ -85,7 +85,6 @@ class MainActivity : AppCompatActivity() {
             copilotService = binder.getService()
             isBound = true
             copilotService?.setPauseMusicInsteadOfDuck(binding.switchPauseMusic.isChecked)
-            copilotService?.setUseMediaStreamChannel(binding.switchUseMediaChannel.isChecked)
             handleIncomingIntent(intent)
         }
 
@@ -135,6 +134,12 @@ class MainActivity : AppCompatActivity() {
             }
             "calibrate_audio" -> {
                 copilotService?.calibrateAudio()
+            }
+            "start_route" -> {
+                startCopilotService()
+            }
+            "stop_route" -> {
+                stopCopilotService()
             }
         }
     }
@@ -372,7 +377,6 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
-        binding.switchUseMediaChannel.isChecked = prefs.getBoolean("pref_use_media_stream", true)
         binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
         lifecycleScope.launch {
             RouteRepository.getInstance(this@MainActivity).refreshRoutes()
@@ -630,13 +634,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
-
-        binding.switchUseMediaChannel.isChecked = prefs.getBoolean("pref_use_media_stream", true)
-        binding.switchUseMediaChannel.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("pref_use_media_stream", isChecked).apply()
-            copilotService?.setUseMediaStreamChannel(isChecked)
-            appendLog("Audio channel: ${if (isChecked) "Media Stream (Matches car stereo volume knob)" else "Navigation Guidance Channel"}")
-        }
 
         binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
         binding.switchPauseMusic.setOnCheckedChangeListener { _, isChecked ->

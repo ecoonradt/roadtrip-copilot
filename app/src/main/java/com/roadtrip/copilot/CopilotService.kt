@@ -213,7 +213,6 @@ class CopilotService : Service() {
 
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
         audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", false)
-        audioDuckEngine.useMediaStreamChannel = prefs.getBoolean("pref_use_media_stream", true)
 
         locationTracker = LocationTracker(this) { evalResult ->
             handleEvaluationResult(evalResult)
@@ -222,10 +221,6 @@ class CopilotService : Service() {
 
     fun setPauseMusicInsteadOfDuck(pause: Boolean) {
         audioDuckEngine.pauseMusicInsteadOfDuck = pause
-    }
-
-    fun setUseMediaStreamChannel(useMedia: Boolean) {
-        audioDuckEngine.useMediaStreamChannel = useMedia
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -352,14 +347,13 @@ class CopilotService : Service() {
     }
 
     fun testAudio() {
-        val channelName = if (audioDuckEngine.useMediaStreamChannel) "media stream (music channel)" else "navigation guidance channel"
-        emitLog("Testing car audio via $channelName...")
-        audioDuckEngine.speakWithDucking("Roadtrip co-pilot audio test. Connected via $channelName and ducking is operational.")
+        val mode = if (audioDuckEngine.pauseMusicInsteadOfDuck) "pause music" else "duck music"
+        emitLog("Testing car audio via navigation guidance channel ($mode)...")
+        audioDuckEngine.speakWithDucking("Roadtrip co-pilot audio test. Navigation guidance channel connected and ducking is operational.")
     }
 
     fun calibrateAudio() {
-        val channelName = if (audioDuckEngine.useMediaStreamChannel) "media stream" else "navigation guidance stream"
-        emitLog("Starting audio calibration speech loop on $channelName...")
+        emitLog("Starting audio calibration speech loop on navigation guidance stream...")
         audioDuckEngine.startContinuousCalibrationSpeech()
     }
 

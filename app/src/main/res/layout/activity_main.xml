@@ -364,26 +364,14 @@
                     android:visibility="gone">
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchUseMediaChannel"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:maxLines="1"
-                        android:ellipsize="end"
-                        android:text="@string/audio_match_volume"
-                        android:textColor="@color/text_light"
-                        android:textSize="12sp"
-                        app:useMaterialThemeColors="true" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/switchPauseMusic"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
+                        android:checked="false"
                         android:maxLines="1"
                         android:ellipsize="end"
                         android:text="@string/audio_mute_music"
-                        android:textColor="@color/text_muted"
+                        android:textColor="@color/text_light"
                         android:textSize="12sp"
                         app:useMaterialThemeColors="true" />
 

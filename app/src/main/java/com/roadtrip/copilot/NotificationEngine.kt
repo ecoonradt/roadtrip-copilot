@@ -17,7 +17,7 @@ class NotificationEngine(private val context: Context) {
 
     companion object {
         const val CHANNEL_STATUS_ID = "copilot_status_channel"
-        const val CHANNEL_ALERT_ID = "copilot_alert_channel_v3"
+        const val CHANNEL_ALERT_ID = "copilot_alert_channel_v4"
         const val FOREGROUND_NOTIFICATION_ID = 1001
         private const val ALERT_NOTIFICATION_ID_BASE = 2000
     }
@@ -42,13 +42,7 @@ class NotificationEngine(private val context: Context) {
             setShowBadge(false)
         }
 
-        // Heads-up alert channel for upcoming waypoints
-        val soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
-        val audioAttr = android.media.AudioAttributes.Builder()
-            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
-            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build()
-
+        // Heads-up alert channel for upcoming waypoints (silent sonification; TTS engine speaks text)
         val alertChannel = NotificationChannel(
             CHANNEL_ALERT_ID,
             context.getString(R.string.channel_alert_name),
@@ -57,7 +51,7 @@ class NotificationEngine(private val context: Context) {
             description = context.getString(R.string.channel_alert_desc)
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 350, 200, 350)
-            setSound(soundUri, audioAttr)
+            setSound(null, null)
             setShowBadge(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
@@ -207,7 +201,6 @@ class NotificationEngine(private val context: Context) {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setVibrate(longArrayOf(0, 350, 200, 350))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setTimeoutAfter(15000) // Tucks away after 15 seconds into the AA drawer
