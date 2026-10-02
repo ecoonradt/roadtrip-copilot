@@ -39,11 +39,11 @@ Requirements:
 1. Title: Under 30 characters. Suitable for Android Auto heads-up card.
 2. Message: 1-2 concise lines. Anticipatory ("Approaching..."). Include target time and key driving or stopping tip.
 3. Speech: Written for offline Android TextToSpeech.
-   - Anticipatory Tense: ALWAYS use future/anticipatory phrasing (e.g. "Approaching [Name] on your right...", "Coming up ahead in about half a mile...", "Prepare to see..."). NEVER use present or past tense ("Now cruising along...", "Driving past...", "Passing...") because this proximity alert triggers in advance of the milestone before reaching it! For scenic drive-bys and route anchors, this prompt is the driver's ONLY alert since non-anchor drive-bys do not appear as intermediate navigation stop pins on Google Maps.
+   - Anticipatory Tense: ALWAYS use future/anticipatory phrasing (e.g. "Approaching [Name] ahead...", "Coming up ahead in about half a mile...", "Prepare to pull into [Name] ahead..."). NEVER use present or past tense ("Now cruising along...", "Driving past...", "Passing...") because this proximity alert triggers in advance of the milestone before reaching it! For scenic drive-bys and route anchors, this prompt is the driver's ONLY alert since non-anchor drive-bys do not appear as intermediate navigation stop pins on Google Maps.
    - Tone: Friendly, professional co-pilot.
    - Pronunciation: Spell out highway numbers naturally (e.g. "Highway one seventy-nine", not "AZ-179").
    - Length: 15-25 words (must speak completely within 8-12 seconds to minimize music ducking).
-   - Orientation: Mention sightline relative to the car if known (e.g. "on your left", "pull-off on your right").
+   - Direction & Lateral Orientation: NEVER guess or assume lateral orientation ("on your right" or "on your left"). Road trips follow winding mountain roads and highways where guessing left vs right is often incorrect and disorients the driver. ONLY specify "on your right" or "on your left" if explicitly provided in the user notes. Otherwise, ALWAYS use neutral directional phrasing such as "ahead", "coming up in two miles", or "prepare to pull into [Name]".
 4. Recommended Trigger Radius: Suggest a radius in miles (0.3 to 6.0) based on approach road speed.
 
 Respond in strict JSON:
@@ -84,11 +84,11 @@ Requirements for EACH waypoint:
 1. Title: Under 30 characters. Suitable for Android Auto heads-up card.
 2. Message: 1-2 concise lines. Anticipatory ("Approaching..."). Include target time and key driving or stopping tip.
 3. Speech: Written for offline Android TextToSpeech.
-   - Anticipatory Tense: ALWAYS use future/anticipatory phrasing (e.g. "Approaching [Name] on your right...", "Coming up ahead in about half a mile...", "Prepare to see..."). NEVER use present or past tense ("Now cruising along...", "Driving past...", "Passing...") because this proximity alert triggers in advance of the milestone before reaching it! For scenic drive-bys and route anchors, this prompt is the driver's ONLY alert since non-anchor drive-bys do not appear as intermediate navigation stop pins on Google Maps.
+   - Anticipatory Tense: ALWAYS use future/anticipatory phrasing (e.g. "Approaching [Name] ahead...", "Coming up ahead in about half a mile...", "Prepare to pull into [Name] ahead..."). NEVER use present or past tense ("Now cruising along...", "Driving past...", "Passing...") because this proximity alert triggers in advance of the milestone before reaching it! For scenic drive-bys and route anchors, this prompt is the driver's ONLY alert since non-anchor drive-bys do not appear as intermediate navigation stop pins on Google Maps.
    - Tone: Friendly, professional co-pilot.
    - Pronunciation: Spell out highway numbers naturally (e.g. "Highway one seventy-nine", not "AZ-179").
    - Length: 15-25 words (must speak completely within 8-12 seconds to minimize music ducking).
-   - Orientation: Mention sightline relative to the car if known (e.g. "on your left", "pull-off on your right").
+   - Direction & Lateral Orientation: NEVER guess or assume lateral orientation ("on your right" or "on your left"). Road trips follow winding mountain roads and highways where guessing left vs right is often incorrect and disorients the driver. ONLY specify "on your right" or "on your left" if explicitly provided in the user notes. Otherwise, ALWAYS use neutral directional phrasing such as "ahead", "coming up in two miles", or "prepare to pull into [Name]".
 4. Recommended Trigger Radius: Suggest a radius in miles (0.3 to 6.0) based on approach road speed.
 
 Respond in strict JSON with an object where each key is the waypoint ID and the value is the alert object:

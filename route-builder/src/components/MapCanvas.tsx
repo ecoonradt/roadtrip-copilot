@@ -104,14 +104,26 @@ const MapViewportManager: React.FC<{
   routeCoordinates: [number, number][];
   activeDayIndex?: number;
   isInitializing?: boolean;
-}> = ({ waypoints, routeCoordinates, activeDayIndex = 0, isInitializing = false }) => {
+  isScoutOpen?: boolean;
+}> = ({
+  waypoints,
+  routeCoordinates,
+  activeDayIndex = 0,
+  isInitializing = false,
+  isScoutOpen = false,
+}) => {
   const map = useMap();
   const lastSignatureRef = useRef<string>('');
+  const prevIsScoutOpenRef = useRef<boolean>(isScoutOpen);
 
   useEffect(() => {
     if (isInitializing || waypoints.length === 0) {
       return;
     }
+
+    // Detect if Route Scout just opened (transition from false to true)
+    const scoutJustOpened = !prevIsScoutOpenRef.current && isScoutOpen;
+    prevIsScoutOpenRef.current = isScoutOpen;
 
     // Generate a spatial signature based on active day, waypoint coordinates, and route geometry
     const coordsSignature = waypoints
@@ -125,24 +137,34 @@ const MapViewportManager: React.FC<{
 
     const currentSignature = `day:${activeDayIndex}|coords:${coordsSignature}|route:${routeSignature}`;
 
-    // Preserve user zoom and pan if the day, route geometry, and coordinates have not changed
-    if (currentSignature === lastSignatureRef.current) {
+    // Preserve user zoom and pan if the day, route geometry, and coordinates have not changed,
+    // UNLESS Route Scout just opened (in which case the map must re-center to fit the resized viewport).
+    if (currentSignature === lastSignatureRef.current && !scoutJustOpened) {
       return;
     }
 
     lastSignatureRef.current = currentSignature;
 
-    // Ensure Leaflet has up-to-date viewport dimensions before fitting bounds
-    map.invalidateSize({ pan: false });
+    const performFit = () => {
+      map.invalidateSize({ pan: false });
+      if (routeCoordinates.length > 0) {
+        const bounds = L.latLngBounds(routeCoordinates);
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      } else {
+        const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+      }
+    };
 
-    if (routeCoordinates.length > 0) {
-      const bounds = L.latLngBounds(routeCoordinates);
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+    if (scoutJustOpened) {
+      // Re-center immediately and after layout settles when the right drawer opens
+      performFit();
+      const timer = setTimeout(performFit, 160);
+      return () => clearTimeout(timer);
     } else {
-      const bounds = L.latLngBounds(waypoints.map((w) => [w.lat, w.lng]));
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+      performFit();
     }
-  }, [map, waypoints, routeCoordinates, activeDayIndex, isInitializing]);
+  }, [map, waypoints, routeCoordinates, activeDayIndex, isInitializing, isScoutOpen]);
 
   return null;
 };
@@ -153,11 +175,43 @@ const FitRouteButton: React.FC<{
   routeCoordinates: [number, number][];
 }> = ({ waypoints, routeCoordinates }) => {
   const map = useMap();
+  const buttonRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = buttonRef.current;
+    if (!el) return;
+
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+
+    const stopNative = (e: Event) => {
+      e.stopPropagation();
+    };
+
+    el.addEventListener('click', stopNative);
+    el.addEventListener('mousedown', stopNative);
+    el.addEventListener('mouseup', stopNative);
+    el.addEventListener('pointerdown', stopNative);
+    el.addEventListener('pointerup', stopNative);
+    el.addEventListener('touchstart', stopNative);
+    el.addEventListener('touchend', stopNative);
+
+    return () => {
+      el.removeEventListener('click', stopNative);
+      el.removeEventListener('mousedown', stopNative);
+      el.removeEventListener('mouseup', stopNative);
+      el.removeEventListener('pointerdown', stopNative);
+      el.removeEventListener('pointerup', stopNative);
+      el.removeEventListener('touchstart', stopNative);
+      el.removeEventListener('touchend', stopNative);
+    };
+  }, []);
 
   if (waypoints.length === 0) return null;
 
   const handleFit = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
     map.invalidateSize({ pan: false });
     if (routeCoordinates.length > 0) {
       const bounds = L.latLngBounds(routeCoordinates);
@@ -168,12 +222,26 @@ const FitRouteButton: React.FC<{
     }
   };
 
+  const handleStopPropagation = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
+  };
+
   return (
-    <div className="absolute top-4 left-4 z-[1000] pointer-events-auto">
+    <div
+      ref={buttonRef}
+      className="leaflet-control absolute top-4 left-4 z-[1000] pointer-events-auto"
+      onClick={handleStopPropagation}
+      onMouseDown={handleStopPropagation}
+      onMouseUp={handleStopPropagation}
+      onDoubleClick={handleStopPropagation}
+    >
       <button
         type="button"
         onClick={handleFit}
-        onDoubleClick={(e) => e.stopPropagation()}
+        onMouseDown={handleStopPropagation}
+        onMouseUp={handleStopPropagation}
+        onDoubleClick={handleStopPropagation}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 shadow-xl backdrop-blur-md text-xs font-medium transition-all cursor-pointer select-none"
         title="Fit route to screen"
         aria-label="Fit route to screen"
@@ -269,6 +337,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           routeCoordinates={polylineCoords}
           activeDayIndex={activeDayIndex}
           isInitializing={isInitializing}
+          isScoutOpen={isScoutOpen}
         />
         <FitRouteButton
           waypoints={waypoints}

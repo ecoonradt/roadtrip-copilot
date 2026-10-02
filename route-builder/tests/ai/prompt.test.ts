@@ -85,4 +85,11 @@ describe('AI Co-Pilot Prompt Generator', () => {
     expect(batchPrompt).toContain('Ponderosa pine lodge retreat');
     expect(batchPrompt).toContain('Respond in strict JSON with an object where each key is the waypoint ID');
   });
+
+  it('Enforces neutral anticipatory phrasing and forbids guessing lateral orientation without user notes', () => {
+    const prompt = buildSingleWaypointPrompt(sampleWaypoint);
+    expect(prompt).toContain('NEVER guess or assume lateral orientation ("on your right" or "on your left")');
+    expect(prompt).toContain('Approaching [Name] ahead');
+    expect(prompt).not.toContain('Approaching [Name] on your right');
+  });
 });
