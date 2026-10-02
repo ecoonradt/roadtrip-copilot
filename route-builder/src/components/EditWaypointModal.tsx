@@ -14,6 +14,7 @@ import {
   Clock,
   Sparkles,
   AlertCircle,
+  Trash2,
 } from 'lucide-react';
 import type { Waypoint, WaypointType } from '../types/routing';
 import type { WaypointContext, CopilotAlert } from '../types/ai';
@@ -237,6 +238,22 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
     }
   };
 
+  // Determine whether an in-car alert is meaningfully configured
+  const hasActiveAlert = useMemo(() => {
+    const currentName = (name || waypoint?.name || '').trim().toLowerCase();
+    const currentTitle = title.trim();
+    const hasSpeech = Boolean(speech.trim());
+    const hasMessage = Boolean(message.trim());
+    const hasDistinctTitle = Boolean(currentTitle && currentTitle.toLowerCase() !== currentName);
+    return hasSpeech || hasMessage || hasDistinctTitle;
+  }, [speech, message, title, name, waypoint?.name]);
+
+  const handleClearAlert = () => {
+    setTitle('');
+    setMessage('');
+    setSpeech('');
+  };
+
   const handleSave = () => {
     if (!waypoint) return;
 
@@ -254,9 +271,9 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
       trigger_radius_miles: radius,
     };
 
-    if (title.trim()) {
+    if (hasActiveAlert) {
       const alert: CopilotAlert = {
-        title: title.trim(),
+        title: title.trim() || name.trim() || waypoint.name,
         message: message.trim(),
         speech: speech.trim(),
         recommended_trigger_radius_miles: radius,
@@ -350,11 +367,11 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>In-Car Alert & Audio</span>
-            {title ? (
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            {hasActiveAlert ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" title="In-car alert armed" />
             ) : (
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-                Optional
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                None
               </span>
             )}
           </button>
@@ -608,7 +625,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
           ) : (
             /* TAB 2: In-Car Alert & Audio Configuration */
             <div className="space-y-4">
-              {type === 'stop' && (
+              {type === 'stop' ? (
                 <div className="p-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
                   <div className="p-1 rounded-md bg-slate-800 text-slate-400 shrink-0 mt-0.5">
                     <VolumeX className="w-4 h-4" />
@@ -620,7 +637,19 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     </p>
                   </div>
                 </div>
-              )}
+              ) : !hasActiveAlert ? (
+                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
+                  <div className="p-1 rounded-md bg-slate-800 text-slate-400 shrink-0 mt-0.5">
+                    <VolumeX className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-semibold text-white">No In-Car Alert Configured</span>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                      This stop will not duck music or trigger in-car spoken announcements. You can author an announcement below or click &ldquo;Generate with AI&rdquo; to add one.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
 
               {!aiAvailable && (
                 <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-start gap-2.5">
@@ -647,30 +676,44 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={aiAvailable ? handleGenerateAlert : undefined}
-                    disabled={!aiAvailable || isLoading}
-                    title={
-                      !aiAvailable
-                        ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
-                        : title
-                        ? 'Regenerate script and alert with AI'
-                        : 'Generate script and alert with AI'
-                    }
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border shadow-sm ${
-                      !aiAvailable
-                        ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
-                        : 'bg-slate-800 hover:bg-slate-750 border-slate-700/80 text-sky-400 hover:text-sky-300 cursor-pointer'
-                    }`}
-                  >
-                    {isLoading ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                  <div className="flex items-center gap-2">
+                    {(title || message || speech) && (
+                      <button
+                        type="button"
+                        onClick={handleClearAlert}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors border border-slate-700/80 bg-slate-800 hover:bg-rose-950/40 hover:border-rose-800/60 text-slate-400 hover:text-rose-300 cursor-pointer"
+                        title="Clear alert text and spoken script for this stop"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Clear Alert</span>
+                      </button>
                     )}
-                    <span>{isLoading ? 'Generating...' : title ? 'Regenerate with AI' : 'Generate with AI'}</span>
-                  </button>
+
+                    <button
+                      type="button"
+                      onClick={aiAvailable ? handleGenerateAlert : undefined}
+                      disabled={!aiAvailable || isLoading}
+                      title={
+                        !aiAvailable
+                          ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                          : title
+                          ? 'Regenerate script and alert with AI'
+                          : 'Generate script and alert with AI'
+                      }
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border shadow-sm ${
+                        !aiAvailable
+                          ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                          : 'bg-slate-800 hover:bg-slate-750 border-slate-700/80 text-sky-400 hover:text-sky-300 cursor-pointer'
+                      }`}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                      )}
+                      <span>{isLoading ? 'Generating...' : title ? 'Regenerate with AI' : 'Generate with AI'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -859,8 +902,16 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
           <div className="text-xs text-slate-400">
             {activeTab === 'details' ? (
               <span>Coordinates: {waypoint.lat.toFixed(4)}, {waypoint.lng.toFixed(4)}</span>
+            ) : hasActiveAlert ? (
+              <span className="text-emerald-400 flex items-center gap-1.5">
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Audio ducking active when trigger radius is crossed</span>
+              </span>
             ) : (
-              <span>Audio ducking active when trigger radius is crossed</span>
+              <span className="text-slate-400 flex items-center gap-1.5">
+                <VolumeX className="w-3.5 h-3.5 text-slate-500" />
+                <span>Silent milestone &bull; Car audio will not be interrupted</span>
+              </span>
             )}
           </div>
 

@@ -162,11 +162,19 @@ export function formatCheckpointV2(
     checkpoint.offset_minutes_from_start = Math.max(0, Math.round(offsetMinutes));
   }
 
-  if (item.notification && (item.notification.title || item.notification.message || item.notification.speech)) {
+  const hasNotificationContent = Boolean(
+    item.notification &&
+      (item.notification.speech?.trim() ||
+        item.notification.message?.trim() ||
+        (item.notification.title?.trim() &&
+          item.notification.title.trim().toLowerCase() !== item.name.trim().toLowerCase()))
+  );
+
+  if (hasNotificationContent && item.notification) {
     checkpoint.notification = {
-      title: item.notification.title || item.name,
-      message: item.notification.message || '',
-      speech: item.notification.speech || '',
+      title: item.notification.title?.trim() || item.name,
+      message: item.notification.message?.trim() || '',
+      speech: item.notification.speech?.trim() || '',
     };
   }
 

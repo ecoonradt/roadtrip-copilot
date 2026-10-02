@@ -223,7 +223,11 @@ class LocationTrackerLoopRouteTest {
                 dwellMinutes = 10,
                 triggerRadiusMiles = 0.5,
                 offsetMinutesFromStart = 30,
-                notification = null // Non-stop type with null notification preserves fallback alert
+                notification = CheckpointNotification(
+                    title = "Fuel Stop",
+                    message = "Shell Station refuel.",
+                    speech = "Approaching Shell Station for refuel."
+                )
             ),
             Checkpoint(
                 id = "destination_end",
@@ -259,12 +263,11 @@ class LocationTrackerLoopRouteTest {
         // Schedule pace telemetry delta must still be resolved and tracked
         assertNotNull("Pace telemetry must still be recorded for silent stops", lastResult!!.scheduleDelta)
 
-        // 3. Arriving at fuel stop (type = "fuel", notification = null)
+        // 3. Arriving at fuel stop (type = "fuel", configured notification)
         tracker.evaluate(42.7600, -73.7250, 10.0)
-        // Non-stop types must preserve fallback announcement behavior even when notification is null
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("fuel_stop", lastResult!!.alerts[0].id)
-        assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Shell Station"))
+        assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Shell Station for refuel."))
         assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
 
         // 4. Arriving at destination triggers destination alert
@@ -272,5 +275,121 @@ class LocationTrackerLoopRouteTest {
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("destination_end", lastResult!!.alerts[0].id)
         assertNull("All stops completed", lastResult!!.nextCheckpoint)
+    }
+
+    @Test
+    fun testClearedAlertWaypointIsSilentAndAdvancesNextCheckpoint() {
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+
+        val routeWithClearedStop = listOf(
+            Checkpoint(
+                id = "origin_start",
+                name = "Home Departure",
+                lat = 42.65260,
+                lng = -73.7870,
+                type = "origin",
+                triggerRadiusMiles = 0.3,
+                offsetMinutesFromStart = 0,
+                notification = CheckpointNotification("Start", "Departing", "Starting trip.")
+            ),
+            Checkpoint(
+                id = "lunch_stop",
+                name = "Lumberyard Brewing Co",
+                lat = 42.7500,
+                lng = -73.7300,
+                type = "meal",
+                dwellMinutes = 45,
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 20,
+                notification = null // User explicitly cleared alert in Route Builder Studio
+            ),
+            Checkpoint(
+                id = "destination_end",
+                name = "Cabin",
+                lat = 42.7800,
+                lng = -73.7100,
+                type = "destination",
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 75,
+                notification = CheckpointNotification("Destination", "Arrived", "Welcome to cabin.")
+            )
+        )
+
+        val startTime = System.currentTimeMillis()
+        tracker.setCheckpoints(routeWithClearedStop, startTime)
+
+        // 1. Departure triggers origin alert
+        tracker.evaluate(42.65260, -73.7870, 0.0)
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("origin_start", lastResult!!.alerts[0].id)
+
+        // 2. Arriving at lunch stop where alert was cleared
+        tracker.evaluate(42.7500, -73.7300, 10.0)
+        // MUST be completely silent: user cleared notifications so no audio ducking or speech!
+        assertTrue("Cleared alert waypoint must NOT produce any in-car alerts", lastResult!!.alerts.isEmpty())
+        // Next checkpoint must advance to the destination
+        assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
+        assertNotNull("Pace telemetry must still be tracked", lastResult!!.scheduleDelta)
+
+        // 3. Arriving at destination triggers destination alert
+        tracker.evaluate(42.7800, -73.7100, 10.0)
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("destination_end", lastResult!!.alerts[0].id)
+        assertNull("All stops completed", lastResult!!.nextCheckpoint)
+    }
+
+    @Test
+    fun testLegacyUntypedWaypointPreservesFallbackAlert() {
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+
+        val legacyRoute = listOf(
+            Checkpoint(
+                id = "origin_start",
+                name = "Home Departure",
+                lat = 42.65260,
+                lng = -73.7870,
+                triggerRadiusMiles = 0.3,
+                offsetMinutesFromStart = 0,
+                notification = CheckpointNotification("Start", "Departing", "Starting trip.")
+            ),
+            Checkpoint(
+                id = "legacy_scenic",
+                name = "Scenic Overlook",
+                lat = 42.7500,
+                lng = -73.7300,
+                type = null, // Legacy untyped milestone
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 20,
+                notification = null // Legacy without explicit notification
+            ),
+            Checkpoint(
+                id = "destination_end",
+                name = "Cabin",
+                lat = 42.7800,
+                lng = -73.7100,
+                triggerRadiusMiles = 0.5,
+                offsetMinutesFromStart = 40,
+                notification = CheckpointNotification("Destination", "Arrived", "Welcome to cabin.")
+            )
+        )
+
+        val startTime = System.currentTimeMillis()
+        tracker.setCheckpoints(legacyRoute, startTime)
+
+        // 1. Departure triggers origin alert
+        tracker.evaluate(42.65260, -73.7870, 0.0)
+        assertEquals(1, lastResult!!.alerts.size)
+
+        // 2. Arriving at legacy untyped milestone
+        tracker.evaluate(42.7500, -73.7300, 10.0)
+        // Legacy untyped milestone must preserve fallback announcement behavior
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("legacy_scenic", lastResult!!.alerts[0].id)
+        assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Scenic Overlook"))
+        assertEquals("destination_end", lastResult!!.nextCheckpoint?.id)
     }
 }

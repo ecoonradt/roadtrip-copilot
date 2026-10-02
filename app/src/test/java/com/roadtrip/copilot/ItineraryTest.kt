@@ -2,10 +2,13 @@ package com.roadtrip.copilot
 
 import com.google.gson.Gson
 import com.roadtrip.copilot.model.Itinerary
+import com.roadtrip.copilot.model.Checkpoint
+import com.roadtrip.copilot.model.CheckpointNotification
 import com.roadtrip.copilot.model.ScheduleDelta
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -352,5 +355,72 @@ class ItineraryTest {
         assertEquals(2, resolvedSingle.size)
         assertEquals(testStartTime, resolvedSingle[0].targetEpochMillis)
         assertEquals(testStartTime + 30 * 60_000L, resolvedSingle[1].targetEpochMillis)
+    }
+
+    @Test
+    fun testShouldAlertGating() {
+        // 1. Silent stop type ("stop") -> shouldAlert is false even if notification exists
+        val silentStop = Checkpoint(
+            id = "stop_grocery",
+            name = "Sprouts Farmers Market",
+            type = "stop",
+            lat = 35.195,
+            lng = -111.648,
+            triggerRadiusMiles = 0.5,
+            notification = CheckpointNotification("Sprouts", "Grocery stop", "Approaching grocery stop")
+        )
+        assertTrue(silentStop.isSilentStop)
+        assertFalse(silentStop.shouldAlert)
+
+        // 2. Meal stop with active alert -> shouldAlert is true
+        val activeMeal = Checkpoint(
+            id = "stop_meal_active",
+            name = "Lumberyard Brewing Co",
+            type = "meal",
+            lat = 35.195,
+            lng = -111.648,
+            triggerRadiusMiles = 0.5,
+            notification = CheckpointNotification("Lumberyard", "Lunch stop", "Approaching Lumberyard Brewing Co")
+        )
+        assertFalse(activeMeal.isSilentStop)
+        assertTrue(activeMeal.shouldAlert)
+
+        // 3. Meal stop with null notification (cleared alert) -> shouldAlert is false
+        val clearedMeal = Checkpoint(
+            id = "stop_meal_cleared",
+            name = "Lumberyard Brewing Co",
+            type = "meal",
+            lat = 35.195,
+            lng = -111.648,
+            triggerRadiusMiles = 0.5,
+            notification = null
+        )
+        assertFalse(clearedMeal.isSilentStop)
+        assertFalse(clearedMeal.shouldAlert)
+
+        // 4. Meal stop with blank speech and message -> shouldAlert is false
+        val blankMeal = Checkpoint(
+            id = "stop_meal_blank",
+            name = "Lumberyard Brewing Co",
+            type = "meal",
+            lat = 35.195,
+            lng = -111.648,
+            triggerRadiusMiles = 0.5,
+            notification = CheckpointNotification("Lumberyard Brewing Co", "", "")
+        )
+        assertFalse(blankMeal.shouldAlert)
+
+        // 5. Untyped legacy checkpoint with null notification -> shouldAlert is true (preserves fallback)
+        val legacyUntyped = Checkpoint(
+            id = "legacy_scenic",
+            name = "Oak Creek Canyon Vista",
+            type = null,
+            lat = 34.912,
+            lng = -111.765,
+            triggerRadiusMiles = 1.0,
+            notification = null
+        )
+        assertFalse(legacyUntyped.isSilentStop)
+        assertTrue(legacyUntyped.shouldAlert)
     }
 }

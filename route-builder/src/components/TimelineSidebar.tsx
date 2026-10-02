@@ -459,6 +459,14 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               dwell_minutes: isOvernight ? 0 : (originalWp?.dwell_minutes ?? stop.dwell_minutes),
             };
 
+            const hasActiveAlert = Boolean(
+              stop.notification &&
+                (stop.notification.speech?.trim() ||
+                  stop.notification.message?.trim() ||
+                  (stop.notification.title?.trim() &&
+                    stop.notification.title.trim().toLowerCase() !== stop.name.trim().toLowerCase()))
+            );
+
             return (
               <React.Fragment key={stop.id}>
                 {/* State / Timezone Boundary Banner */}
@@ -560,7 +568,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           </div>
 
                           {/* Co-Pilot Alert Status Tag (if configured) */}
-                          {stop.notification && !isEditing && (
+                          {hasActiveAlert && !isEditing && (
                             <div
                               onClick={() => {
                                 setSelectedModal({
@@ -575,7 +583,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             >
                               <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
                               <span className="font-medium truncate max-w-[200px]">
-                                &ldquo;{stop.notification.title}&rdquo;
+                                &ldquo;{stop.notification?.title}&rdquo;
                               </span>
                             </div>
                           )}
@@ -855,7 +863,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           </span>
                         )}
 
-                        {stop.notification ? (
+                        {hasActiveAlert ? (
                           <span
                             className="px-2 py-0.5 rounded bg-sky-950/70 text-sky-300 border border-sky-800/60 truncate max-w-[180px] cursor-pointer hover:bg-sky-900/80"
                             onClick={() => {
@@ -868,7 +876,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                             }}
                             title="Click to view or edit AI Co-Pilot announcement"
                           >
-                            🔔 {stop.notification.title}
+                            🔔 {stop.notification?.title}
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded bg-slate-800/50 text-slate-500 border border-slate-800 text-[11px]">

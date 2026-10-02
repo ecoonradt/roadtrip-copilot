@@ -112,6 +112,26 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       expect(cp.google_place_id).toBe('ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q');
       expect(cp.is_route_anchor).toBe(true);
     });
+
+    it('omits notification when alert message and speech are blank or cleared', () => {
+      const stopWithClearedAlert: Waypoint = {
+        id: 'wp_meal_cleared',
+        name: 'Lumberyard Brewing Co',
+        type: 'meal',
+        lat: 35.195,
+        lng: -111.648,
+        dwell_minutes: 60,
+        trigger_radius_miles: 0.5,
+        notification: {
+          title: 'Lumberyard Brewing Co',
+          message: '',
+          speech: '',
+        },
+      };
+
+      const cp = formatCheckpointV2(stopWithClearedAlert);
+      expect(cp.notification).toBeUndefined();
+    });
   });
 
   describe('Multi-Day Itinerary Export (Schema v2.0.0)', () => {
