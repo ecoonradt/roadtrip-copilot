@@ -175,43 +175,9 @@ const FitRouteButton: React.FC<{
   routeCoordinates: [number, number][];
 }> = ({ waypoints, routeCoordinates }) => {
   const map = useMap();
-  const buttonRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    const el = buttonRef.current;
-    if (!el) return;
-
-    L.DomEvent.disableClickPropagation(el);
-    L.DomEvent.disableScrollPropagation(el);
-
-    const stopNative = (e: Event) => {
-      e.stopPropagation();
-    };
-
-    el.addEventListener('click', stopNative);
-    el.addEventListener('mousedown', stopNative);
-    el.addEventListener('mouseup', stopNative);
-    el.addEventListener('pointerdown', stopNative);
-    el.addEventListener('pointerup', stopNative);
-    el.addEventListener('touchstart', stopNative);
-    el.addEventListener('touchend', stopNative);
-
-    return () => {
-      el.removeEventListener('click', stopNative);
-      el.removeEventListener('mousedown', stopNative);
-      el.removeEventListener('mouseup', stopNative);
-      el.removeEventListener('pointerdown', stopNative);
-      el.removeEventListener('pointerup', stopNative);
-      el.removeEventListener('touchstart', stopNative);
-      el.removeEventListener('touchend', stopNative);
-    };
-  }, []);
-
-  if (waypoints.length === 0) return null;
-
-  const handleFit = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.nativeEvent.stopImmediatePropagation();
+  const performFit = () => {
     map.invalidateSize({ pan: false });
     if (routeCoordinates.length > 0) {
       const bounds = L.latLngBounds(routeCoordinates);
@@ -222,26 +188,37 @@ const FitRouteButton: React.FC<{
     }
   };
 
-  const handleStopPropagation = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    e.nativeEvent.stopImmediatePropagation();
-  };
+  useEffect(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.disableScrollPropagation(btn);
+
+    const handleNativeClick = (e: MouseEvent) => {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      performFit();
+    };
+
+    btn.addEventListener('click', handleNativeClick);
+    return () => {
+      btn.removeEventListener('click', handleNativeClick);
+    };
+  }, [map, waypoints, routeCoordinates]);
+
+  if (waypoints.length === 0) return null;
 
   return (
-    <div
-      ref={buttonRef}
-      className="leaflet-control absolute top-4 left-4 z-[1000] pointer-events-auto"
-      onClick={handleStopPropagation}
-      onMouseDown={handleStopPropagation}
-      onMouseUp={handleStopPropagation}
-      onDoubleClick={handleStopPropagation}
-    >
+    <div className="leaflet-control absolute top-4 left-4 z-[1000] pointer-events-auto">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={handleFit}
-        onMouseDown={handleStopPropagation}
-        onMouseUp={handleStopPropagation}
-        onDoubleClick={handleStopPropagation}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.nativeEvent.stopImmediatePropagation();
+          performFit();
+        }}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 shadow-xl backdrop-blur-md text-xs font-medium transition-all cursor-pointer select-none"
         title="Fit route to screen"
         aria-label="Fit route to screen"

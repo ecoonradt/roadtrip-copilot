@@ -119,8 +119,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       const { downloadUrl } = await stageItinerary(itineraryData, fileName);
       setStagedDownloadUrl(downloadUrl);
 
+      // Custom scheme deep link payload ensures phone camera directly launches Roadtrip Co-Pilot
+      const qrPayload = `roadtrip-copilot://import?url=${encodeURIComponent(downloadUrl)}`;
+
       // Generate QR Code image data URL
-      const dataUrl = await QRCode.toDataURL(downloadUrl, {
+      const dataUrl = await QRCode.toDataURL(qrPayload, {
         width: 220,
         margin: 2,
         color: {

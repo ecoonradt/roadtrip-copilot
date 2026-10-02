@@ -334,9 +334,12 @@ class MainActivity : AppCompatActivity() {
                         importedOption.dayNumber,
                         autoRestartIfRunning = isRunning
                     )
+                    binding.tvStatusBadge.text = if (isRunning) getString(R.string.status_running) else getString(R.string.status_idle)
                     Toast.makeText(this@MainActivity, "Trip Loaded: ${importedOption.title}", Toast.LENGTH_SHORT).show()
                     appendLog("Trip loaded: ${importedOption.title} (${importedOption.routeFile})")
                 } else {
+                    val isRunning = CopilotService.isRunning.value
+                    binding.tvStatusBadge.text = if (isRunning) getString(R.string.status_running) else getString(R.string.status_idle)
                     Toast.makeText(
                         this@MainActivity,
                         "File $safeFileName saved, but contains no valid waypoints.",
@@ -346,6 +349,8 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save itinerary", e)
+                val isRunning = CopilotService.isRunning.value
+                binding.tvStatusBadge.text = if (isRunning) getString(R.string.status_running) else getString(R.string.status_idle)
                 Toast.makeText(this@MainActivity, "Save failed: ${e.localizedMessage ?: e.message}", Toast.LENGTH_LONG).show()
                 appendLog("Error saving itinerary: ${e.message}")
             }
@@ -486,11 +491,9 @@ class MainActivity : AppCompatActivity() {
             val trip = tripGroups[tripIdx]
             if (trip.days.size > 1) {
                 binding.layoutDaySelect.visibility = View.VISIBLE
-                if (dayAdapter?.count != trip.days.size) {
-                    dayAdapter?.clear()
-                    dayAdapter?.addAll(trip.days)
-                    dayAdapter?.notifyDataSetChanged()
-                }
+                dayAdapter?.clear()
+                dayAdapter?.addAll(trip.days)
+                dayAdapter?.notifyDataSetChanged()
                 val dayIdx = trip.days.indexOfFirst { it.dayNumber == day }.coerceAtLeast(0)
                 if (binding.spinnerDay.selectedItemPosition != dayIdx) {
                     binding.spinnerDay.setSelection(dayIdx)
