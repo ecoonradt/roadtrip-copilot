@@ -28,20 +28,58 @@ class LocationTracker(
     private var startTimeMillis: Long? = null
     private var isTracking = false
     private var lastVisitedPace: ScheduleDelta = ScheduleDelta(0, "On schedule", true)
+    private var currentRouteId: String? = null
+    private val locationPrefs = context.getSharedPreferences("copilot_location_prefs", Context.MODE_PRIVATE)
 
     companion object {
         private const val TAG = "LocationTracker"
         private const val EARTH_RADIUS_MILES = 3958.8
     }
 
-    fun setCheckpoints(checkpoints: List<Checkpoint>, initialStartTimeMillis: Long? = null) {
-        activeCheckpoints = checkpoints
+    private fun persistVisited() {
+        val routeKey = currentRouteId ?: return
+        locationPrefs.edit().putStringSet("visited_$routeKey", visitedCheckpoints.toSet()).apply()
+    }
+
+    private fun loadPersistedVisited(routeKey: String): Set<String> {
+        return locationPrefs.getStringSet("visited_$routeKey", emptySet()) ?: emptySet()
+    }
+
+    fun clearVisitedState(routeIdentifier: String? = null) {
+        val key = routeIdentifier ?: currentRouteId
+        if (key != null) {
+            locationPrefs.edit().remove("visited_$key").apply()
+        }
         visitedCheckpoints.clear()
+    }
+
+    fun setCheckpoints(
+        checkpoints: List<Checkpoint>,
+        initialStartTimeMillis: Long? = null,
+        routeIdentifier: String? = null,
+        restorePersisted: Boolean = true
+    ) {
+        activeCheckpoints = checkpoints
+        currentRouteId = routeIdentifier
+        visitedCheckpoints.clear()
+
+        if (restorePersisted && routeIdentifier != null) {
+            val restored = loadPersistedVisited(routeIdentifier)
+            if (restored.isNotEmpty()) {
+                visitedCheckpoints.addAll(restored)
+                Log.i(TAG, "Restored ${restored.size} visited checkpoints from storage for $routeIdentifier.")
+            }
+        }
+
         val start = initialStartTimeMillis ?: System.currentTimeMillis()
         startTimeMillis = start
 
         // Initial pace is always Awaiting Departure before departure point is reached
-        lastVisitedPace = ScheduleDelta(0, "Awaiting Departure", true)
+        lastVisitedPace = if (visitedCheckpoints.isNotEmpty()) {
+            ScheduleDelta(0, "In Progress", true)
+        } else {
+            ScheduleDelta(0, "Awaiting Departure", true)
+        }
 
         Log.i(TAG, "Loaded ${checkpoints.size} checkpoints into LocationTracker. Initial pace: ${lastVisitedPace.statusText}")
 
@@ -57,7 +95,7 @@ class LocationTracker(
             val speedMph = if (lastKnown.hasSpeed()) lastKnown.speed * 2.23694 else 0.0
             evaluate(lastKnown.latitude, lastKnown.longitude, speedMph)
         } else {
-            val firstCp = checkpoints.firstOrNull()
+            val firstCp = checkpoints.firstOrNull { it.id !in visitedCheckpoints }
             onEvaluationResult(
                 EvaluationResult(
                     currentLat = 0.0,
@@ -138,10 +176,7 @@ class LocationTracker(
         // Identify the current upcoming unvisited milestone.
         val nextIndex = activeCheckpoints.indexOfFirst { it.id !in visitedCheckpoints }
         if (nextIndex != -1) {
-            // Allow evaluating the immediate next milestone, or skipping at most 1 missed milestone
-            val maxLookaheadIndex = minOf(nextIndex + 1, activeCheckpoints.lastIndex)
-
-            for (i in nextIndex..maxLookaheadIndex) {
+            for (i in nextIndex until activeCheckpoints.size) {
                 val cp = activeCheckpoints[i]
                 if (cp.id in visitedCheckpoints) continue
 
@@ -157,13 +192,15 @@ class LocationTracker(
                 }
 
                 val dist = haversineMiles(currentLat, currentLng, cp.lat, cp.lng)
+                val radius = cp.effectiveRadiusMiles
 
                 // Only trigger if entering checkpoint trigger radius
-                if (dist <= cp.triggerRadiusMiles) {
+                if (dist <= radius) {
                     // Mark this checkpoint and all previous checkpoints in the route as visited
                     for (prevIdx in 0..i) {
                         visitedCheckpoints.add(activeCheckpoints[prevIdx].id)
                     }
+                    persistVisited()
 
                     val notif = cp.notification
                     val delta = calculateScheduleDelta(cp, evalTimeMillis)

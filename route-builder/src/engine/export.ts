@@ -26,6 +26,7 @@ export interface CheckpointV2 {
   is_route_anchor?: boolean;
   approachHighway?: string;
   notes?: string;
+  timezone?: string;
 }
 
 export interface DayV2 {
@@ -149,7 +150,8 @@ export function formatCheckpointV2(
     trigger_radius_miles: normalizeTriggerRadius(item.trigger_radius_miles),
   };
 
-  if (targetTime && !options?.omitTargetTime) {
+  const isRelativeAdHoc = targetTime && (/^\+\d+h/i.test(targetTime) || targetTime === 'Start');
+  if (targetTime && !options?.omitTargetTime && !isRelativeAdHoc) {
     checkpoint.target_time = targetTime;
   }
 
@@ -176,10 +178,13 @@ export function formatCheckpointV2(
   );
 
   if (hasNotificationContent && item.notification) {
+    const title = item.notification.title?.trim() || item.name;
+    const message = item.notification.message?.trim() || '';
+    const speech = item.notification.speech?.trim() || title;
     checkpoint.notification = {
-      title: item.notification.title?.trim() || item.name,
-      message: item.notification.message?.trim() || '',
-      speech: item.notification.speech?.trim() || '',
+      title,
+      message,
+      speech,
     };
   }
 
@@ -205,6 +210,10 @@ export function formatCheckpointV2(
 
   if (item.notes) {
     checkpoint.notes = item.notes;
+  }
+
+  if (item.timezone) {
+    checkpoint.timezone = item.timezone;
   }
 
   return checkpoint;

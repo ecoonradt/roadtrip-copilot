@@ -448,6 +448,99 @@ class ItineraryTest {
         assertEquals("https://www.google.com/maps/dir/?api=1&origin=PHX&destination=FLG", itinerary.getGoogleMapsUrlForDay(2))
     }
 
+    @Test
+    fun testGsonDefaultsAppliedWhenFieldsMissing() {
+        // Test Checkpoint JSON missing trigger_radius_miles
+        val cpJson = """{"id":"cp1","name":"Stop 1","lat":35.0,"lng":-111.0}"""
+        val checkpoint = Gson().fromJson(cpJson, Checkpoint::class.java)
+        assertEquals(0.5, checkpoint.effectiveRadiusMiles, 0.001)
+
+        // Test Itinerary JSON missing trip_name
+        val itinJson = """{"days":[{"day":1,"date":"2026-10-10"}]}"""
+        val itinerary = Gson().fromJson(itinJson, Itinerary::class.java)
+        assertNotNull(itinerary)
+        assertNotNull(itinerary.tripName)
+        assertEquals("", itinerary.tripName)
+    }
+
+    @Test
+    fun testCrossTimezoneCheckpointResolution() {
+        val json = """
+            {
+                "trip_name": "Cross Timezone Trip",
+                "days": [
+                    {
+                        "day": 2,
+                        "date": "2026-10-10",
+                        "timezone": "America/Denver",
+                        "checkpoints": [
+                            {
+                                "id": "az_stop",
+                                "name": "Flagstaff Depart",
+                                "lat": 35.19,
+                                "lng": -111.62,
+                                "target_time": "07:30:00",
+                                "timezone": "America/Phoenix"
+                            },
+                            {
+                                "id": "nm_stop",
+                                "name": "Gallup Picnic",
+                                "lat": 35.54,
+                                "lng": -108.61,
+                                "target_time": "07:30:00"
+                            }
+                        ]
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val itinerary = Gson().fromJson(json, Itinerary::class.java)
+        val resolved = itinerary.resolveCheckpointsForDay(2, System.currentTimeMillis())
+        assertEquals(2, resolved.size)
+
+        val azEpoch = resolved[0].targetEpochMillis
+        val nmEpoch = resolved[1].targetEpochMillis
+
+        assertNotNull(azEpoch)
+        assertNotNull(nmEpoch)
+
+        // On Oct 10, America/Denver is MDT (UTC-6), America/Phoenix is MST (UTC-7).
+        // 07:30 MST = 14:30 UTC. 07:30 MDT = 13:30 UTC.
+        // Therefore, azEpoch should be exactly 1 hour (3,600,000 ms) later than nmEpoch!
+        val diffMillis = azEpoch!! - nmEpoch!!
+        assertEquals(3_600_000L, diffMillis)
+    }
+
+    @Test
+    fun testAdHocTargetTimeFallbackToOffsetMinutes() {
+        val json = """
+            {
+                "trip_name": "Ad-Hoc Trip",
+                "checkpoints": [
+                    {
+                        "id": "adhoc_cp",
+                        "name": "Mid-drive viewpoint",
+                        "lat": 35.0,
+                        "lng": -111.0,
+                        "target_time": "+1h 15m",
+                        "offset_minutes_from_start": 75
+                    }
+                ]
+            }
+        """.trimIndent()
+
+        val itinerary = Gson().fromJson(json, Itinerary::class.java)
+        val startTime = 1_000_000_000L
+        val resolved = itinerary.resolveCheckpointsForDay(1, startTime)
+        assertEquals(1, resolved.size)
+
+        // Unparseable "+1h 15m" falls back to offsetMinutesFromStart
+        val expectedEpoch = startTime + (75 * 60_000L)
+        assertEquals(expectedEpoch, resolved[0].targetEpochMillis)
+        assertNotNull(resolved[0].formattedTargetTime)
+    }
+
     companion object {
         val SAMPLE_ITINERARY_JSON = """
         {

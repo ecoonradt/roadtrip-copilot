@@ -596,4 +596,67 @@ class RouteRepositoryTest {
         )
         assertEquals("Southwest Canyon Loop (2 Days)", existingDaysGroup.toString())
     }
+
+    @Test
+    fun testRefreshRoutesPicksNewestFileWhenDuplicateExistsAcrossDirs() = runBlocking {
+        val olderJson = """
+            {
+              "trip_name": "Older Version",
+              "checkpoints": [{ "id": "c1", "name": "C1", "lat": 1.0, "lng": 2.0 }]
+            }
+        """.trimIndent()
+
+        val newerJson = """
+            {
+              "trip_name": "Newer Version",
+              "checkpoints": [{ "id": "c2", "name": "C2", "lat": 3.0, "lng": 4.0 }]
+            }
+        """.trimIndent()
+
+        val primaryFile = File(primaryStorageDir, "shared_route.json")
+        primaryFile.writeText(olderJson)
+        primaryFile.setLastModified(100_000L)
+
+        val secondaryFile = File(secondaryStorageDir, "shared_route.json")
+        secondaryFile.writeText(newerJson)
+        secondaryFile.setLastModified(200_000L)
+
+        val repository = RouteRepository(
+            storageDirs = listOf(primaryStorageDir, secondaryStorageDir),
+            assetProvider = fileAssetProvider
+        )
+
+        val routes = repository.refreshRoutes()
+        val matching = routes.find { it.routeFile == "shared_route.json" }
+        assertNotNull(matching)
+        assertEquals("Newer Version", matching?.title)
+    }
+
+    @Test
+    fun testDeleteItineraryDeletesAcrossAllDirs() = runBlocking {
+        val json = """
+            {
+              "trip_name": "Duplicate Route To Delete",
+              "checkpoints": [{ "id": "c1", "name": "C1", "lat": 1.0, "lng": 2.0 }]
+            }
+        """.trimIndent()
+
+        val primaryFile = File(primaryStorageDir, "to_delete.json")
+        primaryFile.writeText(json)
+        val secondaryFile = File(secondaryStorageDir, "to_delete.json")
+        secondaryFile.writeText(json)
+
+        assertTrue(primaryFile.exists())
+        assertTrue(secondaryFile.exists())
+
+        val repository = RouteRepository(
+            storageDirs = listOf(primaryStorageDir, secondaryStorageDir),
+            assetProvider = fileAssetProvider
+        )
+
+        val deleted = repository.deleteItineraryFile("to_delete.json")
+        assertTrue(deleted)
+        assertFalse(primaryFile.exists())
+        assertFalse(secondaryFile.exists())
+    }
 }

@@ -20,8 +20,11 @@ class AudioDuckEngine(
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
+    private val pendingSpeechQueue = ArrayDeque<CharSequence>()
 
     private var currentFocusRequest: AudioFocusRequest? = null
+    private var currentFocusGain: Int? = null
+    private var activeUtteranceId: String? = null
 
     companion object {
         private const val TAG = "AudioDuckEngine"
@@ -40,6 +43,12 @@ class AudioDuckEngine(
                 isTtsReady = true
                 applyCurrentAudioAttributes()
                 Log.i(TAG, "Offline TextToSpeech initialized successfully.")
+
+                // Flush any speech that was requested before TTS finished initializing
+                while (pendingSpeechQueue.isNotEmpty()) {
+                    val queued = pendingSpeechQueue.removeFirst()
+                    speakWithDucking(queued)
+                }
             }
 
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -49,21 +58,35 @@ class AudioDuckEngine(
 
                 override fun onDone(utteranceId: String?) {
                     Log.d(TAG, "TTS speech completed: $utteranceId. Restoring audio focus.")
-                    abandonFocus()
-                    onSpeechStatusChanged?.invoke(false, "")
+                    if (utteranceId == activeUtteranceId) {
+                        abandonFocus()
+                        onSpeechStatusChanged?.invoke(false, "")
+                    }
+                }
+
+                override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                    Log.d(TAG, "TTS speech stopped (interrupted=$interrupted): $utteranceId")
+                    if (utteranceId == activeUtteranceId) {
+                        abandonFocus()
+                        onSpeechStatusChanged?.invoke(false, "")
+                    }
                 }
 
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     Log.e(TAG, "TTS speech error on $utteranceId. Restoring audio focus.")
-                    abandonFocus()
-                    onSpeechStatusChanged?.invoke(false, "")
+                    if (utteranceId == activeUtteranceId) {
+                        abandonFocus()
+                        onSpeechStatusChanged?.invoke(false, "")
+                    }
                 }
 
                 override fun onError(utteranceId: String?, errorCode: Int) {
                     Log.e(TAG, "TTS speech error code $errorCode on $utteranceId. Restoring audio focus.")
-                    abandonFocus()
-                    onSpeechStatusChanged?.invoke(false, "")
+                    if (utteranceId == activeUtteranceId) {
+                        abandonFocus()
+                        onSpeechStatusChanged?.invoke(false, "")
+                    }
                 }
             })
         } else {
@@ -94,9 +117,14 @@ class AudioDuckEngine(
      * Pauses active media or ducks it, speaks the provided text through
      * the navigation guidance audio channel, and immediately restores music on completion.
      */
-    fun speakWithDucking(text: CharSequence) {
-        if (!isTtsReady || text.isBlank()) {
-            Log.w(TAG, "Cannot speak: TTS not ready or text is blank.")
+    fun speakWithDucking(text: CharSequence, queueMode: Int = TextToSpeech.QUEUE_FLUSH) {
+        if (text.isBlank()) {
+            return
+        }
+
+        if (!isTtsReady) {
+            Log.i(TAG, "TTS not ready yet; queuing speech request: \"$text\"")
+            pendingSpeechQueue.addLast(text)
             return
         }
 
@@ -107,13 +135,14 @@ class AudioDuckEngine(
         }
 
         val utteranceId = UUID.randomUUID().toString()
+        activeUtteranceId = utteranceId
         val params = Bundle().apply {
             putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
         }
 
         val speechAttributes = getSpeechAudioAttributes()
         tts?.setAudioAttributes(speechAttributes)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        tts?.speak(text, queueMode, params, utteranceId)
     }
 
     /**
@@ -125,35 +154,55 @@ class AudioDuckEngine(
     }
 
     private fun requestDuckingFocus(): Boolean {
-        val audioAttributes = getSpeechAudioAttributes()
-
-        val gain = if (pauseMusicInsteadOfDuck) {
+        val targetGain = if (pauseMusicInsteadOfDuck) {
             AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
         } else {
             AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
         }
 
-        val focusRequest = AudioFocusRequest.Builder(gain)
+        // If focus is already held and the gain type has not changed, reuse existing focus request
+        if (currentFocusRequest != null && currentFocusGain == targetGain) {
+            return true
+        }
+
+        // If gain changed while holding focus, cleanly abandon the previous one before requesting anew
+        if (currentFocusRequest != null) {
+            abandonFocus()
+        }
+
+        val audioAttributes = getSpeechAudioAttributes()
+        val focusRequest = AudioFocusRequest.Builder(targetGain)
             .setAudioAttributes(audioAttributes)
             .setAcceptsDelayedFocusGain(false)
             .setOnAudioFocusChangeListener { focusChange ->
                 Log.d(TAG, "Audio focus changed: $focusChange")
+                if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
+                    currentFocusRequest = null
+                    currentFocusGain = null
+                }
             }
             .build()
 
-        currentFocusRequest = focusRequest
         val res = audioManager.requestAudioFocus(focusRequest)
-        return res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            currentFocusRequest = focusRequest
+            currentFocusGain = targetGain
+            return true
+        }
+        return false
     }
 
     private fun abandonFocus() {
         currentFocusRequest?.let { request ->
             audioManager.abandonAudioFocusRequest(request)
             currentFocusRequest = null
+            currentFocusGain = null
         }
+        activeUtteranceId = null
     }
 
     fun shutdown() {
+        pendingSpeechQueue.clear()
         tts?.stop()
         tts?.shutdown()
         tts = null

@@ -59,7 +59,7 @@ class RouteRepository(
      */
     suspend fun refreshRoutes(): List<RouteOption> = withContext(ioDispatcher) {
         val customRoutes = mutableListOf<RouteOption>()
-        val seenFileNames = mutableSetOf<String>()
+        val allFiles = mutableListOf<File>()
 
         for (dir in storageDirs) {
             if (!dir.exists()) {
@@ -69,40 +69,45 @@ class RouteRepository(
 
             val jsonFiles = dir.listFiles { file ->
                 file.isFile && file.name.endsWith(".json", ignoreCase = true)
-            }?.sortedBy { it.name } ?: emptyList()
+            } ?: emptyArray()
 
-            for (file in jsonFiles) {
-                if (seenFileNames.contains(file.name)) continue
-                seenFileNames.add(file.name)
+            allFiles.addAll(jsonFiles)
+        }
 
-                try {
-                    val content = file.readText(Charsets.UTF_8)
-                    if (content.isBlank()) {
-                        logW(TAG, "Skipping empty itinerary file: ${file.name}")
-                        continue
-                    }
+        // Group by filename across internal and external storage dirs; pick newest copy (Finding 6)
+        val candidateFiles = allFiles.groupBy { it.name }
+            .values
+            .map { filesGroup -> filesGroup.maxByOrNull { it.lastModified() }!! }
+            .sortedBy { it.name }
 
-                    val itinerary = gson.fromJson(content, Itinerary::class.java)
-                    if (itinerary == null) {
-                        logW(TAG, "Skipping null deserialized itinerary: ${file.name}")
-                        continue
-                    }
-
-                    val optionsForFile = parseItineraryToRouteOptions(
-                        itinerary = itinerary,
-                        fileName = file.name,
-                        absolutePath = file.absolutePath,
-                        isAsset = false
-                    )
-
-                    if (optionsForFile.isEmpty()) {
-                        logW(TAG, "No valid days or checkpoints found in: ${file.name}")
-                        continue
-                    }
-                    customRoutes.addAll(optionsForFile)
-                } catch (e: Exception) {
-                    logE(TAG, "Failed to parse itinerary file ${file.name}: ${e.message}", e)
+        for (file in candidateFiles) {
+            try {
+                val content = file.readText(Charsets.UTF_8)
+                if (content.isBlank()) {
+                    logW(TAG, "Skipping empty itinerary file: ${file.name}")
+                    continue
                 }
+
+                val itinerary = gson.fromJson(content, Itinerary::class.java)
+                if (itinerary == null) {
+                    logW(TAG, "Skipping null deserialized itinerary: ${file.name}")
+                    continue
+                }
+
+                val optionsForFile = parseItineraryToRouteOptions(
+                    itinerary = itinerary,
+                    fileName = file.name,
+                    absolutePath = file.absolutePath,
+                    isAsset = false
+                )
+
+                if (optionsForFile.isEmpty()) {
+                    logW(TAG, "No valid days or checkpoints found in: ${file.name}")
+                    continue
+                }
+                customRoutes.addAll(optionsForFile)
+            } catch (e: Exception) {
+                logE(TAG, "Failed to parse itinerary file ${file.name}: ${e.message}", e)
             }
         }
 
@@ -221,65 +226,65 @@ class RouteRepository(
      * Deletes an itinerary from disk and refreshes the route list.
      */
     suspend fun deleteItinerary(option: RouteOption): Boolean = withContext(ioDispatcher) {
-        val file = if (!option.absolutePath.isNullOrBlank()) {
-            File(option.absolutePath)
-        } else {
-            storageDirs.firstNotNullOfOrNull { dir ->
-                File(dir, option.routeFile).takeIf { it.exists() }
+        var anyDeleted = false
+        // Delete the file across all storage dirs to prevent shadowed copies from resurrecting (Finding 6)
+        for (dir in storageDirs) {
+            val file = File(dir, option.routeFile)
+            if (file.exists() && file.delete()) {
+                anyDeleted = true
             }
         }
-        if (file != null && file.exists()) {
-            val deleted = file.delete()
-            if (deleted) {
-                refreshRoutes()
+        if (!option.absolutePath.isNullOrBlank()) {
+            val specificFile = File(option.absolutePath)
+            if (specificFile.exists() && specificFile.delete()) {
+                anyDeleted = true
             }
-            deleted
-        } else {
-            false
         }
+        if (anyDeleted) {
+            refreshRoutes()
+        }
+        anyDeleted
     }
 
-    /**
-     * Deletes an itinerary by file name from disk and refreshes the route list.
-     */
     suspend fun deleteItineraryFile(fileName: String): Boolean = withContext(ioDispatcher) {
-        val file = storageDirs.firstNotNullOfOrNull { dir ->
-            File(dir, fileName).takeIf { it.exists() }
-        }
-        if (file != null && file.exists()) {
-            val deleted = file.delete()
-            if (deleted) {
-                refreshRoutes()
+        var anyDeleted = false
+        // Delete the file across all storage dirs to prevent shadowed copies from resurrecting (Finding 6)
+        for (dir in storageDirs) {
+            val file = File(dir, fileName)
+            if (file.exists() && file.delete()) {
+                anyDeleted = true
             }
-            deleted
-        } else {
-            false
         }
+        if (anyDeleted) {
+            refreshRoutes()
+        }
+        anyDeleted
     }
 
-    private fun parseItineraryToRouteOptions(
+    internal fun parseItineraryToRouteOptions(
         itinerary: Itinerary,
         fileName: String,
-        absolutePath: String?,
-        isAsset: Boolean
+        absolutePath: String? = null,
+        isAsset: Boolean = false
     ): List<RouteOption> {
         val results = mutableListOf<RouteOption>()
 
+        val rawTripName = itinerary.tripName
+        val fallbackTripName = fileName.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
+        val tripName = rawTripName.ifBlank { fallbackTripName }
+
         if (!itinerary.days.isNullOrEmpty()) {
             val sortedDays = itinerary.days.sortedBy { it.day }
-            val tripName = itinerary.tripName.ifBlank {
-                fileName.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
-            }
             for (day in sortedDays) {
                 val dayNum = day.day
                 val rawTitle = day.title?.trim()
                 val title = when {
-                    rawTitle.isNullOrBlank() -> if (itinerary.tripName.isNotBlank()) "${itinerary.tripName} (Day $dayNum)" else "Day $dayNum"
+                    rawTitle.isNullOrBlank() -> if (tripName.isNotBlank()) "$tripName (Day $dayNum)" else "Day $dayNum"
                     rawTitle.startsWith("Day $dayNum", ignoreCase = true) -> rawTitle
                     else -> "Day $dayNum: $rawTitle"
                 }
-                val subtitle = if (itinerary.tripName.isNotBlank() && itinerary.tripName != title) {
-                    itinerary.tripName
+                val subtitle = if (tripName.isNotBlank() && tripName != title) {
+                    tripName
                 } else {
                     val origin = day.origin
                     val destination = day.destination
@@ -295,16 +300,13 @@ class RouteRepository(
                         absolutePath = absolutePath,
                         subtitle = subtitle,
                         tripName = tripName,
-                        googleMapsUrl = gmapsUrl
+                        googleMapsUrl = gmapsUrl,
+                        date = day.date.takeIf { it.isNotBlank() } ?: itinerary.date
                     )
                 )
             }
         } else if (!itinerary.checkpoints.isNullOrEmpty()) {
-            val title = if (itinerary.tripName.isNotBlank()) {
-                itinerary.tripName.trim()
-            } else {
-                fileName.removeSuffix(".json").replace('_', ' ').replace('-', ' ').trim()
-            }
+            val title = if (tripName.isNotBlank()) tripName else fallbackTripName
             val subtitle = "${itinerary.checkpoints.size} checkpoints"
             val gmapsUrl = itinerary.googleMapsUrl
             results.add(
@@ -316,7 +318,8 @@ class RouteRepository(
                     absolutePath = absolutePath,
                     subtitle = subtitle,
                     tripName = title,
-                    googleMapsUrl = gmapsUrl
+                    googleMapsUrl = gmapsUrl,
+                    date = itinerary.date
                 )
             )
         }

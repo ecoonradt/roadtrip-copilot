@@ -434,4 +434,58 @@ class LocationTrackerLoopRouteTest {
         assertEquals("scenic_blank_speech", lastResult!!.alerts[0].id)
         assertTrue(lastResult!!.alerts[0].speech.contains("Approaching Lookout Point"))
     }
+
+    @Test
+    fun testSkipTwoConsecutiveWaypointsProgression() {
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+
+        tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis())
+
+        // 1. Departure at origin
+        tracker.evaluate(42.65260, -73.75620, 0.0)
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("origin_home", lastResult!!.alerts[0].id)
+        assertEquals("cumberland_farms", lastResult!!.nextCheckpoint?.id)
+
+        // 2. Driver skips BOTH Cumberland Farms (stop 1) AND Haswell Road (stop 2),
+        // and arrives directly at Boght Road (stop 3).
+        tracker.evaluate(42.7365, -73.7129, 25.0)
+
+        // Boght Road must trigger successfully even after skipping 2 consecutive stops!
+        assertEquals(1, lastResult!!.alerts.size)
+        assertEquals("boght_rd", lastResult!!.alerts[0].id)
+        // Next checkpoint must now be destination Home
+        assertEquals("dest_home", lastResult!!.nextCheckpoint?.id)
+    }
+
+    @Test
+    fun testVisitedCheckpointsPersistenceAcrossInstances() {
+        val routeId = "test_persisted_route_day_1"
+        val tracker1 = LocationTracker(context) { result ->
+            lastResult = result
+        }
+        tracker1.clearVisitedState(routeId)
+
+        val startTime = System.currentTimeMillis()
+        tracker1.setCheckpoints(loopCheckpoints, startTime, routeIdentifier = routeId)
+
+        // Start and visit Cumberland Farms
+        tracker1.evaluate(42.65260, -73.75620, 0.0)
+        tracker1.evaluate(42.7402, -73.7355, 15.0)
+        assertEquals("haswell_rd", lastResult!!.nextCheckpoint?.id)
+
+        // Now simulate service restart / new tracker instance
+        val tracker2 = LocationTracker(context) { result ->
+            lastResult = result
+        }
+        tracker2.setCheckpoints(loopCheckpoints, startTime, routeIdentifier = routeId, restorePersisted = true)
+
+        // Tracker2 should restore that origin_home and cumberland_farms are already visited
+        assertEquals("haswell_rd", lastResult!!.nextCheckpoint?.id)
+        assertEquals("In Progress", lastResult!!.scheduleDelta?.statusText)
+
+        tracker1.clearVisitedState(routeId)
+    }
 }

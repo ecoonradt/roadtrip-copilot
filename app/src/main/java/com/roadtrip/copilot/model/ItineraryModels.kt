@@ -9,10 +9,10 @@ data class CheckpointNotification(
 )
 
 data class Checkpoint(
-    val id: String,
-    val name: String,
-    val lat: Double,
-    val lng: Double,
+    val id: String = "",
+    val name: String = "",
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
     @SerializedName("trigger_radius_miles")
     val triggerRadiusMiles: Double = 0.5,
     @SerializedName("target_time")
@@ -31,11 +31,15 @@ data class Checkpoint(
     val address: String? = null,
     @SerializedName("is_route_anchor")
     val isRouteAnchor: Boolean? = null,
+    val timezone: String? = null,
     var targetEpochMillis: Long? = null,
     var formattedTargetTime: String? = null
 ) {
     val isSilentStop: Boolean
         get() = type.equals("stop", ignoreCase = true) || type.equals("general_stop", ignoreCase = true)
+
+    val effectiveRadiusMiles: Double
+        get() = if (triggerRadiusMiles > 0.0) triggerRadiusMiles else 0.5
 
     val shouldAlert: Boolean
         get() = !isSilentStop && (
@@ -45,8 +49,8 @@ data class Checkpoint(
 }
 
 data class Day(
-    val day: Int,
-    val date: String,
+    val day: Int = 1,
+    val date: String = "",
     val timezone: String? = null,
     val title: String? = null,
     val origin: String? = null,
@@ -58,7 +62,7 @@ data class Day(
 
 data class Itinerary(
     @SerializedName("trip_name")
-    val tripName: String,
+    val tripName: String = "",
     val date: String? = null,
     val timezone: String? = null,
     @SerializedName("google_maps_url")
@@ -91,24 +95,32 @@ data class Itinerary(
      * For ad-hoc routes (e.g. test drives), targets are computed dynamically from [tripStartTimeMillis]
      * plus [Checkpoint.offsetMinutesFromStart].
      * For fixed itineraries (e.g. PHX -> ABQ), targets are resolved using the Day's ISO date,
-     * route timezone, and [Checkpoint.targetTime].
+     * checkpoint or route timezone, and [Checkpoint.targetTime].
      */
     fun resolveCheckpointsForDay(dayNumber: Int, tripStartTimeMillis: Long): List<Checkpoint> {
         val rawCheckpoints = getCheckpointsForDay(dayNumber)
         val day = days?.find { it.day == dayNumber }
-        val dateStr = day?.date ?: this.date
-        val tzStr = day?.timezone ?: this.timezone ?: "America/Phoenix"
-        val zoneId = try {
-            java.time.ZoneId.of(tzStr)
-        } catch (e: Exception) {
-            java.time.ZoneId.systemDefault()
-        }
+        val dateStr = day?.date?.takeIf { it.isNotBlank() } ?: this.date
+        val dayTz = day?.timezone?.takeIf { it.isNotBlank() } ?: this.timezone ?: "America/Phoenix"
 
         val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US)
         val monthDayTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("MMM d, h:mm a", java.util.Locale.US)
 
         return rawCheckpoints.map { cp ->
-            val resolved = cp.copy()
+            val resolved = cp.copy(
+                triggerRadiusMiles = cp.effectiveRadiusMiles
+            )
+
+            // Per-checkpoint timezone overrides day timezone (critical for cross-timezone days, e.g. AZ -> NM)
+            val cpTz = cp.timezone?.takeIf { it.isNotBlank() } ?: dayTz
+            val zoneId = try {
+                java.time.ZoneId.of(cpTz)
+            } catch (e: Exception) {
+                java.time.ZoneId.systemDefault()
+            }
+
+            var resolvedSuccessfully = false
+
             if (!cp.targetTime.isNullOrBlank() && !dateStr.isNullOrBlank()) {
                 // Fixed Itinerary: Parse ISO date + target_time + timezone
                 try {
@@ -126,15 +138,18 @@ data class Itinerary(
                     } else {
                         zdt.format(monthDayTimeFormatter)
                     }
+                    resolvedSuccessfully = true
                 } catch (e: Exception) {
-                    // Fallback to null if parsing fails
+                    // Fallback to offsetMinutesFromStart if targetTime parsing fails
                 }
-            } else if (cp.offsetMinutesFromStart != null) {
-                // Ad-hoc Trip: Dynamic target from trip start time
+            }
+
+            if (!resolvedSuccessfully && cp.offsetMinutesFromStart != null) {
+                // Ad-hoc Trip or fallback from malformed target_time
                 val epoch = tripStartTimeMillis + (cp.offsetMinutesFromStart * 60_000L)
                 resolved.targetEpochMillis = epoch
                 val targetInstant = java.time.Instant.ofEpochMilli(epoch)
-                val targetZoned = targetInstant.atZone(java.time.ZoneId.systemDefault())
+                val targetZoned = targetInstant.atZone(zoneId)
                 resolved.formattedTargetTime = targetZoned.format(timeFormatter)
             }
             resolved

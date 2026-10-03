@@ -48,11 +48,10 @@ class WaypointListScreen(carContext: CarContext) : Screen(carContext) {
         val listBuilder = ItemList.Builder()
 
         if (checkpoints.isEmpty()) {
-            CopilotService.loadInitialRoute(carContext)
             listBuilder.addItem(
                 Row.Builder()
-                    .setTitle("Loading Waypoints...")
-                    .addText("Loading route itinerary...")
+                    .setTitle("No Route Loaded")
+                    .addText("Select a route on your phone or in the car Route Library.")
                     .build()
             )
         } else {

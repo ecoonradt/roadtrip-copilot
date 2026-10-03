@@ -73,12 +73,25 @@ class CopilotService : Service() {
             companionScope.launch {
                 val repo = RouteRepository.getInstance(context)
                 val routes = repo.refreshRoutes()
+
+                // Never interrupt or stop an actively running route, or reload if already loaded (Finding 1)
+                if (_isRunning.value || _activeRouteFile.value.isNotBlank()) {
+                    return@launch
+                }
+
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 val savedFile = prefs.getString(PREF_ROUTE_FILE, "") ?: ""
                 val savedDay = prefs.getInt(PREF_DAY_NUMBER, 1)
 
-                val matchingOption = routes.find { it.routeFile == savedFile && it.dayNumber == savedDay }
-                    ?: routes.find { it.routeFile == savedFile }
+                val todayIso = java.time.LocalDate.now().toString()
+                val targetFileRoutes = if (savedFile.isNotBlank()) routes.filter { it.routeFile == savedFile } else routes
+
+                // Prioritize today's day for multi-day trips (Finding 8)
+                val matchingToday = targetFileRoutes.find { it.date == todayIso }
+                val matchingOption = matchingToday
+                    ?: targetFileRoutes.find { it.dayNumber == savedDay }
+                    ?: targetFileRoutes.firstOrNull()
+                    ?: routes.find { it.date == todayIso }
                     ?: routes.firstOrNull()
 
                 if (matchingOption != null) {
@@ -110,8 +123,11 @@ class CopilotService : Service() {
             dayNumber: Int,
             autoRestartIfRunning: Boolean = false
         ) {
-            if (_isRunning.value) {
-                stopRoute(context)
+            val wasRunning = _isRunning.value
+            val isSameRoute = (_activeRouteFile.value == routeFile && _activeDayNumber.value == dayNumber)
+
+            if (wasRunning && isSameRoute) {
+                return
             }
 
             if (routeFile.isBlank()) {
@@ -142,7 +158,8 @@ class CopilotService : Service() {
                     val startTime = System.currentTimeMillis()
                     val checkpoints = itinerary.resolveCheckpointsForDay(dayNumber, startTime)
                     val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
-                    val title = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
+                    val tripName = itinerary.tripName.ifBlank { "Day $dayNumber" }
+                    val title = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else tripName
 
                     val googleMapsUrl = itinerary.getGoogleMapsUrlForDay(dayNumber)
 
@@ -345,15 +362,16 @@ class CopilotService : Service() {
                     Triple(loaded, cps, time)
                 }
 
-                locationTracker.setCheckpoints(checkpoints, startTime)
+                locationTracker.setCheckpoints(checkpoints, startTime, "${routeFile}_day_${dayNumber}")
                 locationTracker.startTracking()
 
                 val dayTitle = itinerary.days?.find { it.day == dayNumber }?.title
-                _activeRouteTitle.value = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else itinerary.tripName.ifBlank { "Day $dayNumber" }
+                val tripName = itinerary.tripName.ifBlank { "Day $dayNumber" }
+                _activeRouteTitle.value = if (!dayTitle.isNullOrBlank()) "Day $dayNumber: $dayTitle" else tripName
                 _activeCheckpoints.value = checkpoints
                 _activeGoogleMapsUrl.value = itinerary.getGoogleMapsUrlForDay(dayNumber)
 
-                emitLog("Loaded ${checkpoints.size} waypoints for ${itinerary.tripName} (Day $dayNumber).")
+                emitLog("Loaded ${checkpoints.size} waypoints for $tripName (Day $dayNumber).")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load itinerary $routeFile: ${e.message}", e)
                 emitLog("Error loading route: ${e.message}")
@@ -412,7 +430,8 @@ class CopilotService : Service() {
     }
 
     fun reloadCheckpoints(checkpoints: List<com.roadtrip.copilot.model.Checkpoint>, startTime: Long) {
-        locationTracker.setCheckpoints(checkpoints, startTime)
+        val routeId = "${_activeRouteFile.value}_day_${_activeDayNumber.value}"
+        locationTracker.setCheckpoints(checkpoints, startTime, routeId)
         val firstCp = checkpoints.firstOrNull()
         val updatedNotification = notificationEngine.buildForegroundNotification(
             nextCheckpoint = firstCp?.name ?: "All Waypoints Passed",

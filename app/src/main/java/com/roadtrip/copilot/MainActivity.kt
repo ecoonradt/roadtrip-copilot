@@ -32,6 +32,8 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.roadtrip.copilot.databinding.ActivityMainBinding
 import com.roadtrip.copilot.databinding.BottomSheetRoutesBinding
 import com.roadtrip.copilot.databinding.ItemRouteManageBinding
+import com.google.gson.Gson
+import com.roadtrip.copilot.model.Itinerary
 import com.roadtrip.copilot.model.RouteOption
 import com.roadtrip.copilot.model.RouteRepository
 import kotlinx.coroutines.Dispatchers
@@ -318,16 +320,58 @@ class MainActivity : AppCompatActivity() {
     private fun importItineraryFromJsonString(jsonContent: String, fileName: String) {
         lifecycleScope.launch {
             try {
+                val repo = RouteRepository.getInstance(applicationContext)
+
+                // 1. Validate JSON and parse model before touching the filesystem (Finding 5)
+                val itinerary = try {
+                    Gson().fromJson(jsonContent, Itinerary::class.java)
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (itinerary == null) {
+                    Toast.makeText(this@MainActivity, "Import failed: Invalid itinerary format", Toast.LENGTH_LONG).show()
+                    appendLog("Import failed: Content is not a valid itinerary JSON.")
+                    return@launch
+                }
+
+                // Determine safe, descriptive file name
+                val sanitizedTripName = itinerary.tripName.trim()
+                    .lowercase()
+                    .replace(Regex("[^a-z0-9]+"), "_")
+                    .trim('_')
+                    .takeIf { it.isNotBlank() }
+
+                val rawName = if (fileName.isBlank() || fileName == "scanned_itinerary.json") {
+                    sanitizedTripName?.let { "$it.json" } ?: "scanned_itinerary.json"
+                } else {
+                    fileName
+                }
+                val safeFileName = if (rawName.endsWith(".json", ignoreCase = true)) File(rawName).name else "${File(rawName).name}.json"
+
+                val testOptions = repo.parseItineraryToRouteOptions(itinerary, safeFileName)
+                if (testOptions.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "Import failed: Itinerary has no valid days or checkpoints.", Toast.LENGTH_LONG).show()
+                    appendLog("Import failed: $safeFileName contains no valid waypoints; existing files preserved.")
+                    return@launch
+                }
+
                 val targetDir = File(filesDir, "itineraries")
                 if (!targetDir.exists()) {
                     targetDir.mkdirs()
                 }
-                val safeFileName = if (fileName.endsWith(".json", ignoreCase = true)) File(fileName).name else "${File(fileName).name}.json"
                 val targetFile = File(targetDir, safeFileName)
+                val tempFile = File(targetDir, "${safeFileName}.tmp")
 
                 val importedOption = withContext(Dispatchers.IO) {
-                    targetFile.writeText(jsonContent, Charsets.UTF_8)
-                    val repo = RouteRepository.getInstance(applicationContext)
+                    tempFile.writeText(jsonContent, Charsets.UTF_8)
+                    if (targetFile.exists()) {
+                        targetFile.delete()
+                    }
+                    if (!tempFile.renameTo(targetFile)) {
+                        targetFile.writeText(jsonContent, Charsets.UTF_8)
+                        tempFile.delete()
+                    }
                     val updatedRoutes = repo.refreshRoutes()
                     updatedRoutes.find { it.routeFile == targetFile.name }
                 }
@@ -336,10 +380,12 @@ class MainActivity : AppCompatActivity() {
                     if (CopilotService.isRunning.value) {
                         stopCopilotService()
                     }
+                    val targetDay = testOptions.find { it.date == java.time.LocalDate.now().toString() }?.dayNumber
+                        ?: importedOption.dayNumber
                     CopilotService.setSelectedRoute(
                         this@MainActivity,
                         importedOption.routeFile,
-                        importedOption.dayNumber
+                        targetDay
                     )
                     binding.tvStatusBadge.text = getString(R.string.status_idle)
                     Toast.makeText(this@MainActivity, "Trip Loaded: ${importedOption.title}", Toast.LENGTH_SHORT).show()
@@ -349,10 +395,9 @@ class MainActivity : AppCompatActivity() {
                     binding.tvStatusBadge.text = if (isRunning) getString(R.string.status_running) else getString(R.string.status_idle)
                     Toast.makeText(
                         this@MainActivity,
-                        "File $safeFileName saved, but contains no valid waypoints.",
+                        "File $safeFileName saved, but could not be indexed.",
                         Toast.LENGTH_LONG
                     ).show()
-                    appendLog("Warning: $safeFileName saved but contains no valid checkpoints or days.")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save itinerary", e)
@@ -475,6 +520,18 @@ class MainActivity : AppCompatActivity() {
         if (file.isNotBlank()) {
             val trip = tripGroups.find { it.routeFile == file }
             if (trip != null) {
+                // If co-pilot is idle and trip is multi-day, auto-select today's day if matched (Finding 8)
+                if (!CopilotService.isRunning.value && trip.days.size > 1) {
+                    val todayIso = java.time.LocalDate.now().toString()
+                    val todayDay = trip.days.find { it.date == todayIso }
+                    if (todayDay != null && todayDay.dayNumber != day) {
+                        CopilotService.setSelectedRoute(this@MainActivity, file, todayDay.dayNumber)
+                        Toast.makeText(this@MainActivity, "Auto-switched to Day ${todayDay.dayNumber} for today", Toast.LENGTH_SHORT).show()
+                        appendLog("Auto-selected Day ${todayDay.dayNumber} based on today's date ($todayIso)")
+                        return
+                    }
+                }
+
                 binding.tvActiveRouteTitle.text = trip.title
                 binding.tvActiveRouteSubtitle.text = "${trip.routeFile} • ${trip.days.size} Day${if (trip.days.size > 1) "s" else ""}"
                 if (trip.days.size > 1) {
@@ -548,10 +605,18 @@ class MainActivity : AppCompatActivity() {
                 itemBinding.tvItemRouteSubtitle.text = "${trip.routeFile} • ${trip.days.size} Day${if (trip.days.size > 1) "s" else ""}"
 
                 itemBinding.layoutRouteRow.setOnClickListener {
-                    if (CopilotService.isRunning.value) {
+                    val isDifferentFile = trip.routeFile != activeFile
+                    val todayIso = java.time.LocalDate.now().toString()
+                    val targetDay = if (!isDifferentFile) {
+                        CopilotService.activeDayNumber.value
+                    } else {
+                        trip.days.find { it.date == todayIso }?.dayNumber
+                            ?: trip.days.firstOrNull()?.dayNumber
+                            ?: 1
+                    }
+                    if (CopilotService.isRunning.value && (isDifferentFile || targetDay != CopilotService.activeDayNumber.value)) {
                         stopCopilotService()
                     }
-                    val targetDay = if (trip.routeFile == activeFile) CopilotService.activeDayNumber.value else 1
                     CopilotService.setSelectedRoute(this@MainActivity, trip.routeFile, targetDay)
                     dialog.dismiss()
                     Toast.makeText(this@MainActivity, "Trip Selected: ${trip.title}", Toast.LENGTH_SHORT).show()
@@ -675,20 +740,8 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.testAudio()
             } else {
-                val selectedRoute = getSelectedRouteOption()
-                val routeFile = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
-                val dayNum = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
-                if (routeFile.isBlank()) {
-                    Toast.makeText(this, "Please load or import a route first.", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                val intent = Intent(this, CopilotService::class.java).apply {
-                    action = CopilotService.ACTION_START
-                    putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
-                    putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNum)
-                }
-                ContextCompat.startForegroundService(this, intent)
-                Toast.makeText(this, "Starting co-pilot for audio test...", Toast.LENGTH_SHORT).show()
+                CopilotService.testAudio(this)
+                Toast.makeText(this, "Testing audio...", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -696,20 +749,8 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.testAlert()
             } else {
-                val selectedRoute = getSelectedRouteOption()
-                val routeFile = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
-                val dayNum = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
-                if (routeFile.isBlank()) {
-                    Toast.makeText(this, "Please load or import a route first.", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                val intent = Intent(this, CopilotService::class.java).apply {
-                    action = CopilotService.ACTION_START
-                    putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
-                    putExtra(CopilotService.EXTRA_DAY_NUMBER, dayNum)
-                }
-                ContextCompat.startForegroundService(this, intent)
-                Toast.makeText(this, "Starting co-pilot for alert test...", Toast.LENGTH_SHORT).show()
+                CopilotService.testAlert(this)
+                Toast.makeText(this, "Testing alert...", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -717,10 +758,7 @@ class MainActivity : AppCompatActivity() {
             if (copilotService != null) {
                 copilotService?.calibrateAudio()
             } else {
-                val intent = Intent(this, CopilotService::class.java).apply {
-                    action = CopilotService.ACTION_CALIBRATE_AUDIO
-                }
-                ContextCompat.startForegroundService(this, intent)
+                CopilotService.calibrateAudio(this)
                 Toast.makeText(this, "Starting calibration speech...", Toast.LENGTH_SHORT).show()
             }
         }
