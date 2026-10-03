@@ -946,9 +946,12 @@ export function App() {
       <ExportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
+        trip={trip}
+        activeDayIndex={activeDayIndex}
+        activeDayCascade={cascadeResult}
         waypoints={waypoints}
         scheduledStops={cascadeResult.stops}
-        tripName={`${trip.tripName}${trip.isMultiDay ? ` - Day ${currentDay.dayNumber}` : ''}`}
+        tripName={trip.tripName}
         baseDate={baseDate}
         departureTime={departureTime}
         googleMapsRoute={googleMapsRoute}

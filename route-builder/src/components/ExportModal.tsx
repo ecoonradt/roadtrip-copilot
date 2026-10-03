@@ -12,10 +12,15 @@ import {
   FileJson,
   Navigation,
   Smartphone,
+  Layers,
+  Calendar,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import type { Waypoint } from '../types/routing';
-import type { ScheduledStop, GoogleMapsRouteResult } from '../engine/types';
+import type { ScheduledStop, GoogleMapsRouteResult, TimelineCascadeResult } from '../engine/types';
+import type { ParsedTrip } from '../engine/itineraryParser';
+import { calculateTimelineCascade } from '../engine/cascade';
+import { generateGoogleMapsUrls } from '../engine/googleMapsUrl';
 import {
   formatMultiDayItinerary,
   formatSingleRouteItinerary,
@@ -30,6 +35,9 @@ import {
 interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  trip?: ParsedTrip;
+  activeDayIndex?: number;
+  activeDayCascade?: TimelineCascadeResult;
   waypoints: Waypoint[];
   scheduledStops?: ScheduledStop[];
   tripName?: string;
@@ -43,6 +51,9 @@ interface ExportModalProps {
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
   onClose,
+  trip,
+  activeDayIndex = 0,
+  activeDayCascade,
   waypoints,
   scheduledStops,
   tripName = 'Roadtrip Co-Pilot Itinerary',
@@ -53,22 +64,51 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   fileName: initialFileName,
 }) => {
   const [activeTab, setActiveTab] = useState<'handoff' | 'gmaps' | 'json'>('handoff');
-  const defaultFileName = useMemo(() => {
-    if (initialFileName) {
-      return initialFileName.endsWith('.json') ? initialFileName : `${initialFileName}.json`;
+  const isMultiDay = Boolean(trip?.isMultiDay && trip.days && trip.days.length > 1);
+
+  // Scope selection for multi-day trips: export all days (default) or current day only
+  const [exportScope, setExportScope] = useState<'full' | 'day'>('full');
+
+  // Selected day index for Google Maps navigation links
+  const [selectedGmapsDayIndex, setSelectedGmapsDayIndex] = useState<number>(activeDayIndex);
+
+  // Reset tab and day index when opened or active day changes
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedGmapsDayIndex(activeDayIndex);
     }
-    const sanitized = (tripName || 'itinerary')
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '');
-    return `${sanitized || 'itinerary'}.json`;
-  }, [initialFileName, tripName]);
+  }, [isOpen, activeDayIndex]);
+
+  const defaultFileName = useMemo(() => {
+    if (exportScope === 'full' || !isMultiDay) {
+      if (initialFileName) {
+        return initialFileName.endsWith('.json') ? initialFileName : `${initialFileName}.json`;
+      }
+      const raw = trip?.tripName || tripName || 'itinerary';
+      const sanitized = raw
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      return `${sanitized || 'itinerary'}.json`;
+    } else {
+      const activeDay = trip?.days?.[activeDayIndex];
+      const dayNum = activeDay?.dayNumber ?? (activeDayIndex + 1);
+      const baseRaw = (trip?.fileName ? trip.fileName.replace(/\.json$/i, '') : (trip?.tripName || tripName || 'itinerary'))
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      return `${baseRaw}_day_${dayNum}.json`;
+    }
+  }, [exportScope, isMultiDay, initialFileName, trip, tripName, activeDayIndex]);
+
   const [fileName, setFileName] = useState(defaultFileName);
 
   useEffect(() => {
     setFileName(defaultFileName);
   }, [defaultFileName]);
+
   const [copiedJson, setCopiedJson] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedLegIndex, setCopiedLegIndex] = useState<number | null>(null);
@@ -82,6 +122,28 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   // Google Maps QR Codes map (legIndex -> dataUrl)
   const [gmapsQrCodes, setGmapsQrCodes] = useState<Record<number, string>>({});
 
+  // Compute Google Maps route for selected day in Tab 2
+  const currentGmapsRoute = useMemo(() => {
+    if (isMultiDay && trip?.days) {
+      const targetDay = trip.days[selectedGmapsDayIndex] || trip.days[0];
+      if (!targetDay || !targetDay.waypoints || targetDay.waypoints.length === 0) return null;
+      return generateGoogleMapsUrls(
+        targetDay.waypoints.map((w) => ({
+          lat: w.lat,
+          lng: w.lng,
+          name: w.name,
+          placeName: w.place_name,
+          address: w.address,
+          placeId: w.google_place_id,
+          isRouteAnchor: w.is_route_anchor,
+          type: w.type,
+          dwellMinutes: w.dwell_minutes,
+        }))
+      );
+    }
+    return googleMapsRoute || null;
+  }, [isMultiDay, trip, selectedGmapsDayIndex, googleMapsRoute]);
+
   // Build the formatted V2 Itinerary object
   const itineraryData: ItineraryExportModel = useMemo(() => {
     if (isAdHoc) {
@@ -92,20 +154,87 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         isAdHoc: true,
       });
     }
+
+    if (isMultiDay && trip?.days && exportScope === 'full') {
+      const formattedDays = trip.days.map((day, idx) => {
+        let stopsForDay: ScheduledStop[] | undefined;
+        if (idx === activeDayIndex && activeDayCascade?.stops?.length === day.waypoints.length) {
+          stopsForDay = activeDayCascade.stops;
+        } else if (day.waypoints && day.waypoints.length > 0) {
+          try {
+            stopsForDay = calculateTimelineCascade({
+              baseDate: day.date,
+              departureTime: day.departureTime || '09:00:00',
+              waypoints: day.waypoints,
+            }).stops;
+          } catch {
+            stopsForDay = undefined;
+          }
+        }
+        return {
+          dayNumber: day.dayNumber,
+          date: day.date,
+          timezone: day.timezone,
+          title: day.title,
+          origin: day.origin,
+          destination: day.destination,
+          departureTime: day.departureTime,
+          waypoints: day.waypoints,
+          scheduledStops: stopsForDay,
+        };
+      });
+
+      return formatMultiDayItinerary({
+        tripName: trip.tripName || tripName,
+        startDate: trip.dates?.start || trip.days[0]?.date,
+        endDate: trip.dates?.end || trip.days[trip.days.length - 1]?.date,
+        days: formattedDays,
+      });
+    }
+
+    // Single-day export (or isolated day of multi-day trip)
+    const activeDay = trip?.days?.[activeDayIndex];
+    const effectiveDayNumber = isMultiDay ? (activeDay?.dayNumber ?? (activeDayIndex + 1)) : 1;
+    const effectiveTitle = isMultiDay ? (activeDay?.title || `Day ${effectiveDayNumber}`) : undefined;
+    const effectiveTripName = isMultiDay ? `${trip?.tripName || tripName} - Day ${effectiveDayNumber}` : tripName;
+
     return formatMultiDayItinerary({
-      tripName,
+      tripName: effectiveTripName,
       startDate: baseDate,
       days: [
         {
-          dayNumber: 1,
+          dayNumber: effectiveDayNumber,
           date: baseDate,
           departureTime,
+          title: effectiveTitle,
           waypoints,
           scheduledStops,
         },
       ],
     });
-  }, [tripName, baseDate, departureTime, waypoints, scheduledStops, isAdHoc]);
+  }, [
+    isAdHoc,
+    isMultiDay,
+    trip,
+    exportScope,
+    activeDayIndex,
+    activeDayCascade,
+    tripName,
+    waypoints,
+    scheduledStops,
+    baseDate,
+    departureTime,
+  ]);
+
+  const totalCheckpointCount = useMemo(() => {
+    if ('days' in itineraryData && Array.isArray(itineraryData.days)) {
+      return itineraryData.days.reduce((acc, d) => acc + (d.checkpoints?.length || 0), 0);
+    }
+    if ('checkpoints' in itineraryData && Array.isArray(itineraryData.checkpoints)) {
+      return itineraryData.checkpoints.length;
+    }
+    return 0;
+  }, [itineraryData]);
 
   const jsonString = useMemo(() => {
     return exportItineraryToJson(itineraryData, 2);
@@ -143,12 +272,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   // Generate QR codes for Google Maps legs
   useEffect(() => {
-    if (!googleMapsRoute?.legs || googleMapsRoute.legs.length === 0) return;
+    if (!currentGmapsRoute?.legs || currentGmapsRoute.legs.length === 0) {
+      setGmapsQrCodes({});
+      return;
+    }
 
     let isMounted = true;
     const generateLegQrs = async () => {
       const codes: Record<number, string> = {};
-      for (const leg of googleMapsRoute.legs) {
+      for (const leg of currentGmapsRoute.legs) {
         try {
           const url = await QRCode.toDataURL(leg.url, {
             width: 200,
@@ -170,7 +302,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [googleMapsRoute]);
+  }, [currentGmapsRoute]);
 
   // Initialize when opened
   useEffect(() => {
@@ -304,6 +436,43 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Export Scope Selector (Multi-Day Trips Only) */}
+          {isMultiDay && trip?.days && (
+            <div className="bg-slate-850/80 p-3 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-slate-300 font-medium">
+                <Layers className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>Export Scope:</span>
+              </div>
+              <div className="inline-flex items-center bg-slate-900 rounded-lg p-1 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setExportScope('full')}
+                  className={`px-3 py-1.5 rounded-md font-medium text-xs transition-all flex items-center gap-1.5 ${
+                    exportScope === 'full'
+                      ? 'bg-sky-600 text-white shadow-sm font-semibold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span>Full Trip ({trip.days.length} Days)</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-sky-950 text-sky-200 border border-sky-400/40">
+                    Recommended
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExportScope('day')}
+                  className={`px-3 py-1.5 rounded-md font-medium text-xs transition-all flex items-center gap-1.5 ${
+                    exportScope === 'day'
+                      ? 'bg-sky-600 text-white shadow-sm font-semibold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span>Day {trip.days[activeDayIndex]?.dayNumber ?? (activeDayIndex + 1)} Only</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Filename Input */}
           <div className="bg-slate-850/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2">
@@ -336,10 +505,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   <span>Instant 1-Scan Phone Sync</span>
                 </div>
                 <h3 className="text-base font-bold text-white">
-                  Scan to Load Route into Roadtrip Co-Pilot
+                  {isMultiDay && exportScope === 'full'
+                    ? `Scan to Load All ${trip?.days?.length || ''} Days into Roadtrip Co-Pilot`
+                    : 'Scan to Load Route into Roadtrip Co-Pilot'}
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Open the Android app and tap <strong>&ldquo;Scan Route QR&rdquo;</strong> (or scan with your phone camera). The route will automatically download, save, and activate!
+                  Open the Android app and tap <strong>&ldquo;Scan Route QR&rdquo;</strong> (or scan with your phone camera).{' '}
+                  {isMultiDay && exportScope === 'full'
+                    ? `All ${trip?.days?.length} days will download, save, and be ready in your day selector!`
+                    : 'The route will automatically download, save, and activate!'}
                 </p>
               </div>
 
@@ -381,7 +555,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   </div>
                   <div>
                     <div className="font-semibold text-white">Instant Activation</div>
-                    <div className="text-slate-400 text-[11px]">Downloads &amp; selects the route automatically. Ready to drive!</div>
+                    <div className="text-slate-400 text-[11px]">
+                      {isMultiDay && exportScope === 'full'
+                        ? 'Downloads all days into the route spinner. Ready to drive!'
+                        : 'Downloads & selects the route automatically. Ready to drive!'}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -416,74 +594,103 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           {/* TAB 2: GOOGLE MAPS NAVIGATION */}
           {activeTab === 'gmaps' && (
             <div className="space-y-3">
-              <div className="text-xs text-slate-400">
-                Turn-by-turn navigation links formatted with route-forcing waypoints so Google Maps
-                sticks to the scenic route:
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <span className="text-slate-400">
+                  Turn-by-turn navigation links formatted with route-forcing waypoints:
+                </span>
+                {isMultiDay && trip?.days && (
+                  <div className="flex items-center gap-1 overflow-x-auto shrink-0 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                    <span className="text-slate-500 text-[11px] font-medium px-1 flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-emerald-400" />
+                      <span>Day:</span>
+                    </span>
+                    {trip.days.map((d, idx) => (
+                      <button
+                        key={d.dayNumber || idx}
+                        type="button"
+                        onClick={() => setSelectedGmapsDayIndex(idx)}
+                        className={`px-2 py-0.5 rounded-lg text-xs font-medium transition-colors ${
+                          selectedGmapsDayIndex === idx
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Day {d.dayNumber}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {googleMapsRoute?.legs.map((leg) => (
-                <div
-                  key={leg.legIndex}
-                  className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-xs font-bold text-white">{leg.title}</h4>
-                      <p className="text-[11px] text-slate-400">
-                        {leg.waypointCount} total points ({leg.intermediateWaypoints.length} stops)
+              {currentGmapsRoute && currentGmapsRoute.legs.length > 0 ? (
+                currentGmapsRoute.legs.map((leg) => (
+                  <div
+                    key={leg.legIndex}
+                    className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-white">{leg.title}</h4>
+                        <p className="text-[11px] text-slate-400">
+                          {leg.waypointCount} total points ({leg.intermediateWaypoints.length} stops)
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleCopyLegUrl(leg.url, leg.legIndex)}
+                          className="px-2.5 py-1 bg-slate-700 hover:bg-slate-655 text-slate-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                        >
+                          {copiedLegIndex === leg.legIndex ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span className="text-emerald-400">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy Link</span>
+                            </>
+                          )}
+                        </button>
+                        <a
+                          href={leg.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
+                        >
+                          <span>Open</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    </div>
+
+                    {/* QR Code Display for this leg */}
+                    <div className="pt-2 border-t border-slate-700/60 flex flex-col items-center gap-2">
+                      <div className="bg-white p-2 rounded-xl shadow-md flex items-center justify-center min-h-[144px] min-w-[144px]">
+                        {gmapsQrCodes[leg.legIndex] ? (
+                          <img
+                            src={gmapsQrCodes[leg.legIndex]}
+                            alt={`${leg.title} QR Code`}
+                            className="w-36 h-36 object-contain"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center gap-2 text-slate-800 text-xs">
+                            <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+                            <span>Generating QR...</span>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-emerald-400 font-medium">
+                        Scan with phone camera to launch Google Maps Navigation immediately!
                       </p>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleCopyLegUrl(leg.url, leg.legIndex)}
-                        className="px-2.5 py-1 bg-slate-700 hover:bg-slate-655 text-slate-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
-                      >
-                        {copiedLegIndex === leg.legIndex ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="text-emerald-400">Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy Link</span>
-                          </>
-                        )}
-                      </button>
-                      <a
-                        href={leg.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1"
-                      >
-                        <span>Open</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
                   </div>
-
-                  {/* QR Code Display for this leg */}
-                  <div className="pt-2 border-t border-slate-700/60 flex flex-col items-center gap-2">
-                    <div className="bg-white p-2 rounded-xl shadow-md flex items-center justify-center min-h-[144px] min-w-[144px]">
-                      {gmapsQrCodes[leg.legIndex] ? (
-                        <img
-                          src={gmapsQrCodes[leg.legIndex]}
-                          alt={`${leg.title} QR Code`}
-                          className="w-36 h-36 object-contain"
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center gap-2 text-slate-800 text-xs">
-                          <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
-                          <span>Generating QR...</span>
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-emerald-400 font-medium">
-                      Scan with phone camera to launch Google Maps Navigation immediately!
-                    </p>
-                  </div>
+                ))
+              ) : (
+                <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-6 text-center text-xs text-slate-400">
+                  No driving legs available for this day. Ensure at least two stops are added.
                 </div>
-              ))}
+              )}
             </div>
           )}
 
@@ -492,7 +699,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400 font-mono">
-                  Schema v2.0.0 &bull; {'days' in itineraryData ? (itineraryData.days[0]?.checkpoints.length || 0) : (itineraryData.checkpoints.length || 0)} checkpoints
+                  Schema v2.0.0 &bull;{' '}
+                  {'days' in itineraryData && itineraryData.days.length > 1
+                    ? `${itineraryData.days.length} days (${totalCheckpointCount} checkpoints)`
+                    : `${totalCheckpointCount} checkpoints`}
                 </span>
                 <button
                   onClick={handleCopyJson}

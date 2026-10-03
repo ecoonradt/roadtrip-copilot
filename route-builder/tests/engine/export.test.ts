@@ -277,6 +277,63 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       expect(itinerary.days[0].google_maps_url).toContain('https://www.google.com/maps/dir/?api=1');
       expect(itinerary.google_maps_url).toBe(itinerary.days[0].google_maps_url);
     });
+
+    it('exports all 4 days in a multi-day trip preserving day numbers and distinct waypoints', () => {
+      const fourDayItinerary = formatMultiDayItinerary({
+        tripName: 'Phoenix to Albuquerque Road Trip',
+        startDate: '2026-10-09',
+        endDate: '2026-10-12',
+        days: [
+          {
+            dayNumber: 1,
+            date: '2026-10-09',
+            title: 'Day 1: Phoenix to Flagstaff',
+            waypoints: [sampleWaypoints[0], sampleWaypoints[1]],
+          },
+          {
+            dayNumber: 2,
+            date: '2026-10-10',
+            title: 'Day 2: Flagstaff to Chinle',
+            waypoints: [sampleWaypoints[2]],
+          },
+          {
+            dayNumber: 3,
+            date: '2026-10-11',
+            title: 'Day 3: Chinle to Santa Fe',
+            waypoints: [sampleWaypoints[1]],
+          },
+          {
+            dayNumber: 4,
+            date: '2026-10-12',
+            title: 'Day 4: Santa Fe to Albuquerque',
+            waypoints: [sampleWaypoints[0], sampleWaypoints[2]],
+          },
+        ],
+      });
+
+      expect(fourDayItinerary.trip_name).toBe('Phoenix to Albuquerque Road Trip');
+      expect(fourDayItinerary.days).toHaveLength(4);
+      expect(fourDayItinerary.days[0].day).toBe(1);
+      expect(fourDayItinerary.days[0].date).toBe('2026-10-09');
+      expect(fourDayItinerary.days[0].checkpoints).toHaveLength(2);
+
+      expect(fourDayItinerary.days[1].day).toBe(2);
+      expect(fourDayItinerary.days[1].date).toBe('2026-10-10');
+      expect(fourDayItinerary.days[1].checkpoints).toHaveLength(1);
+
+      expect(fourDayItinerary.days[2].day).toBe(3);
+      expect(fourDayItinerary.days[2].date).toBe('2026-10-11');
+      expect(fourDayItinerary.days[2].checkpoints).toHaveLength(1);
+
+      expect(fourDayItinerary.days[3].day).toBe(4);
+      expect(fourDayItinerary.days[3].date).toBe('2026-10-12');
+      expect(fourDayItinerary.days[3].checkpoints).toHaveLength(2);
+
+      const json = JSON.parse(exportItineraryToJson(fourDayItinerary));
+      expect(json.days).toHaveLength(4);
+      expect(json.days[3].day).toBe(4);
+      expect(json.days[3].title).toBe('Day 4: Santa Fe to Albuquerque');
+    });
   });
 
   describe('Single Route Itinerary Export', () => {
