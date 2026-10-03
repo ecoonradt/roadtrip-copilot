@@ -40,6 +40,8 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
         val isRunning = CopilotService.isRunning.value
         val telemetry = CopilotService.telemetryFlow.value
         val activeRoute = CopilotService.activeRouteTitle.value
+        val activeFile = CopilotService.activeRouteFile.value
+        val hasRoute = activeFile.isNotBlank()
 
         val paneBuilder = Pane.Builder()
 
@@ -49,7 +51,10 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
         val targetTime = nextCp?.formattedTargetTime
 
         val row1Builder = Row.Builder()
-        if (!isRunning) {
+        if (!hasRoute) {
+            row1Builder.setTitle("No Route Loaded")
+            row1Builder.addText("Open phone app to scan or import an itinerary.")
+        } else if (!isRunning) {
             row1Builder.setTitle("Co-Pilot Standby")
             val targetStr = if (!targetTime.isNullOrBlank()) " • Target: $targetTime" else ""
             val nextDesc = if (nextCp != null) "Next: ${nextCp.name}$targetStr" else "Tap 'Start Trip' below to begin tracking."
@@ -77,8 +82,8 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
 
         // Row 3: Active Route & Day
         val row3Builder = Row.Builder()
-            .setTitle(activeRoute)
-            .addText(if (isRunning) "Trip Active • Tracking milestones" else "Standby • Tap 'Start Trip' below")
+            .setTitle(if (hasRoute) activeRoute else "No Active Route")
+            .addText(if (isRunning) "Trip Active • Tracking milestones" else if (hasRoute) "Standby • Tap 'Start Trip' below" else "Awaiting route selection on phone")
         paneBuilder.addRow(row3Builder.build())
 
         // Actions in the pane
@@ -92,7 +97,7 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
                     }
                     .build()
             )
-        } else {
+        } else if (hasRoute) {
             paneBuilder.addAction(
                 Action.Builder()
                     .setTitle("Start Trip")
@@ -101,6 +106,15 @@ class CopilotDashboardScreen(carContext: CarContext) : Screen(carContext) {
                         val routeFile = CopilotService.activeRouteFile.value
                         val dayNum = CopilotService.activeDayNumber.value
                         CopilotService.startRoute(carContext, routeFile, dayNum)
+                    }
+                    .build()
+            )
+        } else {
+            paneBuilder.addAction(
+                Action.Builder()
+                    .setTitle("Select Route")
+                    .setOnClickListener {
+                        screenManager.push(RouteListScreen(carContext))
                     }
                     .build()
             )

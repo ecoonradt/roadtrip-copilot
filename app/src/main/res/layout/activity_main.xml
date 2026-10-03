@@ -54,42 +54,76 @@
                     android:letterSpacing="0.08"
                     android:textStyle="bold" />
 
-                <!-- Scan QR Code Primary Action Button -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnScanQr"
+                <!-- Active Route Display & Change Selector Row -->
+                <LinearLayout
+                    android:id="@+id/layoutActiveRoute"
                     android:layout_width="match_parent"
-                    android:layout_height="50dp"
-                    android:layout_marginTop="10dp"
-                    android:backgroundTint="@color/primary"
-                    android:text="@string/btn_scan_qr"
-                    android:textAllCaps="false"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:textColor="@color/text_light"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    app:icon="@drawable/ic_qr_code"
-                    app:iconGravity="textStart"
-                    app:iconTint="@color/text_light"
-                    app:cornerRadius="10dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Select Saved Route"
-                    android:textColor="@color/text_muted"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/bg_status_pill"
+                    android:backgroundTint="#0F172A"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingVertical="12dp"
+                    android:paddingHorizontal="14dp">
 
-                <Spinner
-                    android:id="@+id/spinnerRoute"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="6dp"
-                    android:popupBackground="@color/card_dark"
-                    android:backgroundTint="@color/accent" />
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
 
+                        <TextView
+                            android:id="@+id/tvActiveRouteTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="No Route Loaded"
+                            android:textColor="@color/text_light"
+                            android:textSize="15sp"
+                            android:textStyle="bold"
+                            android:maxLines="2"
+                            android:ellipsize="end" />
+
+                        <TextView
+                            android:id="@+id/tvActiveRouteSubtitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Scan a QR code or browse a file to get started"
+                            android:textColor="@color/text_muted"
+                            android:textSize="12sp"
+                            android:maxLines="1"
+                            android:ellipsize="end" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layoutChangeBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginStart="8dp">
+
+                        <TextView
+                            android:id="@+id/tvChangeRouteLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Change"
+                            android:textColor="@color/accent"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <ImageView
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:src="@drawable/ic_chevron_right"
+                            app:tint="@color/accent" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Day / Driving Leg Select (Visible only for multi-day itineraries) -->
                 <LinearLayout
                     android:id="@+id/layoutDaySelect"
                     android:layout_width="match_parent"
@@ -115,6 +149,7 @@
                         android:backgroundTint="@color/accent" />
                 </LinearLayout>
 
+                <!-- Google Maps Link Button -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnOpenGoogleMaps"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
@@ -135,21 +170,52 @@
                     app:cornerRadius="10dp"
                     android:visibility="gone" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnImportItinerary"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                <!-- Route Intake Action Buttons Row (Side-by-side) -->
+                <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="40dp"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/btn_browse_file"
-                    android:textAllCaps="false"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:textColor="@color/text_muted"
-                    android:textSize="12sp"
-                    app:icon="@drawable/ic_import_file"
-                    app:iconGravity="textStart"
-                    app:iconTint="@color/text_muted" />
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnScanQr"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        android:backgroundTint="@color/primary"
+                        android:text="@string/btn_scan_qr"
+                        android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:textColor="@color/text_light"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        app:icon="@drawable/ic_qr_code"
+                        app:iconGravity="textStart"
+                        app:iconTint="@color/text_light"
+                        app:cornerRadius="10dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnImportItinerary"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:text="@string/btn_browse_file"
+                        android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:textColor="@color/text_light"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        app:strokeColor="#475569"
+                        app:icon="@drawable/ic_import_file"
+                        app:iconGravity="textStart"
+                        app:iconTint="@color/text_light"
+                        app:cornerRadius="10dp" />
+                </LinearLayout>
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

@@ -35,7 +35,7 @@ class RouteRepository(
 
     private val gson = Gson()
 
-    private val _routes = MutableStateFlow<List<RouteOption>>(DEFAULT_ASSET_OPTIONS)
+    private val _routes = MutableStateFlow<List<RouteOption>>(emptyList())
     val routes: StateFlow<List<RouteOption>> = _routes.asStateFlow()
 
     @VisibleForTesting
@@ -53,7 +53,7 @@ class RouteRepository(
 
     /**
      * Scans all configured [storageDirs] for valid `.json` itineraries, parses their
-     * route options, appends the 6 bundled asset fallback routes, and updates [routes].
+     * route options, and updates [routes].
      *
      * Corrupted or malformed files are logged and skipped without throwing.
      */
@@ -106,65 +106,39 @@ class RouteRepository(
             }
         }
 
-        val assetRoutes = loadAssetRoutes().filter { asset ->
-            customRoutes.none { it.routeFile == asset.routeFile }
-        }
-        val combined = customRoutes + assetRoutes
-        _routes.value = combined
-        combined
+        _routes.value = customRoutes
+        customRoutes
     }
 
     /**
      * Loads the full [Itinerary] object for a given [RouteOption].
-     * Handles both bundled assets and storage filesystem paths.
+     * Handles storage filesystem paths and asset fallbacks if available.
      */
     suspend fun loadItinerary(option: RouteOption): Itinerary? = withContext(ioDispatcher) {
         try {
-            if (option.isAsset) {
-                val stream = assetProvider.open(option.routeFile)
-                if (stream != null) {
-                    return@withContext stream.use { s ->
-                        InputStreamReader(s, Charsets.UTF_8).use { reader ->
-                            gson.fromJson(reader, Itinerary::class.java)
-                        }
-                    }
-                }
-                // Fallback: check storage directories
-                val file = storageDirs.firstNotNullOfOrNull { dir ->
+            val file = if (!option.absolutePath.isNullOrBlank()) {
+                File(option.absolutePath)
+            } else {
+                storageDirs.firstNotNullOfOrNull { dir ->
                     File(dir, option.routeFile).takeIf { it.exists() }
                 }
-                if (file != null && file.exists()) {
-                    return@withContext file.reader(Charsets.UTF_8).use { reader ->
-                        gson.fromJson(reader, Itinerary::class.java)
-                    }
-                }
-                logE(TAG, "Bundled asset file not found: ${option.routeFile}")
-                return@withContext null
-            } else {
-                val file = if (!option.absolutePath.isNullOrBlank()) {
-                    File(option.absolutePath)
-                } else {
-                    storageDirs.firstNotNullOfOrNull { dir ->
-                        File(dir, option.routeFile).takeIf { it.exists() }
-                    }
-                }
-                if (file != null && file.exists()) {
-                    return@withContext file.reader(Charsets.UTF_8).use { reader ->
-                        gson.fromJson(reader, Itinerary::class.java)
-                    }
-                }
-                // Fallback: check asset provider
-                val stream = assetProvider.open(option.routeFile)
-                if (stream != null) {
-                    return@withContext stream.use { s ->
-                        InputStreamReader(s, Charsets.UTF_8).use { reader ->
-                            gson.fromJson(reader, Itinerary::class.java)
-                        }
-                    }
-                }
-                logE(TAG, "Storage itinerary file not found: ${option.routeFile} (path: ${option.absolutePath})")
-                return@withContext null
             }
+            if (file != null && file.exists()) {
+                return@withContext file.reader(Charsets.UTF_8).use { reader ->
+                    gson.fromJson(reader, Itinerary::class.java)
+                }
+            }
+            // Fallback: check asset provider if present
+            val stream = assetProvider.open(option.routeFile)
+            if (stream != null) {
+                return@withContext stream.use { s ->
+                    InputStreamReader(s, Charsets.UTF_8).use { reader ->
+                        gson.fromJson(reader, Itinerary::class.java)
+                    }
+                }
+            }
+            logE(TAG, "Storage itinerary file not found: ${option.routeFile} (path: ${option.absolutePath})")
+            return@withContext null
         } catch (e: Exception) {
             logE(TAG, "Error loading itinerary for ${option.routeFile}: ${e.message}", e)
             null
@@ -244,20 +218,33 @@ class RouteRepository(
     }
 
     /**
-     * Deletes a custom itinerary from disk and refreshes the route list.
-     * Bundled assets cannot be deleted.
+     * Deletes an itinerary from disk and refreshes the route list.
      */
     suspend fun deleteItinerary(option: RouteOption): Boolean = withContext(ioDispatcher) {
-        if (option.isAsset) {
-            logW(TAG, "Cannot delete bundled asset route: ${option.routeFile}")
-            return@withContext false
-        }
         val file = if (!option.absolutePath.isNullOrBlank()) {
             File(option.absolutePath)
         } else {
             storageDirs.firstNotNullOfOrNull { dir ->
                 File(dir, option.routeFile).takeIf { it.exists() }
             }
+        }
+        if (file != null && file.exists()) {
+            val deleted = file.delete()
+            if (deleted) {
+                refreshRoutes()
+            }
+            deleted
+        } else {
+            false
+        }
+    }
+
+    /**
+     * Deletes an itinerary by file name from disk and refreshes the route list.
+     */
+    suspend fun deleteItineraryFile(fileName: String): Boolean = withContext(ioDispatcher) {
+        val file = storageDirs.firstNotNullOfOrNull { dir ->
+            File(dir, fileName).takeIf { it.exists() }
         }
         if (file != null && file.exists()) {
             val deleted = file.delete()
@@ -338,7 +325,7 @@ class RouteRepository(
     }
 
     private fun loadAssetRoutes(): List<RouteOption> {
-        return DEFAULT_ASSET_OPTIONS
+        return emptyList()
     }
 
     private fun logE(tag: String, msg: String, tr: Throwable? = null) {
@@ -405,17 +392,8 @@ class RouteRepository(
         }
 
         /**
-         * The bundled permanent fallback default route options.
+         * Permanent default route options (empty list when no assets bundled).
          */
-        val DEFAULT_ASSET_OPTIONS: List<RouteOption> = listOf(
-            RouteOption(
-                title = "Scenic Southwest: Phoenix to Flagstaff",
-                routeFile = "sample_itinerary.json",
-                dayNumber = 1,
-                isAsset = true,
-                subtitle = "Sample Route • Phoenix → Sedona → Flagstaff",
-                tripName = "Scenic Southwest: Phoenix to Flagstaff"
-            )
-        )
+        val DEFAULT_ASSET_OPTIONS: List<RouteOption> = emptyList()
     }
 }

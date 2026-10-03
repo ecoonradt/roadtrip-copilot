@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/layoutRouteRow"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="?attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:paddingVertical="12dp"
+    android:paddingHorizontal="8dp">
+
+    <!-- Active Radio Indicator -->
+    <ImageView
+        android:id="@+id/ivSelectedRadio"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:src="@drawable/ic_radio_unchecked"
+        android:contentDescription="Selection status" />
+
+    <!-- Route Information -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="8dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvItemRouteTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Route Title"
+            android:textColor="@color/text_light"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/tvItemRouteSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="filename.json • 1 Day"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- Delete Action Button -->
+    <ImageView
+        android:id="@+id/btnItemDelete"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:padding="6dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:clickable="true"
+        android:focusable="true"
+        android:contentDescription="Delete route"
+        android:src="@drawable/ic_delete"
+        app:tint="@color/danger" />
+
+</LinearLayout>

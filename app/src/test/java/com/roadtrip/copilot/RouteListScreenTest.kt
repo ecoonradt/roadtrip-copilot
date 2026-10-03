@@ -388,7 +388,10 @@ class RouteListScreenTest {
 
         val template = screen.onGetTemplate() as ListTemplate
         val items = template.singleList?.items ?: emptyList()
-        assertEquals(RouteRepository.DEFAULT_ASSET_OPTIONS.size, items.size)
+        // When repository has no stored routes, displays 1 placeholder item
+        assertEquals(1, items.size)
+        val row = items[0] as Row
+        assertEquals("No routes available", row.title?.toString())
     }
 
     /**

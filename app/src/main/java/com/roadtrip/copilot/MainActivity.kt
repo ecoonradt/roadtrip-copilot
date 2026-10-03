@@ -24,10 +24,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.roadtrip.copilot.databinding.ActivityMainBinding
+import com.roadtrip.copilot.databinding.BottomSheetRoutesBinding
+import com.roadtrip.copilot.databinding.ItemRouteManageBinding
 import com.roadtrip.copilot.model.RouteOption
 import com.roadtrip.copilot.model.RouteRepository
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +68,6 @@ class MainActivity : AppCompatActivity() {
     private var isBound = false
     private var routeOptions: List<RouteOption> = emptyList()
     private var tripGroups: List<TripGroup> = emptyList()
-    private var tripAdapter: ArrayAdapter<TripGroup>? = null
     private var dayAdapter: ArrayAdapter<RouteOption>? = null
 
     private var isAudioSetupExpanded = false
@@ -121,12 +124,15 @@ class MainActivity : AppCompatActivity() {
                 if (copilotService != null) {
                     copilotService?.testAlert()
                 } else {
-                    val sIntent = Intent(this, CopilotService::class.java).apply {
-                        setAction(CopilotService.ACTION_START)
-                        putExtra(CopilotService.EXTRA_ROUTE_FILE, "sample_itinerary.json")
-                        putExtra(CopilotService.EXTRA_DAY_NUMBER, 1)
+                    val activeFile = CopilotService.activeRouteFile.value
+                    if (activeFile.isNotBlank()) {
+                        val sIntent = Intent(this, CopilotService::class.java).apply {
+                            setAction(CopilotService.ACTION_START)
+                            putExtra(CopilotService.EXTRA_ROUTE_FILE, activeFile)
+                            putExtra(CopilotService.EXTRA_DAY_NUMBER, CopilotService.activeDayNumber.value)
+                        }
+                        ContextCompat.startForegroundService(this, sIntent)
                     }
-                    ContextCompat.startForegroundService(this, sIntent)
                 }
             }
             "test_audio" -> {
@@ -327,14 +333,15 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 if (importedOption != null) {
-                    val isRunning = CopilotService.isRunning.value
+                    if (CopilotService.isRunning.value) {
+                        stopCopilotService()
+                    }
                     CopilotService.setSelectedRoute(
                         this@MainActivity,
                         importedOption.routeFile,
-                        importedOption.dayNumber,
-                        autoRestartIfRunning = isRunning
+                        importedOption.dayNumber
                     )
-                    binding.tvStatusBadge.text = if (isRunning) getString(R.string.status_running) else getString(R.string.status_idle)
+                    binding.tvStatusBadge.text = getString(R.string.status_idle)
                     Toast.makeText(this@MainActivity, "Trip Loaded: ${importedOption.title}", Toast.LENGTH_SHORT).show()
                     appendLog("Trip loaded: ${importedOption.title} (${importedOption.routeFile})")
                 } else {
@@ -363,7 +370,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         CopilotService.loadInitialRoute(this)
-        setupRouteSpinner()
+        setupRouteSelection()
         setupListeners()
         observeServiceState()
         handleIncomingIntent(intent)
@@ -387,18 +394,7 @@ class MainActivity : AppCompatActivity() {
             RouteRepository.getInstance(this@MainActivity).refreshRoutes()
             val currentFile = CopilotService.activeRouteFile.value
             val currentDay = CopilotService.activeDayNumber.value
-            if (currentFile.isNotBlank()) {
-                if (!CopilotService.isRunning.value) {
-                    CopilotService.setSelectedRoute(
-                        this@MainActivity,
-                        currentFile,
-                        currentDay,
-                        autoRestartIfRunning = false
-                    )
-                } else {
-                    syncSelectionFromServiceState(currentFile, currentDay)
-                }
-            }
+            updateActiveRouteCard(currentFile, currentDay)
         }
     }
 
@@ -431,112 +427,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getSelectedRouteOption(): RouteOption? {
-        val tripIdx = binding.spinnerRoute.selectedItemPosition
-        val trip = tripGroups.getOrNull(tripIdx) ?: return null
-        return if (trip.days.size > 1) {
-            val dayIdx = binding.spinnerDay.selectedItemPosition
-            trip.days.getOrNull(dayIdx) ?: trip.days.firstOrNull()
-        } else {
-            trip.days.firstOrNull()
-        }
+        val currentFile = CopilotService.activeRouteFile.value
+        if (currentFile.isBlank()) return null
+        val currentDay = CopilotService.activeDayNumber.value
+        return routeOptions.find { it.routeFile == currentFile && it.dayNumber == currentDay }
+            ?: routeOptions.find { it.routeFile == currentFile }
     }
 
-    private fun handleTripSelection(trip: TripGroup) {
-        if (trip.days.size > 1) {
-            binding.layoutDaySelect.visibility = View.VISIBLE
-            dayAdapter?.apply {
-                clear()
-                addAll(trip.days)
-                notifyDataSetChanged()
-            }
-            val targetDayNum = if (trip.routeFile == CopilotService.activeRouteFile.value) {
-                CopilotService.activeDayNumber.value
-            } else {
-                1
-            }
-            val dayIdx = trip.days.indexOfFirst { it.dayNumber == targetDayNum }.coerceAtLeast(0)
-            if (binding.spinnerDay.selectedItemPosition != dayIdx) {
-                binding.spinnerDay.setSelection(dayIdx)
-            }
-            val selectedDay = trip.days.getOrNull(dayIdx) ?: return
-            if (selectedDay.routeFile != CopilotService.activeRouteFile.value ||
-                selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
-                val running = CopilotService.isRunning.value
-                CopilotService.setSelectedRoute(this, selectedDay.routeFile, selectedDay.dayNumber, autoRestartIfRunning = running)
-            }
-        } else {
-            binding.layoutDaySelect.visibility = View.GONE
-            dayAdapter?.apply {
-                clear()
-                notifyDataSetChanged()
-            }
-            val selectedDay = trip.days.firstOrNull() ?: return
-            if (selectedDay.routeFile != CopilotService.activeRouteFile.value ||
-                selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
-                val running = CopilotService.isRunning.value
-                CopilotService.setSelectedRoute(this, selectedDay.routeFile, selectedDay.dayNumber, autoRestartIfRunning = running)
-            }
-        }
-    }
-
-    private fun syncSelectionFromServiceState(
-        file: String = CopilotService.activeRouteFile.value,
-        day: Int = CopilotService.activeDayNumber.value
-    ) {
-        val tripIdx = tripGroups.indexOfFirst { it.routeFile == file }
-        if (tripIdx >= 0) {
-            if (binding.spinnerRoute.selectedItemPosition != tripIdx) {
-                binding.spinnerRoute.setSelection(tripIdx)
-            }
-            val trip = tripGroups[tripIdx]
-            if (trip.days.size > 1) {
-                binding.layoutDaySelect.visibility = View.VISIBLE
-                dayAdapter?.clear()
-                dayAdapter?.addAll(trip.days)
-                dayAdapter?.notifyDataSetChanged()
-                val dayIdx = trip.days.indexOfFirst { it.dayNumber == day }.coerceAtLeast(0)
-                if (binding.spinnerDay.selectedItemPosition != dayIdx) {
-                    binding.spinnerDay.setSelection(dayIdx)
-                }
-            } else {
-                binding.layoutDaySelect.visibility = View.GONE
-            }
-        }
-    }
-
-    private fun setupRouteSpinner() {
+    private fun setupRouteSelection() {
         routeOptions = RouteRepository.getInstance(this).getRouteOptions()
         tripGroups = buildTripGroups(routeOptions)
-
-        tripAdapter = ArrayAdapter(this, R.layout.spinner_item, ArrayList(tripGroups)).apply {
-            setDropDownViewResource(R.layout.spinner_dropdown_item)
-        }
-        binding.spinnerRoute.adapter = tripAdapter
 
         dayAdapter = ArrayAdapter(this, R.layout.spinner_item, ArrayList<RouteOption>()).apply {
             setDropDownViewResource(R.layout.spinner_dropdown_item)
         }
         binding.spinnerDay.adapter = dayAdapter
 
-        binding.spinnerRoute.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val trip = tripGroups.getOrNull(position) ?: return
-                handleTripSelection(trip)
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        binding.layoutActiveRoute.setOnClickListener {
+            showRouteLibraryBottomSheet()
         }
 
         binding.spinnerDay.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val tripIdx = binding.spinnerRoute.selectedItemPosition
-                val trip = tripGroups.getOrNull(tripIdx) ?: return
+                val currentFile = CopilotService.activeRouteFile.value
+                val trip = tripGroups.find { it.routeFile == currentFile } ?: return
                 if (trip.days.size > 1) {
                     val selectedDay = trip.days.getOrNull(position) ?: return
-                    if (selectedDay.routeFile != CopilotService.activeRouteFile.value ||
-                        selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
-                        val running = CopilotService.isRunning.value
-                        CopilotService.setSelectedRoute(this@MainActivity, selectedDay.routeFile, selectedDay.dayNumber, autoRestartIfRunning = running)
+                    if (selectedDay.dayNumber != CopilotService.activeDayNumber.value) {
+                        if (CopilotService.isRunning.value) {
+                            stopCopilotService()
+                        }
+                        CopilotService.setSelectedRoute(this@MainActivity, selectedDay.routeFile, selectedDay.dayNumber)
                     }
                 }
             }
@@ -544,7 +465,163 @@ class MainActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
-        syncSelectionFromServiceState()
+        updateActiveRouteCard()
+    }
+
+    private fun updateActiveRouteCard(
+        file: String = CopilotService.activeRouteFile.value,
+        day: Int = CopilotService.activeDayNumber.value
+    ) {
+        if (file.isNotBlank()) {
+            val trip = tripGroups.find { it.routeFile == file }
+            if (trip != null) {
+                binding.tvActiveRouteTitle.text = trip.title
+                binding.tvActiveRouteSubtitle.text = "${trip.routeFile} • ${trip.days.size} Day${if (trip.days.size > 1) "s" else ""}"
+                if (trip.days.size > 1) {
+                    binding.layoutDaySelect.visibility = View.VISIBLE
+                    dayAdapter?.apply {
+                        clear()
+                        addAll(trip.days)
+                        notifyDataSetChanged()
+                    }
+                    val dayIdx = trip.days.indexOfFirst { it.dayNumber == day }.coerceAtLeast(0)
+                    if (binding.spinnerDay.selectedItemPosition != dayIdx) {
+                        binding.spinnerDay.setSelection(dayIdx)
+                    }
+                } else {
+                    binding.layoutDaySelect.visibility = View.GONE
+                }
+            } else {
+                binding.tvActiveRouteTitle.text = CopilotService.activeRouteTitle.value.ifBlank { "Route Loaded" }
+                binding.tvActiveRouteSubtitle.text = file
+                binding.layoutDaySelect.visibility = View.GONE
+            }
+            binding.layoutChangeBadge.visibility = View.VISIBLE
+            binding.tvChangeRouteLabel.text = "Change"
+        } else {
+            binding.tvActiveRouteTitle.text = "No Route Loaded"
+            binding.tvActiveRouteSubtitle.text = "Scan a QR code or browse a file to get started"
+            binding.layoutDaySelect.visibility = View.GONE
+            if (tripGroups.isNotEmpty()) {
+                binding.layoutChangeBadge.visibility = View.VISIBLE
+                binding.tvChangeRouteLabel.text = "Select"
+            } else {
+                binding.layoutChangeBadge.visibility = View.GONE
+            }
+        }
+        updateGoogleMapsButton(CopilotService.activeGoogleMapsUrl.value)
+    }
+
+    private fun showRouteLibraryBottomSheet() {
+        val dialog = BottomSheetDialog(this)
+        val sheetBinding = BottomSheetRoutesBinding.inflate(layoutInflater)
+        dialog.setContentView(sheetBinding.root)
+
+        fun renderRouteItems() {
+            sheetBinding.layoutRouteItems.removeAllViews()
+            sheetBinding.tvSheetTitle.text = "Saved Routes (${tripGroups.size})"
+
+            if (tripGroups.isEmpty()) {
+                sheetBinding.tvEmptyRoutes.visibility = View.VISIBLE
+                sheetBinding.layoutRouteItems.visibility = View.GONE
+                return
+            }
+
+            sheetBinding.tvEmptyRoutes.visibility = View.GONE
+            sheetBinding.layoutRouteItems.visibility = View.VISIBLE
+
+            val activeFile = CopilotService.activeRouteFile.value
+
+            for (trip in tripGroups) {
+                val itemBinding = ItemRouteManageBinding.inflate(
+                    layoutInflater,
+                    sheetBinding.layoutRouteItems,
+                    false
+                )
+
+                val isSelected = trip.routeFile == activeFile
+                itemBinding.ivSelectedRadio.setImageResource(
+                    if (isSelected) R.drawable.ic_radio_checked else R.drawable.ic_radio_unchecked
+                )
+
+                itemBinding.tvItemRouteTitle.text = trip.title
+                itemBinding.tvItemRouteSubtitle.text = "${trip.routeFile} • ${trip.days.size} Day${if (trip.days.size > 1) "s" else ""}"
+
+                itemBinding.layoutRouteRow.setOnClickListener {
+                    if (CopilotService.isRunning.value) {
+                        stopCopilotService()
+                    }
+                    val targetDay = if (trip.routeFile == activeFile) CopilotService.activeDayNumber.value else 1
+                    CopilotService.setSelectedRoute(this@MainActivity, trip.routeFile, targetDay)
+                    dialog.dismiss()
+                    Toast.makeText(this@MainActivity, "Trip Selected: ${trip.title}", Toast.LENGTH_SHORT).show()
+                }
+
+                itemBinding.btnItemDelete.setOnClickListener {
+                    confirmAndDeleteRoute(trip, dialog, ::renderRouteItems)
+                }
+
+                sheetBinding.layoutRouteItems.addView(itemBinding.root)
+            }
+        }
+
+        renderRouteItems()
+
+        sheetBinding.btnCloseSheet.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    private fun confirmAndDeleteRoute(
+        trip: TripGroup,
+        dialog: BottomSheetDialog,
+        onDeletedRefresh: () -> Unit
+    ) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Delete Route?")
+            .setMessage("Are you sure you want to remove \"${trip.title}\" (${trip.routeFile})? This will delete the file from your device.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                if (CopilotService.isRunning.value) {
+                    stopCopilotService()
+                }
+
+                lifecycleScope.launch {
+                    val repo = RouteRepository.getInstance(applicationContext)
+                    val wasActive = trip.routeFile == CopilotService.activeRouteFile.value
+                    val success = repo.deleteItineraryFile(trip.routeFile)
+
+                    if (success) {
+                        appendLog("Deleted itinerary file: ${trip.routeFile}")
+                        Toast.makeText(this@MainActivity, "Deleted ${trip.routeFile}", Toast.LENGTH_SHORT).show()
+
+                        if (wasActive) {
+                            val remaining = repo.getRouteOptions()
+                            val nextTrip = remaining.firstOrNull()
+                            if (nextTrip != null) {
+                                CopilotService.setSelectedRoute(this@MainActivity, nextTrip.routeFile, nextTrip.dayNumber)
+                            } else {
+                                CopilotService.clearActiveRoute(this@MainActivity)
+                            }
+                        }
+
+                        val updatedRoutes = repo.getRouteOptions()
+                        routeOptions = updatedRoutes
+                        tripGroups = buildTripGroups(updatedRoutes)
+                        onDeletedRefresh()
+                        updateActiveRouteCard()
+
+                        if (tripGroups.isEmpty()) {
+                            dialog.dismiss()
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "Could not delete ${trip.routeFile}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .show()
     }
 
     private fun toggleAudioSetup() {
@@ -586,6 +663,10 @@ class MainActivity : AppCompatActivity() {
             if (CopilotService.isRunning.value) {
                 stopCopilotService()
             } else {
+                if (CopilotService.activeRouteFile.value.isBlank() || routeOptions.isEmpty()) {
+                    Toast.makeText(this, "Please load or import a route first.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
                 checkPermissionsAndStart()
             }
         }
@@ -597,6 +678,10 @@ class MainActivity : AppCompatActivity() {
                 val selectedRoute = getSelectedRouteOption()
                 val routeFile = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
                 val dayNum = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
+                if (routeFile.isBlank()) {
+                    Toast.makeText(this, "Please load or import a route first.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
                     putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
@@ -614,6 +699,10 @@ class MainActivity : AppCompatActivity() {
                 val selectedRoute = getSelectedRouteOption()
                 val routeFile = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
                 val dayNum = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
+                if (routeFile.isBlank()) {
+                    Toast.makeText(this, "Please load or import a route first.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
                 val intent = Intent(this, CopilotService::class.java).apply {
                     action = CopilotService.ACTION_START
                     putExtra(CopilotService.EXTRA_ROUTE_FILE, routeFile)
@@ -695,12 +784,7 @@ class MainActivity : AppCompatActivity() {
                     RouteRepository.getInstance(this@MainActivity).routes.collectLatest { options ->
                         routeOptions = options
                         tripGroups = buildTripGroups(options)
-                        tripAdapter?.apply {
-                            clear()
-                            addAll(tripGroups)
-                            notifyDataSetChanged()
-                        }
-                        syncSelectionFromServiceState()
+                        updateActiveRouteCard()
                     }
                 }
 
@@ -790,7 +874,7 @@ class MainActivity : AppCompatActivity() {
                         CopilotService.activeRouteFile,
                         CopilotService.activeDayNumber
                     ) { file, day -> Pair(file, day) }.collectLatest { (file, day) ->
-                        syncSelectionFromServiceState(file, day)
+                        updateActiveRouteCard(file, day)
                     }
                 }
             }

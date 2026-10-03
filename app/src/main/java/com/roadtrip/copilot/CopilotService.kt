@@ -45,10 +45,10 @@ class CopilotService : Service() {
         private val _eventLogFlow = MutableSharedFlow<String>(replay = 5)
         val eventLogFlow = _eventLogFlow.asSharedFlow()
 
-        private val _activeRouteTitle = MutableStateFlow("Scenic Southwest: Phoenix to Flagstaff")
+        private val _activeRouteTitle = MutableStateFlow("No Route Loaded")
         val activeRouteTitle = _activeRouteTitle.asStateFlow()
 
-        private val _activeRouteFile = MutableStateFlow("sample_itinerary.json")
+        private val _activeRouteFile = MutableStateFlow("")
         val activeRouteFile = _activeRouteFile.asStateFlow()
 
         private val _activeDayNumber = MutableStateFlow(1)
@@ -71,12 +71,37 @@ class CopilotService : Service() {
 
         fun loadInitialRoute(context: Context) {
             companionScope.launch {
-                RouteRepository.getInstance(context).refreshRoutes()
+                val repo = RouteRepository.getInstance(context)
+                val routes = repo.refreshRoutes()
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val savedFile = prefs.getString(PREF_ROUTE_FILE, "") ?: ""
+                val savedDay = prefs.getInt(PREF_DAY_NUMBER, 1)
+
+                val matchingOption = routes.find { it.routeFile == savedFile && it.dayNumber == savedDay }
+                    ?: routes.find { it.routeFile == savedFile }
+                    ?: routes.firstOrNull()
+
+                if (matchingOption != null) {
+                    setSelectedRoute(context, matchingOption.routeFile, matchingOption.dayNumber, autoRestartIfRunning = false)
+                } else {
+                    clearActiveRoute(context)
+                }
+            }
+        }
+
+        fun clearActiveRoute(context: Context) {
+            if (_isRunning.value) {
+                stopRoute(context)
             }
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val routeFile = prefs.getString(PREF_ROUTE_FILE, "sample_itinerary.json") ?: "sample_itinerary.json"
-            val dayNum = prefs.getInt(PREF_DAY_NUMBER, 1)
-            setSelectedRoute(context, routeFile, dayNum, autoRestartIfRunning = false)
+            prefs.edit().remove(PREF_ROUTE_FILE).remove(PREF_DAY_NUMBER).apply()
+
+            _activeRouteFile.value = ""
+            _activeDayNumber.value = 1
+            _activeRouteTitle.value = "No Route Loaded"
+            _activeCheckpoints.value = emptyList()
+            _activeGoogleMapsUrl.value = null
+            _telemetryFlow.value = null
         }
 
         fun setSelectedRoute(
@@ -85,6 +110,15 @@ class CopilotService : Service() {
             dayNumber: Int,
             autoRestartIfRunning: Boolean = false
         ) {
+            if (_isRunning.value) {
+                stopRoute(context)
+            }
+
+            if (routeFile.isBlank()) {
+                clearActiveRoute(context)
+                return
+            }
+
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putString(PREF_ROUTE_FILE, routeFile)
@@ -141,7 +175,11 @@ class CopilotService : Service() {
 
         fun startRoute(context: Context, routeFile: String? = null, dayNumber: Int? = null) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val file = routeFile ?: prefs.getString(PREF_ROUTE_FILE, "sample_itinerary.json") ?: "sample_itinerary.json"
+            val file = routeFile ?: prefs.getString(PREF_ROUTE_FILE, "") ?: ""
+            if (file.isBlank()) {
+                Log.w(TAG, "Cannot start route: No route file selected.")
+                return
+            }
             val day = dayNumber ?: prefs.getInt(PREF_DAY_NUMBER, 1)
 
             prefs.edit()
@@ -248,11 +286,17 @@ class CopilotService : Service() {
         }
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val defaultRoute = prefs.getString(PREF_ROUTE_FILE, "sample_itinerary.json") ?: "sample_itinerary.json"
+        val defaultRoute = prefs.getString(PREF_ROUTE_FILE, "") ?: ""
         val defaultDay = prefs.getInt(PREF_DAY_NUMBER, 1)
 
         val routeFile = intent?.getStringExtra(EXTRA_ROUTE_FILE) ?: defaultRoute
         val dayNumber = intent?.getIntExtra(EXTRA_DAY_NUMBER, defaultDay) ?: defaultDay
+
+        if (routeFile.isBlank()) {
+            emitLog("Cannot start co-pilot: No route file selected.")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         prefs.edit()
             .putString(PREF_ROUTE_FILE, routeFile)

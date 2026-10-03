@@ -34,10 +34,7 @@ class ItineraryTest {
 
     @Test
     fun testParseSampleItinerary() {
-        val file = File("src/main/assets/sample_itinerary.json")
-        assertTrue("sample_itinerary.json must exist in assets", file.exists())
-
-        val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
+        val itinerary = Gson().fromJson(SAMPLE_ITINERARY_JSON, Itinerary::class.java)
         assertEquals("Scenic Southwest: Phoenix to Flagstaff", itinerary.tripName)
         assertNotNull(itinerary.days)
         assertEquals(1, itinerary.days!!.size)
@@ -69,10 +66,7 @@ class ItineraryTest {
 
     @Test
     fun testFixedItineraryResolutionAndPace() {
-        val file = File("src/main/assets/sample_itinerary.json")
-        assertTrue("sample_itinerary.json must exist in assets", file.exists())
-
-        val itinerary = Gson().fromJson(file.readText(), Itinerary::class.java)
+        val itinerary = Gson().fromJson(SAMPLE_ITINERARY_JSON, Itinerary::class.java)
         val dummyStart = System.currentTimeMillis()
         val checkpoints = itinerary.resolveCheckpointsForDay(1, dummyStart)
 
@@ -452,5 +446,61 @@ class ItineraryTest {
         assertEquals("https://www.google.com/maps/dir/?api=1&origin=PHX&destination=SEDONA", itinerary.getGoogleMapsUrlForDay(1))
         // Day 2 has no day-level URL, so falls back to root itinerary URL
         assertEquals("https://www.google.com/maps/dir/?api=1&origin=PHX&destination=FLG", itinerary.getGoogleMapsUrlForDay(2))
+    }
+
+    companion object {
+        val SAMPLE_ITINERARY_JSON = """
+        {
+          "trip_name": "Scenic Southwest: Phoenix to Flagstaff",
+          "dates": {
+            "start": "2026-10-09",
+            "end": "2026-10-09"
+          },
+          "days": [
+            {
+              "day": 1,
+              "date": "2026-10-09",
+              "timezone": "America/Phoenix",
+              "title": "Red Rock Scenic Byway & Oak Creek Canyon",
+              "origin": "Phoenix Sky Harbor Airport",
+              "destination": "Flagstaff Downtown",
+              "checkpoints": [
+                {
+                  "id": "phx_rental_pickup",
+                  "name": "Phoenix Sky Harbor Car Rental",
+                  "lat": 33.4357,
+                  "lng": -112.0152,
+                  "target_time": "14:30:00",
+                  "trigger_radius_miles": 0.5
+                },
+                {
+                  "id": "sedona_bell_rock",
+                  "name": "Bell Rock Scenic Vista",
+                  "lat": 34.8010,
+                  "lng": -111.7645,
+                  "target_time": "16:15:00",
+                  "trigger_radius_miles": 2.5
+                },
+                {
+                  "id": "oak_creek_overlook",
+                  "name": "Oak Creek Canyon Switchbacks Vista",
+                  "lat": 35.0345,
+                  "lng": -111.7330,
+                  "target_time": "17:30:00",
+                  "trigger_radius_miles": 2.0
+                },
+                {
+                  "id": "flagstaff_arrival",
+                  "name": "Flagstaff Downtown",
+                  "lat": 35.1983,
+                  "lng": -111.6513,
+                  "target_time": "18:30:00",
+                  "trigger_radius_miles": 1.0
+                }
+              ]
+            }
+          ]
+        }
+        """.trimIndent()
     }
 }

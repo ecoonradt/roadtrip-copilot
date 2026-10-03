@@ -130,15 +130,13 @@ roadtrip-copilot/
         ├── test/              # JUnit & Robolectric unit tests (RouteRepositoryTest, RouteListScreenTest, ItineraryTest)
         └── main/
             ├── AndroidManifest.xml
-            ├── assets/
-            │   └── sample_itinerary.json # Bundled fallback route for offline navigation
             ├── res/
-            │   ├── layout/    # Dashboard (activity_main.xml with SAF import button) and custom spinner layouts
+            │   ├── layout/    # Dashboard (activity_main.xml), route library bottom sheet (bottom_sheet_routes.xml, item_route_manage.xml)
             │   ├── drawable/  # Vector assets
             │   └── xml/
             │       └── automotive_app_desc.xml
             └── java/com/roadtrip/copilot/
-                ├── MainActivity.kt        # Phone dashboard, SAF import contract, route spinner & volume calibration
+                ├── MainActivity.kt        # Phone dashboard, active route card, route library sheet, SAF import & volume calibration
                 ├── CopilotService.kt      # Foreground service lifecycle, dynamic route loading & pace telemetry
                 ├── LocationTracker.kt     # Event-driven GPS, sequential progression & pace resolution
                 ├── AudioDuckEngine.kt     # Audio focus, stream routing & TTS manager
@@ -152,7 +150,7 @@ roadtrip-copilot/
                 │   ├── RouteListScreen.kt        # Dynamic ListTemplate with 6-item pagination & distraction compliance
                 │   └── SettingsScreen.kt         # ListTemplate for audio ducking toggles & calibration
                 └── model/
-                    ├── RouteRepository.kt # Singleton scanning storage & asset fallbacks, StateFlow<List<RouteOption>>
+                    ├── RouteRepository.kt # Singleton scanning storage & dynamic ingestion, StateFlow<List<RouteOption>>
                     ├── RouteOption.kt     # Unified route metadata class
                     ├── AssetProvider.kt   # Interface abstraction for pure JVM unit testing
                     └── ItineraryModels.kt # Itinerary data classes (V1 & V2 schemas), pace resolution
