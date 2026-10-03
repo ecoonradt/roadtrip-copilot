@@ -212,7 +212,7 @@ class CopilotService : Service() {
         }
 
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
-        audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", false)
+        audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", true)
 
         locationTracker = LocationTracker(this) { evalResult ->
             handleEvaluationResult(evalResult)

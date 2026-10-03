@@ -24,11 +24,16 @@
 * A persistent low-priority ongoing notification keeps the service active so the Android OS does not kill it while driving.
 
 ### B. Audio Ducking, Stream Routing & Calibration
-* When approaching a waypoint, the app ducks or optionally pauses whatever audio is playing (Spotify, podcasts) rather than talking over it.
+* When approaching a waypoint, the app pauses or optionally ducks whatever audio is playing (Spotify, podcasts) rather than talking over it.
 * Uses Android's `AudioManager` with `AudioFocusRequest`:
-  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (default, Google Maps style smooth ducking) or `AUDIOFOCUS_GAIN_TRANSIENT` (when "Pause music completely" is toggled).
+  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT` (default, cleanly pauses music during alerts) or `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (when "Duck volume" is toggled for subtle -14 dB attenuation).
   * Audio Usage: `AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` (car navigation guidance channel, matching Android Auto projection requirements).
   * Content Type: `AudioAttributes.CONTENT_TYPE_SPEECH`.
+* **Architectural Rationale for Pausing over Ducking (`AUDIOFOCUS_GAIN_TRANSIENT`):**
+  * In Android's audio framework (`PlaybackActivityMonitor.java`), navigation ducking (`DUCK_VSHAPE`) is hardcoded to only $-14\text{ dB}$ ($20\%$ amplitude, perceived as $\approx 50\%$ volume over road noise). Strong ducking ($-35\text{ dB}$) is hardcoded exclusively for `USAGE_ASSISTANT`.
+  * Android Auto projects Media and Guidance across separate digital channels (`Mix:0` and `Mix:1`). Vehicle head unit DSPs mix them without aggressive attenuation, making $-14\text{ dB}$ ducking inaudible in the car.
+  * Modern Android (API 37+ AudioHardening) also silently rejects background ducking requests.
+  * Pausing (`AUDIOFOCUS_GAIN_TRANSIENT`) dispatches `AUDIOFOCUS_LOSS_TRANSIENT` to media apps (YouTube Music, Spotify), cleanly halting music and resuming it instantly upon speech completion across all head units. **Do not revert default focus gain to `MAY_DUCK` or attempt volume slider hacks (`setStreamVolume`).**
 * Provides a 12-second continuous calibration speech loop so the driver can adjust the car guidance volume knob in real time before driving.
 * Focus must be abandoned immediately upon speech completion (`TextToSpeech.OnUtteranceProgressListener.onDone`) so music smoothly returns to 100% volume.
 * Heads-up waypoint alert notifications use a dedicated silent channel (`setSound(null, null)`) to prevent notification chime collisions with simultaneous TTS speech.

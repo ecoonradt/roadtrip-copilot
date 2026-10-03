@@ -110,10 +110,10 @@ Because Android Auto reserves its two visual slots for Navigation (Google Maps) 
 |  • Proximity triggers drop a 5-7 second MessagingStyle notification card       |
 |    directly over Google Maps with voice-reply "Acknowledge" & "Dismiss"        |
 |                                                                                |
-|  [ AUDIO DUCKING & TTS (AudioDuckEngine.kt) ]                                  |
-|  • Requests transient audio focus (AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)         |
-|  • Smoothly lowers Spotify volume, speaks scenic/itinerary script, and returns |
-|    music to 100% volume upon speech completion                                 |
+|  [ AUDIO PAUSE / DUCKING & TTS (AudioDuckEngine.kt) ]                         |
+|  • Requests transient audio focus (AUDIOFOCUS_GAIN_TRANSIENT default)         |
+|  • Cleanly pauses active media, speaks scenic/itinerary script, and resumes    |
+|    music cleanly upon speech completion (or subtle ducking if toggled)        |
 +--------------------------------------------------------------------------------+
 ```
 
@@ -125,3 +125,16 @@ For times when the vehicle is parked or stopped at an overlook, Roadtrip Co-Pilo
 * [`SettingsScreen.kt`](../app/src/main/java/com/roadtrip/copilot/car/SettingsScreen.kt): Audio ducking and speech calibration controls.
 
 When the driver resumes driving and returns to Google Maps, Roadtrip Co-Pilot cleanly returns to the background, ensuring the driver never has to choose between their driving map, their music, and their itinerary co-pilot.
+
+---
+
+## 6. Audio Architecture Decision: Why Media Pauses Instead of Ducks
+
+Early iterations of Roadtrip Co-Pilot attempted to use Android's transient audio ducking (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`) to dip music volume during announcements. In real-world car testing, media volume was not noticeably attenuated. This was investigated and confirmed to be an OS and automotive projection limitation:
+
+1. **AOSP Ducking Curve Limits:** In Android's audio system (`PlaybackActivityMonitor.java`), navigation ducking applies `DUCK_VSHAPE` ($-14\text{ dB}$, leaving $20\%$ signal amplitude). Due to logarithmic human hearing and automotive road noise, $-14\text{ dB}$ sounds like only a mild dip ($\approx 50\%$ perceived volume). The deeper $-35\text{ dB}$ strong duck is hardcoded in AOSP exclusively for `USAGE_ASSISTANT` (which cannot be used because it triggers in-car Siri/Google Assistant overlays, chimes, and mic capture).
+2. **Dual-Channel Automotive Projection:** Android Auto transmits Media and Navigation as separate digital audio channels to the vehicle. The car's head unit DSP amplifier mixes them together without attenuating Media further unless configured in vehicle firmware.
+3. **Background Audio Hardening:** Android 17+ (API 37+) introduces Background Audio Hardening, which silently rejects background ducking requests from services without active UI interaction.
+
+**The Solution:** Roadtrip Co-Pilot defaults to `AUDIOFOCUS_GAIN_TRANSIENT` ("Pause music during alerts"). The system dispatches `AUDIOFOCUS_LOSS_TRANSIENT` to the active media player (Spotify, YouTube Music, podcasts), cleanly pausing playback for the duration of the alert and resuming playback instantly when TTS completes (`onDone`).
+

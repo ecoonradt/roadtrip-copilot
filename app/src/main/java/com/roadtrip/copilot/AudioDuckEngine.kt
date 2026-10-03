@@ -71,7 +71,12 @@ class AudioDuckEngine(
         }
     }
 
-    var pauseMusicInsteadOfDuck: Boolean = false
+    /**
+     * Defaults to true (AUDIOFOCUS_GAIN_TRANSIENT). Standard Android ducking (MAY_DUCK) only
+     * attenuates by -14 dB (DUCK_VSHAPE), which is inaudible over car/road noise when mixed
+     * across Android Auto's dual-channel projection. Pausing guarantees complete speech clarity.
+     */
+    var pauseMusicInsteadOfDuck: Boolean = true
 
     fun applyCurrentAudioAttributes() {
         val speechAttributes = getSpeechAudioAttributes()
@@ -86,8 +91,8 @@ class AudioDuckEngine(
     }
 
     /**
-     * Ducks active media (like Google Maps) or pauses it, speaks the provided text through
-     * the navigation guidance audio channel, and immediately restores music volume on completion.
+     * Pauses active media or ducks it, speaks the provided text through
+     * the navigation guidance audio channel, and immediately restores music on completion.
      */
     fun speakWithDucking(text: CharSequence) {
         if (!isTtsReady || text.isBlank()) {

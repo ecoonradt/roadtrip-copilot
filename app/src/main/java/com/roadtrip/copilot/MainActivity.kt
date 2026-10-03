@@ -382,7 +382,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
-        binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
+        binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", true)
         lifecycleScope.launch {
             RouteRepository.getInstance(this@MainActivity).refreshRoutes()
             val currentFile = CopilotService.activeRouteFile.value
@@ -638,11 +638,11 @@ class MainActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
 
-        binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", false)
+        binding.switchPauseMusic.isChecked = prefs.getBoolean("pref_pause_music", true)
         binding.switchPauseMusic.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean("pref_pause_music", isChecked).apply()
             copilotService?.setPauseMusicInsteadOfDuck(isChecked)
-            appendLog("Audio mode: ${if (isChecked) "Pause music completely" else "Duck volume (Google Maps style)"}")
+            appendLog("Audio mode: ${if (isChecked) "Pause music during alerts (Recommended)" else "Duck volume (subtle -14dB)"}")
         }
 
         binding.btnImportItinerary.setOnClickListener {

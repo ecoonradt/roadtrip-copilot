@@ -15,7 +15,7 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
 
     override fun onGetTemplate(): Template {
         val prefs = carContext.getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
-        val pauseMusic = prefs.getBoolean("pref_pause_music", false)
+        val pauseMusic = prefs.getBoolean("pref_pause_music", true)
 
         val listBuilder = ItemList.Builder()
 
@@ -28,12 +28,12 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
 
         listBuilder.addItem(
             Row.Builder()
-                .setTitle("Pause Music Completely")
+                .setTitle("Pause Music During Alerts")
                 .addText(
                     if (pauseMusic)
-                        "ON: Pauses music completely during announcements"
+                        "ON: Pauses media cleanly during speech (Recommended)"
                     else
-                        "OFF: Ducks volume smoothly (Google Maps style)"
+                        "OFF: Subtle volume dip (-14 dB ducking)"
                 )
                 .setToggle(pauseToggle)
                 .build()

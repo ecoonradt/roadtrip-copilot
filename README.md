@@ -175,7 +175,7 @@ For complete documentation on route authoring, AI model configuration, test suit
 * **Dynamic Route Loading:** Import any custom itinerary from phone storage without rebuilding the APK. Bundled sample routes in `assets/` serve as built-in examples and offline fallbacks.
 * **In-Car Route Switcher (`RouteListScreen`):** Conforms to Android Auto distraction guidelines by capping items at 6 per page with "Prev" and "Next" paging. Active routes display a `"✓ "` indicator.
 * **Audio Channel Routing:** Toggle between the vehicle's **Media Channel** (standard stereo volume knob) and **Navigation Channel** (dedicated car navigation guidance stream).
-* **Pause vs. Duck:** Choose between ducking background audio or temporarily pausing music during waypoint announcements.
+* **Pause vs. Duck:** Cleanly pauses music during announcements by default, with an option for subtle -14 dB background ducking.
 * **Continuous Volume Calibration:** Loops a 12-second speech sample to easily balance car stereo volume levels before driving.
 * **Schedule Pace Telemetry:** Real-time calculation of schedule pace (ahead/behind target arrival time) in the persistent notification and in-car dashboard.
 
