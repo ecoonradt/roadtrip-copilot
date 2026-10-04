@@ -161,14 +161,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         if (idx === activeDayIndex && activeDayCascade?.stops?.length === day.waypoints.length) {
           stopsForDay = activeDayCascade.stops;
         } else if (day.waypoints && day.waypoints.length > 0) {
-          try {
-            stopsForDay = calculateTimelineCascade({
-              baseDate: day.date,
-              departureTime: day.departureTime || '09:00:00',
-              waypoints: day.waypoints,
-            }).stops;
-          } catch {
-            stopsForDay = undefined;
+          const hasExistingTargetTimes = day.waypoints.every((w) => Boolean(w.target_time));
+          if (!hasExistingTargetTimes) {
+            try {
+              stopsForDay = calculateTimelineCascade({
+                baseDate: day.date,
+                departureTime: day.departureTime || '09:00:00',
+                waypoints: day.waypoints,
+              }).stops;
+            } catch {
+              stopsForDay = undefined;
+            }
           }
         }
         return {

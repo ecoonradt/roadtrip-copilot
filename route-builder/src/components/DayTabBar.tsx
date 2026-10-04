@@ -17,7 +17,7 @@ export const DayTabBar: React.FC<DayTabBarProps> = ({
   onAddDay,
   onDeleteDay,
 }) => {
-  if (!days || days.length <= 1) {
+  if (!days || days.length === 0) {
     return null;
   }
 

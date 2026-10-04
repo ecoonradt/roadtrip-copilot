@@ -239,12 +239,17 @@ class LocationTracker(
 
                 // Loop route destination guard: The final destination must NEVER trigger if intermediate
                 // milestones exist and none have been visited yet (prevents premature trip completion at origin).
+                // Restrict this guard to actual loop routes where origin and destination are coincident.
                 if (i == activeCheckpoints.lastIndex && activeCheckpoints.size > 2) {
-                    val hasVisitedIntermediate = (1 until activeCheckpoints.lastIndex).any {
-                        activeCheckpoints[it].id in visitedCheckpoints
-                    }
-                    if (!hasVisitedIntermediate) {
-                        continue
+                    val origin = activeCheckpoints.firstOrNull()
+                    val isLoopRoute = origin != null && haversineMiles(origin.lat, origin.lng, cp.lat, cp.lng) < 2.0
+                    if (isLoopRoute) {
+                        val hasVisitedIntermediate = (1 until activeCheckpoints.lastIndex).any {
+                            activeCheckpoints[it].id in visitedCheckpoints
+                        }
+                        if (!hasVisitedIntermediate) {
+                            continue
+                        }
                     }
                 }
 

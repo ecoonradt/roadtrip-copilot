@@ -124,9 +124,9 @@ class RouteRepository(
             val file = if (!option.absolutePath.isNullOrBlank()) {
                 File(option.absolutePath)
             } else {
-                storageDirs.firstNotNullOfOrNull { dir ->
+                storageDirs.mapNotNull { dir ->
                     File(dir, option.routeFile).takeIf { it.exists() }
-                }
+                }.maxByOrNull { it.lastModified() }
             }
             if (file != null && file.exists()) {
                 return@withContext file.reader(Charsets.UTF_8).use { reader ->

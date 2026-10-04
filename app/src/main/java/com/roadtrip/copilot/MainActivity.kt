@@ -119,8 +119,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleTestAction(intent: Intent?) {
-        val action = intent?.getStringExtra("test_action") ?: return
-        intent.removeExtra("test_action")
+        val action = intent?.getStringExtra("test_action") ?: intent?.getStringExtra("action") ?: return
+        intent?.removeExtra("test_action")
+        intent?.removeExtra("action")
         when (action) {
             "test_alert" -> {
                 if (copilotService != null) {
@@ -861,6 +862,14 @@ class MainActivity : AppCompatActivity() {
                             binding.btnToggleService.backgroundTintList = ColorStateList.valueOf(getColor(R.color.accent))
                             binding.btnToggleService.setIconResource(R.drawable.ic_navigation)
                         }
+
+                        val isIdle = !running
+                        binding.btnTestAlert.isEnabled = isIdle
+                        binding.btnTestAlert.alpha = if (isIdle) 1.0f else 0.5f
+                        binding.btnTestAudio.isEnabled = isIdle
+                        binding.btnTestAudio.alpha = if (isIdle) 1.0f else 0.5f
+                        binding.btnCalibrateAudio.isEnabled = isIdle
+                        binding.btnCalibrateAudio.alpha = if (isIdle) 1.0f else 0.5f
                     }
                 }
 

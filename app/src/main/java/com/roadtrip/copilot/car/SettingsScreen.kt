@@ -39,13 +39,22 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
                 .build()
         )
 
+        val isRunning = CopilotService.isRunning.value
+
         // 3. Audio Calibration Speech Loop
         listBuilder.addItem(
             Row.Builder()
                 .setTitle("Calibrate Car Volume (12s Loop)")
-                .addText("Speaks continuously so you can adjust the volume knob")
+                .addText(
+                    if (isRunning)
+                        "Unavailable while trip is active"
+                    else
+                        "Speaks continuously so you can adjust the volume knob"
+                )
                 .setOnClickListener {
-                    CopilotService.calibrateAudio(carContext)
+                    if (!CopilotService.isRunning.value) {
+                        CopilotService.calibrateAudio(carContext)
+                    }
                 }
                 .build()
         )
@@ -54,9 +63,16 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
         listBuilder.addItem(
             Row.Builder()
                 .setTitle("Test Audio Speech")
-                .addText("Speaks a sample waypoint announcement over car speakers")
+                .addText(
+                    if (isRunning)
+                        "Unavailable while trip is active"
+                    else
+                        "Speaks a sample waypoint announcement over car speakers"
+                )
                 .setOnClickListener {
-                    CopilotService.testAudio(carContext)
+                    if (!CopilotService.isRunning.value) {
+                        CopilotService.testAudio(carContext)
+                    }
                 }
                 .build()
         )
@@ -65,9 +81,16 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
         listBuilder.addItem(
             Row.Builder()
                 .setTitle("Test Heads-Up Card & Alert")
-                .addText("Posts a high-priority heads-up card and ducking test")
+                .addText(
+                    if (isRunning)
+                        "Unavailable while trip is active"
+                    else
+                        "Posts a high-priority heads-up card and ducking test"
+                )
                 .setOnClickListener {
-                    CopilotService.testAlert(carContext)
+                    if (!CopilotService.isRunning.value) {
+                        CopilotService.testAlert(carContext)
+                    }
                 }
                 .build()
         )

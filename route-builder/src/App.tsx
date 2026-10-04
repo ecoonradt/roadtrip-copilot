@@ -766,11 +766,15 @@ export function App() {
     setIsSaving(true);
     try {
       const isAdHoc = schedulingMode === 'adhoc';
+      const computedDepartureTime = backwardInfo?.requiredDepartureTime || (departureTime.length === 5 ? `${departureTime}:00` : departureTime);
+      const computedBaseDate = backwardInfo ? (cascadeResult?.stops[0]?.localDate || baseDate) : baseDate;
       // Synchronize the active day's live cascaded arrival times into waypoints before saving
       const updatedDays = trip.days.map((d, dIdx) => {
         if (dIdx === activeDayIndex && cascadeResult?.stops?.length === d.waypoints.length) {
           return {
             ...d,
+            date: computedBaseDate,
+            departureTime: computedDepartureTime,
             isAdHoc,
             waypoints: d.waypoints.map((w, wIdx) => ({
               ...w,
@@ -783,7 +787,7 @@ export function App() {
       });
 
       const updatedTrip = { ...trip, days: updatedDays, isAdHoc };
-      const serialized = serializeTripToItineraryJson(updatedTrip, { isAdHoc });
+      const serialized = serializeTripToItineraryJson(updatedTrip, { isAdHoc, preserveTargetTimes: true });
       const fileName = trip.fileName || `${trip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
       await saveItinerary(fileName, serialized);
       setTrip(updatedTrip);

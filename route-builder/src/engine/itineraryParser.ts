@@ -379,15 +379,42 @@ function serializeCheckpoint(w: Waypoint, idx?: number, total?: number, isAdHoc?
     cp.notes = w.notes;
   }
 
+  if (w.timezone) {
+    cp.timezone = w.timezone;
+  }
+
   return cp;
+}
+
+export interface SerializeOptions {
+  isAdHoc?: boolean;
+  preserveTargetTimes?: boolean;
+}
+
+function resolveCheckpointTargetTime(
+  w: Waypoint,
+  cascadedTarget: string | undefined,
+  departureTime: string | undefined,
+  isAdHoc: boolean,
+  preserveTargetTimes?: boolean
+): string | undefined {
+  if (isAdHoc) return undefined;
+  if (!w.target_time) return cascadedTarget;
+  if (preserveTargetTimes) return w.target_time;
+  // If target time is chronologically before departure time (e.g. legacy draft error), re-synchronize
+  if (departureTime && w.target_time < departureTime) {
+    return cascadedTarget || w.target_time;
+  }
+  return w.target_time;
 }
 
 /**
  * Serializes an in-memory ParsedTrip back into standard Android-compatible JSON.
  * Synchronizes target times with the dynamic schedule cascade to eliminate stale draft times.
  */
-export function serializeTripToItineraryJson(trip: ParsedTrip, options?: { isAdHoc?: boolean }): Record<string, unknown> {
+export function serializeTripToItineraryJson(trip: ParsedTrip, options?: SerializeOptions): Record<string, unknown> {
   const isAdHoc = Boolean(options?.isAdHoc ?? trip.isAdHoc);
+  const preserveTargetTimes = Boolean(options?.preserveTargetTimes);
 
   if (trip.isMultiDay) {
     const days = trip.days.map((day) => {
@@ -431,8 +458,18 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: { isAdH
         ...(day.notes ? { notes: day.notes } : {}),
         checkpoints: day.waypoints.map((w, idx) => {
           const cascadedTarget = cascadedStops[idx]?.arrivalTime;
-          const updatedWp = cascadedTarget ? { ...w, target_time: cascadedTarget } : w;
-          return serializeCheckpoint(updatedWp, idx, day.waypoints.length, false);
+          const targetTime = resolveCheckpointTargetTime(
+            w,
+            cascadedTarget,
+            day.departureTime,
+            isAdHoc,
+            preserveTargetTimes
+          );
+          const updatedWp: Waypoint = {
+            ...w,
+            target_time: targetTime,
+          };
+          return serializeCheckpoint(updatedWp, idx, day.waypoints.length, isAdHoc);
         }),
       };
     });
@@ -505,9 +542,16 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: { isAdH
       const cascadedStop = cascadedStops[idx];
       const cascadedTarget = cascadedStop?.arrivalTime;
       const offsetMin = cascadedStop?.offsetMinutesFromStart ?? w.offset_minutes_from_start ?? (idx * 15);
+      const targetTime = resolveCheckpointTargetTime(
+        w,
+        cascadedTarget,
+        singleDay.departureTime,
+        isAdHoc,
+        preserveTargetTimes
+      );
       const updatedWp: Waypoint = {
         ...w,
-        target_time: isAdHoc ? undefined : (cascadedTarget || w.target_time),
+        target_time: targetTime,
         offset_minutes_from_start: offsetMin,
       };
       return serializeCheckpoint(updatedWp, idx, singleDay.waypoints.length, isAdHoc);

@@ -246,20 +246,21 @@ class CopilotService : Service() {
         }
 
         fun resetProgress(context: Context) {
+            val file = _activeRouteFile.value
+            val day = _activeDayNumber.value
+            if (file.isNotBlank()) {
+                val routeId = "${file}_day_${day}"
+                context.getSharedPreferences("copilot_location_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .remove("visited_$routeId")
+                    .remove("visited_${routeId}_ts")
+                    .apply()
+            }
+
             val service = instance
             if (service != null) {
                 service.resetProgress()
             } else {
-                val file = _activeRouteFile.value
-                val day = _activeDayNumber.value
-                if (file.isNotBlank()) {
-                    val routeId = "${file}_day_${day}"
-                    context.getSharedPreferences("copilot_location_prefs", Context.MODE_PRIVATE)
-                        .edit()
-                        .remove("visited_$routeId")
-                        .remove("visited_${routeId}_ts")
-                        .apply()
-                }
                 val firstCp = _activeCheckpoints.value.firstOrNull()
                 _telemetryFlow.value = EvaluationResult(
                     currentLat = 0.0,
@@ -375,17 +376,17 @@ class CopilotService : Service() {
 
         if (action == ACTION_TEST_ALERT) {
             testAlert()
-            return START_NOT_STICKY
+            return if (_isRunning.value) START_STICKY else START_NOT_STICKY
         }
 
         if (action == ACTION_TEST_AUDIO) {
             testAudio()
-            return START_NOT_STICKY
+            return if (_isRunning.value) START_STICKY else START_NOT_STICKY
         }
 
         if (action == ACTION_CALIBRATE_AUDIO) {
             calibrateAudio()
-            return START_NOT_STICKY
+            return if (_isRunning.value) START_STICKY else START_NOT_STICKY
         }
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
