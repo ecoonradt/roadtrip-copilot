@@ -158,10 +158,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     if (isMultiDay && trip?.days && exportScope === 'full') {
       const formattedDays = trip.days.map((day, idx) => {
         let stopsForDay: ScheduledStop[] | undefined;
+        const hasExistingTargetTimes = day.waypoints && day.waypoints.length > 0 && day.waypoints.every((w) => Boolean(w.target_time));
+
         if (idx === activeDayIndex && activeDayCascade?.stops?.length === day.waypoints.length) {
-          stopsForDay = activeDayCascade.stops;
+          if (hasExistingTargetTimes && activeDayCascade.isRouted === false && day.waypoints.length > 1) {
+            stopsForDay = undefined;
+          } else {
+            stopsForDay = activeDayCascade.stops;
+          }
         } else if (day.waypoints && day.waypoints.length > 0) {
-          const hasExistingTargetTimes = day.waypoints.every((w) => Boolean(w.target_time));
           if (!hasExistingTargetTimes) {
             try {
               stopsForDay = calculateTimelineCascade({

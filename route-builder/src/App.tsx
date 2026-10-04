@@ -638,6 +638,7 @@ export function App() {
     const isAdHoc = schedulingMode === 'adhoc';
     const computedDepartureTime = backwardInfo?.requiredDepartureTime || (departureTime.length === 5 ? `${departureTime}:00` : departureTime);
     const computedBaseDate = backwardInfo ? (cascadeResult?.stops[0]?.localDate || baseDate) : baseDate;
+    const isRouteReady = waypoints.length <= 1 || (cascadeResult?.isRouted === true && !routeError && !isLoadingRoute);
 
     const updatedDays = sourceTrip.days.map((d, dIdx) => {
       if (dIdx === activeDayIndex && cascadeResult?.stops?.length === d.waypoints.length) {
@@ -650,10 +651,8 @@ export function App() {
             const stop = cascadeResult.stops[wIdx];
             const targetTime = isAdHoc
               ? undefined
-              : (isLoadingRoute && w.target_time ? w.target_time : (stop?.arrivalTime || w.target_time));
-            const offsetMin = (isLoadingRoute && w.offset_minutes_from_start !== undefined)
-              ? w.offset_minutes_from_start
-              : (stop?.offsetMinutesFromStart ?? w.offset_minutes_from_start);
+              : (!isRouteReady ? w.target_time : (stop?.arrivalTime || w.target_time));
+            const offsetMin = (!isRouteReady ? w.offset_minutes_from_start : (stop?.offsetMinutesFromStart ?? w.offset_minutes_from_start));
 
             return {
               ...w,
@@ -667,7 +666,7 @@ export function App() {
     });
 
     return { ...sourceTrip, days: updatedDays, isAdHoc };
-  }, [trip, activeDayIndex, cascadeResult, schedulingMode, backwardInfo, departureTime, baseDate, isLoadingRoute]);
+  }, [trip, activeDayIndex, cascadeResult, schedulingMode, backwardInfo, departureTime, baseDate, isLoadingRoute, routeError, waypoints.length]);
 
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
@@ -698,54 +697,63 @@ export function App() {
   }, [activeDayIndex, getSynchronizedTrip]);
 
   const handleAddDay = useCallback(() => {
-    setTrip((prev) => {
-      const lastDay = prev.days[prev.days.length - 1];
-      const nextDayNum = prev.days.length + 1;
-      let nextDate = new Date().toISOString().slice(0, 10);
-      if (lastDay?.date) {
-        const d = new Date(lastDay.date);
-        d.setDate(d.getDate() + 1);
-        nextDate = d.toISOString().slice(0, 10);
-      }
+    // Snapshot the active day's live cascade and schedule before adding a new day
+    const synchronized = getSynchronizedTrip();
 
-      const initialWps: Waypoint[] = [];
-      if (lastDay && lastDay.waypoints.length > 0) {
-        const prevDest = lastDay.waypoints[lastDay.waypoints.length - 1];
-        initialWps.push({
-          ...prevDest,
-          id: `wp_day${nextDayNum}_origin_${Date.now()}`,
-          type: 'origin',
-          dwell_minutes: 0,
-          target_time: '09:00:00',
-        });
-      }
+    const lastDay = synchronized.days[synchronized.days.length - 1];
+    const nextDayNum = synchronized.days.length + 1;
+    let nextDate = new Date().toISOString().slice(0, 10);
+    if (lastDay?.date) {
+      const d = new Date(lastDay.date);
+      d.setDate(d.getDate() + 1);
+      nextDate = d.toISOString().slice(0, 10);
+    }
 
-      const newDay: ParsedDay = {
-        dayNumber: nextDayNum,
-        date: nextDate,
-        title: `Day ${nextDayNum}`,
-        departureTime: '09:00:00',
-        timezone: lastDay?.timezone || 'America/Phoenix',
-        waypoints: initialWps,
-      };
+    const initialWps: Waypoint[] = [];
+    if (lastDay && lastDay.waypoints.length > 0) {
+      const prevDest = lastDay.waypoints[lastDay.waypoints.length - 1];
+      initialWps.push({
+        ...prevDest,
+        id: `wp_day${nextDayNum}_origin_${Date.now()}`,
+        type: 'origin',
+        dwell_minutes: 0,
+        target_time: '09:00:00',
+      });
+    }
 
-      return {
-        ...prev,
-        isMultiDay: true,
-        days: [...prev.days, newDay],
-      };
-    });
-    const nextIdx = trip.days.length;
+    const newDay: ParsedDay = {
+      dayNumber: nextDayNum,
+      date: nextDate,
+      title: `Day ${nextDayNum}`,
+      departureTime: '09:00:00',
+      timezone: lastDay?.timezone || 'America/Phoenix',
+      waypoints: initialWps,
+    };
+
+    const nextTrip: ParsedTrip = {
+      ...synchronized,
+      isMultiDay: true,
+      days: [...synchronized.days, newDay],
+    };
+
+    setTrip(nextTrip);
+    const nextIdx = synchronized.days.length;
     setActiveDayIndex(nextIdx);
+    setRoute(null);
+    setScoutScope({
+      type: 'day',
+      dayNumber: nextDayNum,
+      dayTitle: `Day ${nextDayNum}`,
+    });
     localStorage.setItem('copilot_active_day', String(nextIdx));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(nextIdx));
-    const fileName = trip.fileName || localStorage.getItem('copilot_active_file');
+    const fileName = synchronized.fileName || localStorage.getItem('copilot_active_file');
     if (fileName) {
       url.searchParams.set('route', fileName);
     }
     window.history.replaceState({}, '', url.toString());
-  }, [trip.days, trip.fileName]);
+  }, [getSynchronizedTrip]);
 
   const handleDeleteDay = useCallback((index: number) => {
     if (trip.days.length <= 1) return;

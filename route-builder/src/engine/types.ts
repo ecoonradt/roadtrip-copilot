@@ -100,6 +100,7 @@ export interface TimelineCascadeResult {
   endTime: string; // Local arrival time at final stop
   timezonesCrossed: string[]; // Unique list of timezones encountered along the route
   isAdHoc?: boolean;
+  isRouted?: boolean;
 }
 
 /**

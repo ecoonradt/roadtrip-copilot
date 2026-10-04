@@ -429,6 +429,11 @@ export function calculateTimelineCascade(
       ? Math.round((finalStop.departureEpochMs - initialStop.arrivalEpochMs) / 1000)
       : 0;
 
+  const isRouted = Boolean(
+    waypoints.length <= 1 ||
+    (driveDurationsSeconds && driveDurationsSeconds.length > 0)
+  );
+
   return {
     stops,
     totalDriveSeconds,
@@ -440,6 +445,7 @@ export function calculateTimelineCascade(
     endTime: isAdHoc ? (stops.length > 0 ? formatOffsetMinutes(Math.round(totalTripSeconds / 60)) : '') : (finalStop ? finalStop.arrivalTime : ''),
     timezonesCrossed: Array.from(timezonesSet),
     isAdHoc,
+    isRouted,
   };
 }
 

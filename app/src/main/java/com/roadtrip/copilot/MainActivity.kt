@@ -823,17 +823,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCopilotService() {
-        val prefs = getSharedPreferences(CopilotService.PREFS_NAME, Context.MODE_PRIVATE)
         val selectedRoute = getSelectedRouteOption()
-        val file = selectedRoute?.routeFile?.ifBlank { null }
-            ?: CopilotService.activeRouteFile.value.ifBlank { null }
-            ?: prefs.getString(CopilotService.PREF_ROUTE_FILE, null)
-            ?: ""
-        val day = selectedRoute?.dayNumber
-            ?: (if (CopilotService.activeDayNumber.value > 0) CopilotService.activeDayNumber.value else null)
-            ?: prefs.getInt(CopilotService.PREF_DAY_NUMBER, 1)
-
-        CopilotService.startRoute(this, file, day)
+        if (selectedRoute != null) {
+            CopilotService.startRoute(this, selectedRoute.routeFile, selectedRoute.dayNumber)
+        } else if (CopilotService.activeRouteFile.value.isNotBlank()) {
+            CopilotService.startRoute(this, CopilotService.activeRouteFile.value, CopilotService.activeDayNumber.value)
+        } else {
+            // Cold start with no in-memory selection: restore both file and day atomically from preferences
+            CopilotService.startRoute(this)
+        }
     }
 
     private fun stopCopilotService() {
