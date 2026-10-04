@@ -19,7 +19,7 @@ import QRCode from 'qrcode';
 import type { Waypoint } from '../types/routing';
 import type { ScheduledStop, GoogleMapsRouteResult, TimelineCascadeResult } from '../engine/types';
 import type { ParsedTrip } from '../engine/itineraryParser';
-import { calculateTimelineCascade } from '../engine/cascade';
+import { calculateTimelineCascade, calculateBackwardSchedule } from '../engine/cascade';
 import { generateGoogleMapsUrls } from '../engine/googleMapsUrl';
 import {
   formatMultiDayItinerary,
@@ -170,11 +170,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           const hasAnyTargetTimes = day.waypoints.some((w) => Boolean(w.target_time));
           if (!hasAnyTargetTimes) {
             try {
-              stopsForDay = calculateTimelineCascade({
-                baseDate: day.date,
-                departureTime: day.departureTime || '09:00:00',
-                waypoints: day.waypoints,
-              }).stops;
+              if (day.schedulingMode === 'backward') {
+                const targetArrival = day.targetArrivalTime || '18:00:00';
+                stopsForDay = calculateBackwardSchedule({
+                  baseDate: day.date,
+                  targetArrivalTime: targetArrival.length === 5 ? `${targetArrival}:00` : targetArrival,
+                  waypoints: day.waypoints,
+                }).cascadeResult.stops;
+              } else {
+                stopsForDay = calculateTimelineCascade({
+                  baseDate: day.date,
+                  departureTime: day.departureTime || '09:00:00',
+                  waypoints: day.waypoints,
+                  isAdHoc: day.schedulingMode === 'adhoc' || day.isAdHoc,
+                }).stops;
+              }
             } catch {
               stopsForDay = undefined;
             }

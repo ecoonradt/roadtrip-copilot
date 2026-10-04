@@ -34,6 +34,13 @@ export function detectTimezone(
     return fallback;
   }
 
+  // Arizona corridor override: Arizona does not observe DST (America/Phoenix year-round).
+  // Coarse polygon tz-lookup maps northern Arizona coordinates to America/Denver,
+  // whereas state highway road trips across Arizona operate on Mountain Standard Time (America/Phoenix).
+  if (lat >= 31.3 && lat <= 37.0 && lng < AZ_NM_LONGITUDE_BOUNDARY && lng >= -114.8) {
+    return 'America/Phoenix';
+  }
+
   try {
     return tzlookup(lat, lng);
   } catch {

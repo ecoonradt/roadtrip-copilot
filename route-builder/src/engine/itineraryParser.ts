@@ -1,6 +1,6 @@
 import type { Waypoint, WaypointType } from '../types/routing';
 import { detectTimezone, calculateTimelineCascade, parseLocalToUtcEpoch } from './cascade';
-import type { ScheduledStop, CoordinateLocation } from './types';
+import type { ScheduledStop, CoordinateLocation, SchedulingMode } from './types';
 import { generateGoogleMapsUrls } from './googleMapsUrl';
 
 export interface ParsedDay {
@@ -15,6 +15,8 @@ export interface ParsedDay {
   notes?: string;
   isAdHoc?: boolean;
   google_maps_url?: string;
+  schedulingMode?: SchedulingMode;
+  targetArrivalTime?: string;
 }
 
 export interface ParsedTrip {
@@ -129,6 +131,8 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
         origin: typeof d.origin === 'string' ? d.origin : undefined,
         destination: typeof d.destination === 'string' ? d.destination : undefined,
         google_maps_url: typeof d.google_maps_url === 'string' ? d.google_maps_url : undefined,
+        schedulingMode: (typeof d.scheduling_mode === 'string' ? d.scheduling_mode : typeof d.schedulingMode === 'string' ? d.schedulingMode : undefined) as SchedulingMode | undefined,
+        targetArrivalTime: typeof d.target_arrival_time === 'string' ? d.target_arrival_time : typeof d.targetArrivalTime === 'string' ? d.targetArrivalTime : undefined,
       });
     }
   } else {
@@ -181,6 +185,8 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       destination: destinationName,
       isAdHoc: isAdHocDay,
       google_maps_url: typeof data.google_maps_url === 'string' ? data.google_maps_url : undefined,
+      schedulingMode: isAdHocDay ? 'adhoc' : (typeof data.scheduling_mode === 'string' ? data.scheduling_mode : typeof data.schedulingMode === 'string' ? data.schedulingMode : undefined) as SchedulingMode | undefined,
+      targetArrivalTime: typeof data.target_arrival_time === 'string' ? data.target_arrival_time : typeof data.targetArrivalTime === 'string' ? data.targetArrivalTime : undefined,
     });
   }
 
@@ -477,12 +483,16 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
         origin: day.origin,
         destination: day.destination,
         departure_time: day.departureTime,
+        ...(day.schedulingMode ? { scheduling_mode: day.schedulingMode } : {}),
+        ...(day.targetArrivalTime ? { target_arrival_time: day.targetArrivalTime } : {}),
         ...(dayGoogleMapsUrl ? { google_maps_url: dayGoogleMapsUrl } : {}),
         ...(day.notes ? { notes: day.notes } : {}),
         checkpoints: day.waypoints.map((w, idx) => {
           const cascadedStop = cascadedStops[idx];
           const cascadedTarget = cascadedStop?.arrivalTime;
-          const offsetMin = w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15);
+          const offsetMin = preserveTargetTimes
+            ? w.offset_minutes_from_start
+            : (w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15));
           const targetTime = resolveCheckpointTargetTime(
             w,
             cascadedTarget,
@@ -558,6 +568,8 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
   const result: Record<string, unknown> = {
     trip_name: trip.tripName,
     timezone: singleDay.timezone || 'America/Phoenix',
+    ...(singleDay.schedulingMode ? { scheduling_mode: singleDay.schedulingMode } : {}),
+    ...(singleDay.targetArrivalTime ? { target_arrival_time: singleDay.targetArrivalTime } : {}),
     ...(singleGoogleMapsUrl ? { google_maps_url: singleGoogleMapsUrl } : {}),
     metadata: {
       version: '2.0.0',
@@ -569,7 +581,9 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
     checkpoints: singleDay.waypoints.map((w, idx) => {
       const cascadedStop = cascadedStops[idx];
       const cascadedTarget = cascadedStop?.arrivalTime;
-      const offsetMin = w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15);
+      const offsetMin = preserveTargetTimes
+        ? w.offset_minutes_from_start
+        : (w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15));
       const targetTime = resolveCheckpointTargetTime(
         w,
         cascadedTarget,

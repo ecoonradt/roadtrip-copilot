@@ -402,5 +402,6 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     expect(cps[0].target_time).toBe('10:00:00');
     expect(cps[1].target_time).toBe('11:00:00');
     expect(cps[2].target_time).toBeUndefined();
+    expect((cps[2] as { offset_minutes_from_start?: number }).offset_minutes_from_start).toBeUndefined();
   });
 });

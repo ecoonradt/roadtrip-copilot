@@ -12,9 +12,10 @@ import type { ScoutScope, ScoutSuggestion } from './types/scout';
 import {
   calculateTimelineCascade,
   calculateBackwardSchedule,
+  detectTimezone,
 } from './engine/cascade';
 import { generateGoogleMapsUrls } from './engine/googleMapsUrl';
-import type { SchedulingMode } from './engine/types';
+import type { SchedulingMode, TimelineCascadeResult } from './engine/types';
 import {
   parseItineraryJson,
   serializeTripToItineraryJson,
@@ -298,29 +299,51 @@ export function App() {
 
           const durations = routeData.legs?.map((l) => l.durationSeconds);
           const distances = routeData.legs?.map((l) => l.distanceMiles);
-          const isAdHocDay = targetDay.isAdHoc || prevTrip.isAdHoc;
+          const effectiveMode = targetDay.schedulingMode || (targetDay.isAdHoc || prevTrip.isAdHoc ? 'adhoc' : 'forward');
 
-          const cascade = calculateTimelineCascade({
-            baseDate: targetDay.date,
-            departureTime: targetDay.departureTime || '09:00:00',
-            waypoints: targetDay.waypoints,
-            driveDurationsSeconds: durations,
-            driveDistancesMiles: distances,
-            isAdHoc: isAdHocDay,
-          });
+          let cascade: TimelineCascadeResult;
+          let computedDepartureTime = targetDay.departureTime || '09:00:00';
+          let computedDate = targetDay.date;
+
+          if (effectiveMode === 'backward') {
+            const targetArrival = targetDay.targetArrivalTime || '18:00:00';
+            const backwardRes = calculateBackwardSchedule({
+              baseDate: targetDay.date,
+              targetArrivalTime: targetArrival.length === 5 ? `${targetArrival}:00` : targetArrival,
+              waypoints: targetDay.waypoints,
+              driveDurationsSeconds: durations,
+              driveDistancesMiles: distances,
+            });
+            cascade = backwardRes.cascadeResult;
+            computedDepartureTime = backwardRes.requiredDepartureTime;
+            computedDate = backwardRes.cascadeResult.stops[0]?.localDate || targetDay.date;
+          } else {
+            const isAdHocDay = effectiveMode === 'adhoc';
+            cascade = calculateTimelineCascade({
+              baseDate: targetDay.date,
+              departureTime: targetDay.departureTime || '09:00:00',
+              waypoints: targetDay.waypoints,
+              driveDurationsSeconds: durations,
+              driveDistancesMiles: distances,
+              isAdHoc: isAdHocDay,
+            });
+          }
 
           const updatedWaypoints = targetDay.waypoints.map((w, idx) => {
             const stop = cascade.stops[idx];
             return {
               ...w,
-              target_time: isAdHocDay ? undefined : (stop?.arrivalTime || w.target_time),
+              target_time: effectiveMode === 'adhoc' ? undefined : (stop?.arrivalTime || w.target_time),
               offset_minutes_from_start: stop?.offsetMinutesFromStart ?? w.offset_minutes_from_start,
+              timezone: stop?.timezone || w.timezone,
             };
           });
 
           const nextDays = [...prevTrip.days];
           nextDays[currentDayIdx] = {
             ...targetDay,
+            date: computedDate,
+            departureTime: computedDepartureTime,
             waypoints: updatedWaypoints,
           };
           return { ...prevTrip, days: nextDays };
@@ -446,9 +469,13 @@ export function App() {
       if (!current) return prev;
 
       const resolved = typeof newWaypoints === 'function' ? newWaypoints(current.waypoints || []) : newWaypoints;
+      const originTz = resolved[0]?.lat !== undefined && resolved[0]?.lng !== undefined
+        ? (resolved[0].timezone || detectTimezone(resolved[0].lat, resolved[0].lng, current.timezone || 'America/Phoenix'))
+        : current.timezone;
 
       nextDays[activeDayIndex] = {
         ...current,
+        timezone: originTz || current.timezone || 'America/Phoenix',
         waypoints: resolved,
       };
       return { ...prev, days: nextDays };
@@ -466,7 +493,7 @@ export function App() {
       type: resolvedType,
       lat: result.lat,
       lng: result.lng,
-      timezone: currentDay.timezone || 'America/Phoenix',
+      timezone: detectTimezone(result.lat, result.lng, currentDay.timezone || 'America/Phoenix'),
       dwell_minutes: defaultDwell,
       trigger_radius_miles: 2.0,
       ...(result.placeName ? { place_name: result.placeName } : {}),
@@ -484,7 +511,7 @@ export function App() {
       type: isFirstStop ? 'origin' : 'scenic_pull_off',
       lat,
       lng,
-      timezone: currentDay.timezone || 'America/Phoenix',
+      timezone: detectTimezone(lat, lng, currentDay.timezone || 'America/Phoenix'),
       dwell_minutes: isFirstStop ? 0 : 15,
       trigger_radius_miles: 2.0,
     };
@@ -497,7 +524,17 @@ export function App() {
 
   const handleUpdateWaypoint = useCallback((id: string, updates: Partial<Waypoint>) => {
     updateCurrentDayWaypoints((prevWaypoints) =>
-      prevWaypoints.map((w) => (w.id === id ? { ...w, ...updates } : w))
+      prevWaypoints.map((w) => {
+        if (w.id !== id) return w;
+        const updated = { ...w, ...updates };
+        if (
+          (updates.lat !== undefined || updates.lng !== undefined) &&
+          updates.timezone === undefined
+        ) {
+          updated.timezone = detectTimezone(updated.lat, updated.lng, updated.timezone || currentDay.timezone || 'America/Phoenix');
+        }
+        return updated;
+      })
     );
     if (updates.id && updates.id !== id) {
       if (selectedWaypointId === id) {
@@ -516,7 +553,7 @@ export function App() {
         return prev;
       });
     }
-  }, [updateCurrentDayWaypoints, selectedWaypointId]);
+  }, [updateCurrentDayWaypoints, selectedWaypointId, currentDay.timezone]);
 
   const handleBatchUpdateWaypoints = useCallback((updatesMap: Record<string, Partial<Waypoint>>) => {
     updateCurrentDayWaypoints((prevWaypoints) =>
@@ -587,6 +624,7 @@ export function App() {
         type: (suggestion.type as WaypointType) || 'scenic_pull_off',
         lat: suggestion.lat,
         lng: suggestion.lng,
+        timezone: detectTimezone(suggestion.lat, suggestion.lng, currentDay.timezone || 'America/Phoenix'),
         dwell_minutes: suggestion.dwell_minutes ?? 15,
         trigger_radius_miles: suggestion.trigger_radius_miles ?? 1.5,
         target_time: '12:00:00',
@@ -665,13 +703,24 @@ export function App() {
     setSchedulingMode(mode);
     setTrip((prev) => {
       const nextDays = prev.days.map((d, idx) =>
-        idx === activeDayIndex ? { ...d, isAdHoc: mode === 'adhoc' } : d
+        idx === activeDayIndex ? { ...d, schedulingMode: mode, isAdHoc: mode === 'adhoc' } : d
       );
       return {
         ...prev,
         isAdHoc: mode === 'adhoc',
         days: nextDays,
       };
+    });
+  }, [activeDayIndex]);
+
+  const handleSetTargetArrivalTime = useCallback((newTime: string) => {
+    setTargetArrivalTime(newTime);
+    setTrip((prev) => {
+      const nextDays = [...prev.days];
+      const current = nextDays[activeDayIndex];
+      if (!current) return prev;
+      nextDays[activeDayIndex] = { ...current, targetArrivalTime: newTime };
+      return { ...prev, days: nextDays };
     });
   }, [activeDayIndex]);
 
@@ -684,11 +733,15 @@ export function App() {
 
     const updatedDays = sourceTrip.days.map((d, dIdx) => {
       if (dIdx === activeDayIndex && cascadeResult?.stops?.length === d.waypoints.length) {
+        const originTz = cascadeResult.stops[0]?.timezone || d.waypoints[0]?.timezone || d.timezone;
         return {
           ...d,
           date: computedBaseDate,
           departureTime: computedDepartureTime,
+          timezone: originTz || d.timezone || 'America/Phoenix',
           isAdHoc,
+          schedulingMode,
+          targetArrivalTime: schedulingMode === 'backward' ? targetArrivalTime : d.targetArrivalTime,
           waypoints: d.waypoints.map((w, wIdx) => {
             const stop = cascadeResult.stops[wIdx];
             const targetTime = isAdHoc
@@ -700,6 +753,7 @@ export function App() {
               ...w,
               target_time: targetTime,
               offset_minutes_from_start: offsetMin,
+              timezone: stop?.timezone || w.timezone,
             };
           }),
         };
@@ -708,7 +762,7 @@ export function App() {
     });
 
     return { ...sourceTrip, days: updatedDays, isAdHoc };
-  }, [trip, activeDayIndex, cascadeResult, schedulingMode, backwardInfo, departureTime, baseDate, isLoadingRoute, routeError, waypoints.length]);
+  }, [trip, activeDayIndex, cascadeResult, schedulingMode, targetArrivalTime, backwardInfo, departureTime, baseDate, isLoadingRoute, routeError, waypoints.length]);
 
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
@@ -722,6 +776,16 @@ export function App() {
     setRoute(null);
     const targetDay = synchronized.days[index];
     if (targetDay) {
+      if (targetDay.schedulingMode) {
+        setSchedulingMode(targetDay.schedulingMode);
+      } else if (targetDay.isAdHoc) {
+        setSchedulingMode('adhoc');
+      } else {
+        setSchedulingMode('forward');
+      }
+      if (targetDay.targetArrivalTime) {
+        setTargetArrivalTime(targetDay.targetArrivalTime);
+      }
       setScoutScope({
         type: 'day',
         dayNumber: targetDay.dayNumber,
@@ -918,7 +982,7 @@ export function App() {
         schedulingMode={schedulingMode}
         setSchedulingMode={handleSetSchedulingMode}
         targetArrivalTime={targetArrivalTime}
-        setTargetArrivalTime={setTargetArrivalTime}
+        setTargetArrivalTime={handleSetTargetArrivalTime}
         backwardInfo={backwardInfo}
         cascadeResult={cascadeResult}
         googleMapsRoute={googleMapsRoute}
