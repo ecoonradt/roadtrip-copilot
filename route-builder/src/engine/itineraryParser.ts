@@ -457,7 +457,9 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
         ...(dayGoogleMapsUrl ? { google_maps_url: dayGoogleMapsUrl } : {}),
         ...(day.notes ? { notes: day.notes } : {}),
         checkpoints: day.waypoints.map((w, idx) => {
-          const cascadedTarget = cascadedStops[idx]?.arrivalTime;
+          const cascadedStop = cascadedStops[idx];
+          const cascadedTarget = cascadedStop?.arrivalTime;
+          const offsetMin = w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15);
           const targetTime = resolveCheckpointTargetTime(
             w,
             cascadedTarget,
@@ -468,6 +470,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
           const updatedWp: Waypoint = {
             ...w,
             target_time: targetTime,
+            offset_minutes_from_start: offsetMin,
           };
           return serializeCheckpoint(updatedWp, idx, day.waypoints.length, isAdHoc);
         }),
@@ -541,7 +544,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
     checkpoints: singleDay.waypoints.map((w, idx) => {
       const cascadedStop = cascadedStops[idx];
       const cascadedTarget = cascadedStop?.arrivalTime;
-      const offsetMin = cascadedStop?.offsetMinutesFromStart ?? w.offset_minutes_from_start ?? (idx * 15);
+      const offsetMin = w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15);
       const targetTime = resolveCheckpointTargetTime(
         w,
         cascadedTarget,

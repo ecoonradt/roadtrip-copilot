@@ -633,11 +633,53 @@ export function App() {
     });
   }, [activeDayIndex]);
 
+  // Helper to snapshot active day's live cascade and schedule into trip model
+  const getSynchronizedTrip = useCallback((sourceTrip: ParsedTrip = trip): ParsedTrip => {
+    const isAdHoc = schedulingMode === 'adhoc';
+    const computedDepartureTime = backwardInfo?.requiredDepartureTime || (departureTime.length === 5 ? `${departureTime}:00` : departureTime);
+    const computedBaseDate = backwardInfo ? (cascadeResult?.stops[0]?.localDate || baseDate) : baseDate;
+
+    const updatedDays = sourceTrip.days.map((d, dIdx) => {
+      if (dIdx === activeDayIndex && cascadeResult?.stops?.length === d.waypoints.length) {
+        return {
+          ...d,
+          date: computedBaseDate,
+          departureTime: computedDepartureTime,
+          isAdHoc,
+          waypoints: d.waypoints.map((w, wIdx) => {
+            const stop = cascadeResult.stops[wIdx];
+            const targetTime = isAdHoc
+              ? undefined
+              : (isLoadingRoute && w.target_time ? w.target_time : (stop?.arrivalTime || w.target_time));
+            const offsetMin = (isLoadingRoute && w.offset_minutes_from_start !== undefined)
+              ? w.offset_minutes_from_start
+              : (stop?.offsetMinutesFromStart ?? w.offset_minutes_from_start);
+
+            return {
+              ...w,
+              target_time: targetTime,
+              offset_minutes_from_start: offsetMin,
+            };
+          }),
+        };
+      }
+      return d;
+    });
+
+    return { ...sourceTrip, days: updatedDays, isAdHoc };
+  }, [trip, activeDayIndex, cascadeResult, schedulingMode, backwardInfo, departureTime, baseDate, isLoadingRoute]);
+
   // Multi-day operations
   const handleSelectDay = useCallback((index: number) => {
+    if (index === activeDayIndex) return;
+
+    // Snapshot the active day's live cascade and schedule before switching tabs
+    const synchronized = getSynchronizedTrip();
+    setTrip(synchronized);
+
     setActiveDayIndex(index);
     setRoute(null);
-    const targetDay = trip.days[index];
+    const targetDay = synchronized.days[index];
     if (targetDay) {
       setScoutScope({
         type: 'day',
@@ -648,12 +690,12 @@ export function App() {
     localStorage.setItem('copilot_active_day', String(index));
     const url = new URL(window.location.href);
     url.searchParams.set('day', String(index));
-    const fileName = trip.fileName || localStorage.getItem('copilot_active_file');
+    const fileName = synchronized.fileName || localStorage.getItem('copilot_active_file');
     if (fileName) {
       url.searchParams.set('route', fileName);
     }
     window.history.replaceState({}, '', url.toString());
-  }, [trip.days, trip.fileName]);
+  }, [activeDayIndex, getSynchronizedTrip]);
 
   const handleAddDay = useCallback(() => {
     setTrip((prev) => {
@@ -766,29 +808,9 @@ export function App() {
     setIsSaving(true);
     try {
       const isAdHoc = schedulingMode === 'adhoc';
-      const computedDepartureTime = backwardInfo?.requiredDepartureTime || (departureTime.length === 5 ? `${departureTime}:00` : departureTime);
-      const computedBaseDate = backwardInfo ? (cascadeResult?.stops[0]?.localDate || baseDate) : baseDate;
-      // Synchronize the active day's live cascaded arrival times into waypoints before saving
-      const updatedDays = trip.days.map((d, dIdx) => {
-        if (dIdx === activeDayIndex && cascadeResult?.stops?.length === d.waypoints.length) {
-          return {
-            ...d,
-            date: computedBaseDate,
-            departureTime: computedDepartureTime,
-            isAdHoc,
-            waypoints: d.waypoints.map((w, wIdx) => ({
-              ...w,
-              target_time: isAdHoc ? undefined : (cascadeResult.stops[wIdx]?.arrivalTime || w.target_time),
-              offset_minutes_from_start: cascadeResult.stops[wIdx]?.offsetMinutesFromStart ?? w.offset_minutes_from_start,
-            })),
-          };
-        }
-        return d;
-      });
-
-      const updatedTrip = { ...trip, days: updatedDays, isAdHoc };
+      const updatedTrip = getSynchronizedTrip();
       const serialized = serializeTripToItineraryJson(updatedTrip, { isAdHoc, preserveTargetTimes: true });
-      const fileName = trip.fileName || `${trip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
+      const fileName = updatedTrip.fileName || `${updatedTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
       await saveItinerary(fileName, serialized);
       setTrip(updatedTrip);
       setLastSavedTripJson(JSON.stringify(updatedTrip));
@@ -806,7 +828,7 @@ export function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [trip, activeDayIndex, cascadeResult, schedulingMode]);
+  }, [isLoadingRoute, schedulingMode, getSynchronizedTrip, activeDayIndex]);
 
   // Dirty state tracking (indicates unsaved changes)
   const isDirty = useMemo(() => {
@@ -950,7 +972,7 @@ export function App() {
       <ExportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        trip={trip}
+        trip={getSynchronizedTrip()}
         activeDayIndex={activeDayIndex}
         activeDayCascade={cascadeResult}
         waypoints={waypoints}

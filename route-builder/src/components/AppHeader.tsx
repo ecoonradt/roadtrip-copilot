@@ -462,7 +462,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {onSaveTrip && (
           <button
             onClick={onSaveTrip}
-            disabled={isSaving}
+            disabled={isSaving || isLoadingRoute}
             className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer disabled:opacity-50 ${
               saveSuccess
                 ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300'
@@ -471,12 +471,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/80'
             }`}
             title={
-              isDirty
+              isLoadingRoute
+                ? 'Calculating road directions...'
+                : isDirty
                 ? 'Unsaved changes! Click to save to route file on disk'
                 : 'All changes saved to route file on disk'
             }
           >
-            {isSaving ? (
+            {isSaving || isLoadingRoute ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
             ) : saveSuccess ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -485,8 +487,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             ) : (
               <Save className="w-3.5 h-3.5 text-slate-400" />
             )}
-            <span>{saveSuccess ? 'Saved!' : isDirty ? 'Save *' : 'Save'}</span>
-            {isDirty && !saveSuccess && (
+            <span>{isLoadingRoute ? 'Routing...' : saveSuccess ? 'Saved!' : isDirty ? 'Save *' : 'Save'}</span>
+            {isDirty && !saveSuccess && !isLoadingRoute && (
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Unsaved changes" />
             )}
           </button>
@@ -495,11 +497,18 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         {/* Primary CTA: Export & Sync */}
         <button
           onClick={onOpenExportModal}
-          className="flex items-center gap-1.5 py-1.5 px-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-950/40 transition-all cursor-pointer"
-          title="Export itinerary, 1-Click ADB Push, or QR code handoff"
+          disabled={isLoadingRoute}
+          className={`flex items-center gap-1.5 py-1.5 px-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-950/40 transition-all cursor-pointer ${
+            isLoadingRoute ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+          title={isLoadingRoute ? 'Calculating road directions...' : 'Export itinerary, 1-Click ADB Push, or QR code handoff'}
         >
-          <Share2 className="w-3.5 h-3.5" />
-          <span>Export &amp; Sync</span>
+          {isLoadingRoute ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+          ) : (
+            <Share2 className="w-3.5 h-3.5" />
+          )}
+          <span>{isLoadingRoute ? 'Calculating...' : 'Export & Sync'}</span>
         </button>
       </div>
     </header>

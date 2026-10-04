@@ -197,7 +197,7 @@ class CopilotService : Service() {
 
         fun startRoute(context: Context, routeFile: String? = null, dayNumber: Int? = null) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val file = routeFile ?: prefs.getString(PREF_ROUTE_FILE, "") ?: ""
+            val file = routeFile?.ifBlank { null } ?: prefs.getString(PREF_ROUTE_FILE, "") ?: ""
             if (file.isBlank()) {
                 Log.w(TAG, "Cannot start route: No route file selected.")
                 return

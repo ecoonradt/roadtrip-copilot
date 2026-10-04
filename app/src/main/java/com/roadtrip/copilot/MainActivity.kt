@@ -823,9 +823,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCopilotService() {
+        val prefs = getSharedPreferences(CopilotService.PREFS_NAME, Context.MODE_PRIVATE)
         val selectedRoute = getSelectedRouteOption()
-        val file = selectedRoute?.routeFile ?: CopilotService.activeRouteFile.value
-        val day = selectedRoute?.dayNumber ?: CopilotService.activeDayNumber.value
+        val file = selectedRoute?.routeFile?.ifBlank { null }
+            ?: CopilotService.activeRouteFile.value.ifBlank { null }
+            ?: prefs.getString(CopilotService.PREF_ROUTE_FILE, null)
+            ?: ""
+        val day = selectedRoute?.dayNumber
+            ?: (if (CopilotService.activeDayNumber.value > 0) CopilotService.activeDayNumber.value else null)
+            ?: prefs.getInt(CopilotService.PREF_DAY_NUMBER, 1)
 
         CopilotService.startRoute(this, file, day)
     }
