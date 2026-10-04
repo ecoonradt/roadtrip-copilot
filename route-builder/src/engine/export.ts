@@ -1,5 +1,5 @@
 import type { Waypoint, WaypointType } from '../types/routing';
-import type { ScheduledStop, CoordinateLocation } from './types';
+import type { ScheduledStop, CoordinateLocation, SchedulingMode } from './types';
 import { detectTimezone } from './cascade';
 import { generateGoogleMapsUrls } from './googleMapsUrl';
 
@@ -37,6 +37,8 @@ export interface DayV2 {
   origin?: string;
   destination?: string;
   departure_time?: string;
+  scheduling_mode?: SchedulingMode;
+  target_arrival_time?: string;
   google_maps_url?: string;
   checkpoints: CheckpointV2[];
 }
@@ -65,6 +67,9 @@ export interface SingleRouteItineraryV2 {
   trip_name: string;
   date?: string;
   timezone?: string;
+  departure_time?: string;
+  scheduling_mode?: SchedulingMode;
+  target_arrival_time?: string;
   google_maps_url?: string;
   metadata: ItineraryMetadataV2;
   origin?: string;
@@ -90,6 +95,8 @@ export interface FormatMultiDayOptions {
     departureTime?: string;
     waypoints?: Waypoint[];
     scheduledStops?: ScheduledStop[];
+    schedulingMode?: SchedulingMode;
+    targetArrivalTime?: string;
   }>;
 }
 
@@ -97,6 +104,7 @@ export interface FormatSingleRouteOptions {
   tripName: string;
   date?: string;
   timezone?: string;
+  departureTime?: string;
   author?: string;
   description?: string;
   origin?: string;
@@ -104,6 +112,8 @@ export interface FormatSingleRouteOptions {
   waypoints?: Waypoint[];
   scheduledStops?: ScheduledStop[];
   isAdHoc?: boolean;
+  schedulingMode?: SchedulingMode;
+  targetArrivalTime?: string;
 }
 
 /**
@@ -225,11 +235,16 @@ export function formatCheckpointV2(
 export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDayItineraryV2 {
   const days: DayV2[] = options.days.map((dayInput) => {
     let checkpoints: CheckpointV2[] = [];
+    const omitTargetTime = dayInput.schedulingMode === 'adhoc';
 
     if (dayInput.scheduledStops && dayInput.scheduledStops.length > 0) {
-      checkpoints = dayInput.scheduledStops.map((stop) => formatCheckpointV2(stop));
+      const startEpoch = dayInput.scheduledStops[0].arrivalEpochMs;
+      checkpoints = dayInput.scheduledStops.map((stop) => formatCheckpointV2(stop, {
+        omitTargetTime,
+        offsetMinutesFromStart: Math.round((stop.arrivalEpochMs - startEpoch) / 60000),
+      }));
     } else if (dayInput.waypoints && dayInput.waypoints.length > 0) {
-      checkpoints = dayInput.waypoints.map((wp) => formatCheckpointV2(wp));
+      checkpoints = dayInput.waypoints.map((wp) => formatCheckpointV2(wp, { omitTargetTime }));
     }
 
     const firstStopName = checkpoints[0]?.name;
@@ -261,6 +276,8 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
       origin: dayInput.origin || firstStopName || 'Origin',
       destination: dayInput.destination || lastStopName || 'Destination',
       departure_time: dayInput.departureTime || checkpoints[0]?.target_time || '08:00:00',
+      ...(dayInput.schedulingMode ? { scheduling_mode: dayInput.schedulingMode } : {}),
+      ...(dayInput.targetArrivalTime ? { target_arrival_time: dayInput.targetArrivalTime } : {}),
       ...(dayGoogleMapsUrl ? { google_maps_url: dayGoogleMapsUrl } : {}),
       checkpoints,
     };
@@ -305,8 +322,8 @@ export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): S
       });
     });
   } else if (options.waypoints && options.waypoints.length > 0) {
-    checkpoints = options.waypoints.map((wp, idx) => {
-      const offset = wp.offset_minutes_from_start ?? idx * 15;
+    checkpoints = options.waypoints.map((wp) => {
+      const offset = wp.offset_minutes_from_start;
       return formatCheckpointV2(wp, {
         offsetMinutesFromStart: offset,
         omitTargetTime: isAdHoc,
@@ -338,6 +355,9 @@ export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): S
   const result: SingleRouteItineraryV2 = {
     trip_name: options.tripName,
     timezone: resolvedTimezone,
+    ...(options.departureTime ? { departure_time: options.departureTime } : {}),
+    ...(options.schedulingMode ? { scheduling_mode: options.schedulingMode } : {}),
+    ...(options.targetArrivalTime ? { target_arrival_time: options.targetArrivalTime } : {}),
     ...(singleGoogleMapsUrl ? { google_maps_url: singleGoogleMapsUrl } : {}),
     metadata: {
       version: '2.0.0',

@@ -29,6 +29,14 @@ export interface ParsedTrip {
   isAdHoc?: boolean;
 }
 
+function parseSchedulingMode(value: unknown): SchedulingMode | undefined {
+  return value === 'forward' || value === 'backward' || value === 'adhoc' ? value : undefined;
+}
+
+export function getDaySchedulingMode(day: ParsedDay, tripIsAdHoc = false): SchedulingMode {
+  return day.schedulingMode ?? ((day.isAdHoc ?? tripIsAdHoc) ? 'adhoc' : 'forward');
+}
+
 /**
  * Infers a sensible WaypointType if not explicitly provided in the raw data.
  */
@@ -112,6 +120,10 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       const waypoints = rawCheckpoints.map((cp, idx) =>
         convertRawCheckpointToWaypoint(cp, idx, rawCheckpoints.length, tz)
       );
+      const schedulingMode = parseSchedulingMode(d.scheduling_mode ?? d.schedulingMode);
+      const isAdHocDay = schedulingMode === 'adhoc' || (schedulingMode === undefined &&
+        rawCheckpoints.some((cp) => typeof cp.offset_minutes_from_start === 'number') &&
+        !rawCheckpoints.some((cp) => typeof cp.target_time === 'string' && cp.target_time.trim()));
 
       // Determine departure time: first checkpoint target_time or default 09:00:00
       let departureTime = '09:00:00';
@@ -131,7 +143,8 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
         origin: typeof d.origin === 'string' ? d.origin : undefined,
         destination: typeof d.destination === 'string' ? d.destination : undefined,
         google_maps_url: typeof d.google_maps_url === 'string' ? d.google_maps_url : undefined,
-        schedulingMode: (typeof d.scheduling_mode === 'string' ? d.scheduling_mode : typeof d.schedulingMode === 'string' ? d.schedulingMode : undefined) as SchedulingMode | undefined,
+        isAdHoc: isAdHocDay,
+        schedulingMode,
         targetArrivalTime: typeof d.target_arrival_time === 'string' ? d.target_arrival_time : typeof d.targetArrivalTime === 'string' ? d.targetArrivalTime : undefined,
       });
     }
@@ -152,7 +165,9 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     );
 
     let departureTime = '09:00:00';
-    if (waypoints.length > 0 && waypoints[0].target_time) {
+    if (typeof data.departure_time === 'string' && data.departure_time.trim()) {
+      departureTime = normalizeTimeString(data.departure_time);
+    } else if (waypoints.length > 0 && waypoints[0].target_time) {
       departureTime = normalizeTimeString(waypoints[0].target_time);
     }
 
@@ -172,7 +187,8 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
 
     const hasExplicitDate = typeof data.date === 'string' && data.date.trim().length > 0;
     const hasAdHocOffsets = rawCheckpoints.some((cp) => typeof cp.offset_minutes_from_start === 'number');
-    const isAdHocDay = Boolean(!hasExplicitDate || (hasAdHocOffsets && !rawCheckpoints.some((cp) => typeof cp.target_time === 'string' && cp.target_time.trim())));
+    const storedMode = parseSchedulingMode(data.scheduling_mode ?? data.schedulingMode);
+    const isAdHocDay = storedMode ? storedMode === 'adhoc' : Boolean(!hasExplicitDate || (hasAdHocOffsets && !rawCheckpoints.some((cp) => typeof cp.target_time === 'string' && cp.target_time.trim())));
 
     parsedDays.push({
       dayNumber: 1,
@@ -185,7 +201,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       destination: destinationName,
       isAdHoc: isAdHocDay,
       google_maps_url: typeof data.google_maps_url === 'string' ? data.google_maps_url : undefined,
-      schedulingMode: isAdHocDay ? 'adhoc' : (typeof data.scheduling_mode === 'string' ? data.scheduling_mode : typeof data.schedulingMode === 'string' ? data.schedulingMode : undefined) as SchedulingMode | undefined,
+      schedulingMode: storedMode ?? (isAdHocDay ? 'adhoc' : undefined),
       targetArrivalTime: typeof data.target_arrival_time === 'string' ? data.target_arrival_time : typeof data.targetArrivalTime === 'string' ? data.targetArrivalTime : undefined,
     });
   }
@@ -442,11 +458,14 @@ function resolveCheckpointTargetTime(
  * Synchronizes target times with the dynamic schedule cascade to eliminate stale draft times.
  */
 export function serializeTripToItineraryJson(trip: ParsedTrip, options?: SerializeOptions): Record<string, unknown> {
-  const isAdHoc = Boolean(options?.isAdHoc ?? trip.isAdHoc);
+  const isAdHoc = Boolean(options?.isAdHoc ?? (trip.isMultiDay || !trip.days[0]
+    ? trip.isAdHoc
+    : getDaySchedulingMode(trip.days[0], trip.isAdHoc) === 'adhoc'));
   const preserveTargetTimes = Boolean(options?.preserveTargetTimes);
 
   if (trip.isMultiDay) {
     const days = trip.days.map((day) => {
+      const dayIsAdHoc = getDaySchedulingMode(day, isAdHoc) === 'adhoc';
       let cascadedStops: ScheduledStop[] = [];
       try {
         if (day.waypoints && day.waypoints.length > 0) {
@@ -499,7 +518,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
             day.departureTime,
             day.timezone,
             day.date,
-            isAdHoc,
+            dayIsAdHoc,
             preserveTargetTimes
           );
           const updatedWp: Waypoint = {
@@ -507,7 +526,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
             target_time: targetTime,
             offset_minutes_from_start: offsetMin,
           };
-          return serializeCheckpoint(updatedWp, idx, day.waypoints.length, isAdHoc);
+          return serializeCheckpoint(updatedWp, idx, day.waypoints.length, dayIsAdHoc);
         }),
       };
     });
@@ -568,6 +587,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
   const result: Record<string, unknown> = {
     trip_name: trip.tripName,
     timezone: singleDay.timezone || 'America/Phoenix',
+    departure_time: singleDay.departureTime,
     ...(singleDay.schedulingMode ? { scheduling_mode: singleDay.schedulingMode } : {}),
     ...(singleDay.targetArrivalTime ? { target_arrival_time: singleDay.targetArrivalTime } : {}),
     ...(singleGoogleMapsUrl ? { google_maps_url: singleGoogleMapsUrl } : {}),

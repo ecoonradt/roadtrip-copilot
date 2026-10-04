@@ -98,7 +98,11 @@ route-builder/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
 │   └── types/                  # Frontend data models (routing, ai, scout)
-└── tests/                      # Comprehensive Vitest test suites (162 tests)
+└── tests/                      # Vitest regression suites
+    ├── ai/                     # Harness adapters, alert/schema generation, Scout
+    ├── backend/                # Routing, storage, device handoff, geocoding
+    ├── engine/                 # Cascade, schema, timezone and navigation-link math
+    └── ui/                     # Portable React scheduling acceptance tests & harness
 ```
 
 ---

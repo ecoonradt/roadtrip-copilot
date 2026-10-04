@@ -10,9 +10,9 @@ import type {
 import tzlookup from 'tz-lookup';
 
 /**
- * Longitude boundary between Arizona and New Mexico (~109° 02' 48" W).
- * Locations west of this coordinate (more negative) are in Arizona (America/Phoenix).
- * Locations east of this coordinate (less negative) are in New Mexico (America/Denver).
+ * Approximate Arizona/New Mexico state border, retained for corridor metadata.
+ * State borders are not timezone borders: the Navajo Nation observes DST.
+ * Timezones must be resolved geographically rather than from this longitude.
  */
 export const AZ_NM_LONGITUDE_BOUNDARY = -109.0452;
 
@@ -32,13 +32,6 @@ export function detectTimezone(
 ): string {
   if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
     return fallback;
-  }
-
-  // Arizona corridor override: Arizona does not observe DST (America/Phoenix year-round).
-  // Coarse polygon tz-lookup maps northern Arizona coordinates to America/Denver,
-  // whereas state highway road trips across Arizona operate on Mountain Standard Time (America/Phoenix).
-  if (lat >= 31.3 && lat <= 37.0 && lng < AZ_NM_LONGITUDE_BOUNDARY && lng >= -114.8) {
-    return 'America/Phoenix';
   }
 
   try {
@@ -438,7 +431,8 @@ export function calculateTimelineCascade(
 
   const isRouted = Boolean(
     waypoints.length <= 1 ||
-    (driveDurationsSeconds && driveDurationsSeconds.length > 0)
+    (driveDurationsSeconds && driveDurationsSeconds.length === waypoints.length - 1 &&
+      driveDurationsSeconds.every((duration) => Number.isFinite(duration) && duration >= 0))
   );
 
   return {

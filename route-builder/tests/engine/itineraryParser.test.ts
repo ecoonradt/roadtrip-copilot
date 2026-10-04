@@ -6,6 +6,21 @@ import {
 } from '../../src/engine/itineraryParser';
 
 describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
+  it('keeps explicit single-day scheduling intent authoritative over legacy clock inference', () => {
+    const checkpoints = [
+      { id: 'origin', name: 'Origin', lat: 33.1, lng: -112, offset_minutes_from_start: 0 },
+      { id: 'dest', name: 'Destination', lat: 33.2, lng: -112, offset_minutes_from_start: 60 },
+    ];
+    const fixed = parseItineraryJson({ trip_name: 'Catch-Up draft', date: '2026-10-09', departure_time: '15:00:00', scheduling_mode: 'backward', target_arrival_time: '16:00:00', checkpoints });
+    expect(fixed.isAdHoc).toBe(false);
+    expect(fixed.days[0].schedulingMode).toBe('backward');
+    expect(fixed.days[0].departureTime).toBe('15:00:00');
+    expect(serializeTripToItineraryJson(fixed, { preserveTargetTimes: true }).date).toBe('2026-10-09');
+    const relative = parseItineraryJson({ trip_name: 'Relative', date: '2026-10-09', scheduling_mode: 'adhoc', checkpoints });
+    expect(relative.isAdHoc).toBe(true);
+    expect(serializeTripToItineraryJson(relative, { preserveTargetTimes: true }).date).toBeUndefined();
+  });
+
   it('correctly parses multi-day itinerary with 4 days and preserves metadata', () => {
     const multiDayJson = {
       trip_name: 'Phoenix to Albuquerque Road Trip',

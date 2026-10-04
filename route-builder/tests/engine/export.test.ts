@@ -337,7 +337,7 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
   });
 
   describe('Single Route Itinerary Export', () => {
-    it('generates root checkpoints with offset_minutes_from_start', () => {
+    it('preserves absolute targets without inventing relative offsets', () => {
       const itinerary = formatSingleRouteItinerary({
         tripName: 'Test Run: Albany to Nassau',
         date: '2026-09-06',
@@ -348,9 +348,10 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       expect(itinerary.trip_name).toBe('Test Run: Albany to Nassau');
       expect(itinerary.checkpoints).toHaveLength(3);
       expect(itinerary.google_maps_url).toContain('https://www.google.com/maps/dir/?api=1');
-      expect(itinerary.checkpoints[0].offset_minutes_from_start).toBe(0);
-      expect(itinerary.checkpoints[1].offset_minutes_from_start).toBe(15);
-      expect(itinerary.checkpoints[2].offset_minutes_from_start).toBe(30);
+      expect(itinerary.checkpoints[0].offset_minutes_from_start).toBeUndefined();
+      expect(itinerary.checkpoints[1].offset_minutes_from_start).toBeUndefined();
+      expect(itinerary.checkpoints[2].offset_minutes_from_start).toBeUndefined();
+      expect(itinerary.checkpoints[1].target_time).toBe('16:30:00');
       expect(itinerary.date).toBe('2026-09-06');
       expect(itinerary.timezone).toBe('America/New_York');
     });
@@ -422,7 +423,7 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
     it('omits date and target_time when isAdHoc is true', () => {
       const singleRoute = formatSingleRouteItinerary({
         tripName: 'Ad-Hoc Shopping Drive',
-        waypoints: sampleWaypoints,
+        waypoints: sampleWaypoints.map((waypoint, index) => ({ ...waypoint, offset_minutes_from_start: [0, 120, 225][index] })),
         isAdHoc: true,
       });
 
@@ -430,7 +431,12 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
       expect(singleRoute.checkpoints[0].target_time).toBeUndefined();
       expect(singleRoute.checkpoints[0].offset_minutes_from_start).toBe(0);
       expect(singleRoute.checkpoints[1].target_time).toBeUndefined();
-      expect(singleRoute.checkpoints[1].offset_minutes_from_start).toBe(15);
+      expect(singleRoute.checkpoints[1].offset_minutes_from_start).toBe(120);
+    });
+
+    it('does not invent clock fields for unrouted relative drafts', () => {
+      const output = formatSingleRouteItinerary({ tripName: 'Unscheduled', waypoints: sampleWaypoints, isAdHoc: true });
+      expect(output.checkpoints.every((cp) => cp.target_time === undefined && cp.offset_minutes_from_start === undefined)).toBe(true);
     });
   });
 

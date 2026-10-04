@@ -19,7 +19,7 @@ import QRCode from 'qrcode';
 import type { Waypoint } from '../types/routing';
 import type { ScheduledStop, GoogleMapsRouteResult, TimelineCascadeResult } from '../engine/types';
 import type { ParsedTrip } from '../engine/itineraryParser';
-import { calculateTimelineCascade, calculateBackwardSchedule } from '../engine/cascade';
+import { getDaySchedulingMode } from '../engine/itineraryParser';
 import { generateGoogleMapsUrls } from '../engine/googleMapsUrl';
 import {
   formatMultiDayItinerary,
@@ -151,44 +151,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     const currentDayWaypoints = activeDay?.waypoints || waypoints;
     const routedStops = isCascadeRouted ? (activeDayCascade?.stops || scheduledStops) : undefined;
 
-    if (isAdHoc) {
-      return formatSingleRouteItinerary({
-        tripName,
-        waypoints: currentDayWaypoints,
-        scheduledStops: routedStops,
-        isAdHoc: true,
-      });
-    }
-
     if (isMultiDay && trip?.days && exportScope === 'full') {
       const formattedDays = trip.days.map((day, idx) => {
         let stopsForDay: ScheduledStop[] | undefined;
 
         if (idx === activeDayIndex && isCascadeRouted && activeDayCascade?.stops?.length === day.waypoints.length) {
           stopsForDay = activeDayCascade.stops;
-        } else if (day.waypoints && day.waypoints.length > 0) {
-          const hasAnyTargetTimes = day.waypoints.some((w) => Boolean(w.target_time));
-          if (!hasAnyTargetTimes) {
-            try {
-              if (day.schedulingMode === 'backward') {
-                const targetArrival = day.targetArrivalTime || '18:00:00';
-                stopsForDay = calculateBackwardSchedule({
-                  baseDate: day.date,
-                  targetArrivalTime: targetArrival.length === 5 ? `${targetArrival}:00` : targetArrival,
-                  waypoints: day.waypoints,
-                }).cascadeResult.stops;
-              } else {
-                stopsForDay = calculateTimelineCascade({
-                  baseDate: day.date,
-                  departureTime: day.departureTime || '09:00:00',
-                  waypoints: day.waypoints,
-                  isAdHoc: day.schedulingMode === 'adhoc' || day.isAdHoc,
-                }).stops;
-              }
-            } catch {
-              stopsForDay = undefined;
-            }
-          }
         }
         return {
           dayNumber: day.dayNumber,
@@ -198,6 +166,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           origin: day.origin,
           destination: day.destination,
           departureTime: day.departureTime,
+          schedulingMode: getDaySchedulingMode(day, trip.isAdHoc),
+          targetArrivalTime: day.targetArrivalTime,
           waypoints: day.waypoints,
           scheduledStops: stopsForDay,
         };
@@ -211,6 +181,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       });
     }
 
+    const activeMode = activeDay ? getDaySchedulingMode(activeDay, trip?.isAdHoc) : (isAdHoc ? 'adhoc' : 'forward');
+    if (activeMode === 'adhoc') {
+      return formatSingleRouteItinerary({
+        tripName,
+        timezone: activeDay?.timezone,
+        departureTime: activeDay?.departureTime || departureTime,
+        schedulingMode: 'adhoc',
+        waypoints: currentDayWaypoints,
+        scheduledStops: routedStops,
+        isAdHoc: true,
+      });
+    }
+
     // Single-day export (or isolated day of multi-day trip)
     const effectiveDayNumber = isMultiDay ? (activeDay?.dayNumber ?? (activeDayIndex + 1)) : 1;
     const effectiveTitle = isMultiDay ? (activeDay?.title || `Day ${effectiveDayNumber}`) : undefined;
@@ -218,12 +201,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
     return formatMultiDayItinerary({
       tripName: effectiveTripName,
-      startDate: baseDate,
+      startDate: activeDay?.date || baseDate,
       days: [
         {
           dayNumber: effectiveDayNumber,
-          date: baseDate,
-          departureTime,
+          date: activeDay?.date || baseDate,
+          departureTime: activeDay?.departureTime || departureTime,
+          timezone: activeDay?.timezone,
+          schedulingMode: activeMode,
+          targetArrivalTime: activeDay?.targetArrivalTime,
           title: effectiveTitle,
           waypoints: currentDayWaypoints,
           scheduledStops: routedStops,
@@ -256,6 +242,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const jsonString = useMemo(() => {
     return exportItineraryToJson(itineraryData, 2);
+  }, [itineraryData]);
+
+  const hasDraftTimes = useMemo(() => {
+    const checkpoints = 'days' in itineraryData
+      ? itineraryData.days.flatMap((day) => day.checkpoints)
+      : itineraryData.checkpoints;
+    return checkpoints.some((cp) => !cp.target_time && cp.offset_minutes_from_start === undefined);
   }, [itineraryData]);
 
   // Stage itinerary and generate Wi-Fi QR code
@@ -454,6 +447,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {hasDraftTimes && (
+            <p className="p-3 text-xs text-amber-200 bg-amber-950/40 border border-amber-800/60 rounded-xl">
+              Some stop times are not ready yet. Wait for road directions to finish before syncing a complete schedule.
+            </p>
+          )}
           {/* Export Scope Selector (Multi-Day Trips Only) */}
           {isMultiDay && trip?.days && (
             <div className="bg-slate-850/80 p-3 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
