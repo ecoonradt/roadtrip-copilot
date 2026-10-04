@@ -146,11 +146,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   // Build the formatted V2 Itinerary object
   const itineraryData: ItineraryExportModel = useMemo(() => {
+    const isCascadeRouted = activeDayCascade?.isRouted === true;
+    const activeDay = trip?.days?.[activeDayIndex];
+    const currentDayWaypoints = activeDay?.waypoints || waypoints;
+    const routedStops = isCascadeRouted ? (activeDayCascade?.stops || scheduledStops) : undefined;
+
     if (isAdHoc) {
       return formatSingleRouteItinerary({
         tripName,
-        waypoints,
-        scheduledStops,
+        waypoints: currentDayWaypoints,
+        scheduledStops: routedStops,
         isAdHoc: true,
       });
     }
@@ -158,16 +163,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     if (isMultiDay && trip?.days && exportScope === 'full') {
       const formattedDays = trip.days.map((day, idx) => {
         let stopsForDay: ScheduledStop[] | undefined;
-        const hasExistingTargetTimes = day.waypoints && day.waypoints.length > 0 && day.waypoints.every((w) => Boolean(w.target_time));
 
-        if (idx === activeDayIndex && activeDayCascade?.stops?.length === day.waypoints.length) {
-          if (hasExistingTargetTimes && activeDayCascade.isRouted === false && day.waypoints.length > 1) {
-            stopsForDay = undefined;
-          } else {
-            stopsForDay = activeDayCascade.stops;
-          }
+        if (idx === activeDayIndex && isCascadeRouted && activeDayCascade?.stops?.length === day.waypoints.length) {
+          stopsForDay = activeDayCascade.stops;
         } else if (day.waypoints && day.waypoints.length > 0) {
-          if (!hasExistingTargetTimes) {
+          const hasAnyTargetTimes = day.waypoints.some((w) => Boolean(w.target_time));
+          if (!hasAnyTargetTimes) {
             try {
               stopsForDay = calculateTimelineCascade({
                 baseDate: day.date,
@@ -201,7 +202,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
 
     // Single-day export (or isolated day of multi-day trip)
-    const activeDay = trip?.days?.[activeDayIndex];
     const effectiveDayNumber = isMultiDay ? (activeDay?.dayNumber ?? (activeDayIndex + 1)) : 1;
     const effectiveTitle = isMultiDay ? (activeDay?.title || `Day ${effectiveDayNumber}`) : undefined;
     const effectiveTripName = isMultiDay ? `${trip?.tripName || tripName} - Day ${effectiveDayNumber}` : tripName;
@@ -215,8 +215,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           date: baseDate,
           departureTime,
           title: effectiveTitle,
-          waypoints,
-          scheduledStops,
+          waypoints: currentDayWaypoints,
+          scheduledStops: routedStops,
         },
       ],
     });

@@ -1,5 +1,5 @@
 import type { Waypoint, WaypointType } from '../types/routing';
-import { detectTimezone, calculateTimelineCascade } from './cascade';
+import { detectTimezone, calculateTimelineCascade, parseLocalToUtcEpoch } from './cascade';
 import type { ScheduledStop, CoordinateLocation } from './types';
 import { generateGoogleMapsUrls } from './googleMapsUrl';
 
@@ -391,18 +391,41 @@ export interface SerializeOptions {
   preserveTargetTimes?: boolean;
 }
 
+function isTargetBeforeDeparture(
+  targetTime: string,
+  targetTimezone: string | undefined,
+  departureTime: string,
+  departureTimezone: string | undefined,
+  baseDate: string | undefined
+): boolean {
+  if (!baseDate) {
+    return targetTime < departureTime;
+  }
+  const tzA = targetTimezone || departureTimezone || 'America/Phoenix';
+  const tzB = departureTimezone || targetTimezone || 'America/Phoenix';
+  try {
+    const epochTarget = parseLocalToUtcEpoch(baseDate, targetTime, tzA);
+    const epochDep = parseLocalToUtcEpoch(baseDate, departureTime, tzB);
+    return epochTarget < epochDep;
+  } catch {
+    return targetTime < departureTime;
+  }
+}
+
 function resolveCheckpointTargetTime(
   w: Waypoint,
   cascadedTarget: string | undefined,
   departureTime: string | undefined,
+  dayTimezone: string | undefined,
+  baseDate: string | undefined,
   isAdHoc: boolean,
   preserveTargetTimes?: boolean
 ): string | undefined {
   if (isAdHoc) return undefined;
-  if (!w.target_time) return cascadedTarget;
   if (preserveTargetTimes) return w.target_time;
+  if (!w.target_time) return cascadedTarget;
   // If target time is chronologically before departure time (e.g. legacy draft error), re-synchronize
-  if (departureTime && w.target_time < departureTime) {
+  if (departureTime && isTargetBeforeDeparture(w.target_time, w.timezone, departureTime, dayTimezone, baseDate)) {
     return cascadedTarget || w.target_time;
   }
   return w.target_time;
@@ -446,7 +469,6 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
       const gmapsResult = generateGoogleMapsUrls(navLocations);
       const dayGoogleMapsUrl = gmapsResult.primaryUrl || undefined;
 
-      let prevTargetTime: string | undefined = undefined;
       return {
         day: day.dayNumber,
         date: day.date,
@@ -461,19 +483,15 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
           const cascadedStop = cascadedStops[idx];
           const cascadedTarget = cascadedStop?.arrivalTime;
           const offsetMin = w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15);
-          let targetTime = resolveCheckpointTargetTime(
+          const targetTime = resolveCheckpointTargetTime(
             w,
             cascadedTarget,
             day.departureTime,
+            day.timezone,
+            day.date,
             isAdHoc,
             preserveTargetTimes
           );
-          if (targetTime && prevTargetTime && targetTime < prevTargetTime) {
-            targetTime = prevTargetTime;
-          }
-          if (targetTime) {
-            prevTargetTime = targetTime;
-          }
           const updatedWp: Waypoint = {
             ...w,
             target_time: targetTime,
@@ -537,7 +555,6 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
   const gmapsResult = generateGoogleMapsUrls(navLocations);
   const singleGoogleMapsUrl = gmapsResult.primaryUrl || undefined;
 
-  let prevSingleTargetTime: string | undefined = undefined;
   const result: Record<string, unknown> = {
     trip_name: trip.tripName,
     timezone: singleDay.timezone || 'America/Phoenix',
@@ -553,19 +570,15 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
       const cascadedStop = cascadedStops[idx];
       const cascadedTarget = cascadedStop?.arrivalTime;
       const offsetMin = w.offset_minutes_from_start ?? cascadedStop?.offsetMinutesFromStart ?? (idx * 15);
-      let targetTime = resolveCheckpointTargetTime(
+      const targetTime = resolveCheckpointTargetTime(
         w,
         cascadedTarget,
         singleDay.departureTime,
+        singleDay.timezone,
+        singleDay.date,
         isAdHoc,
         preserveTargetTimes
       );
-      if (targetTime && prevSingleTargetTime && targetTime < prevSingleTargetTime) {
-        targetTime = prevSingleTargetTime;
-      }
-      if (targetTime) {
-        prevSingleTargetTime = targetTime;
-      }
       const updatedWp: Waypoint = {
         ...w,
         target_time: targetTime,

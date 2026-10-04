@@ -331,4 +331,76 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     // Little America Hotel (lodging destination): anchor stripped
     expect(checkpoints[3].is_route_anchor).toBe(false);
   });
+
+  it('preserves valid westbound timezone crossing target times on serialization', () => {
+    const westDay = {
+      day: 1,
+      date: '2026-10-09',
+      timezone: 'America/Denver',
+      title: 'Westbound Border Crossing',
+      departure_time: '09:00:00',
+      checkpoints: [
+        {
+          id: 'nm_depart',
+          name: 'New Mexico departure',
+          lat: 34.18,
+          lng: -109.0,
+          timezone: 'America/Denver',
+          target_time: '09:00:00',
+        },
+        {
+          id: 'az_arrival',
+          name: 'Arizona arrival',
+          lat: 34.16,
+          lng: -109.1,
+          timezone: 'America/Phoenix',
+          target_time: '08:30:00',
+        },
+      ],
+    };
+
+    const multiTrip = parseItineraryJson({ trip_name: 'Westbound Multi-day', days: [westDay] });
+    const serializedMulti = serializeTripToItineraryJson(multiTrip, { preserveTargetTimes: true });
+    const multiCps = (serializedMulti as { days: Array<{ checkpoints: Array<{ target_time: string; timezone: string }> }> }).days[0].checkpoints;
+    expect(multiCps[1].target_time).toBe('08:30:00');
+    expect(multiCps[1].timezone).toBe('America/Phoenix');
+
+    const singleTrip = parseItineraryJson({
+      trip_name: 'Westbound Single',
+      date: westDay.date,
+      timezone: westDay.timezone,
+      departure_time: westDay.departure_time,
+      checkpoints: westDay.checkpoints,
+    });
+    const serializedSingle = serializeTripToItineraryJson(singleTrip, { preserveTargetTimes: true });
+    const singleCps = (serializedSingle as { checkpoints: Array<{ target_time: string; timezone: string }> }).checkpoints;
+    expect(singleCps[1].target_time).toBe('08:30:00');
+    expect(singleCps[1].timezone).toBe('America/Phoenix');
+  });
+
+  it('treats unrouted new waypoints as drafts without fabricating clamped target times on preserveTargetTimes', () => {
+    const tripWithUnrouted = {
+      trip_name: 'Draft Stop Test',
+      days: [
+        {
+          day: 1,
+          date: '2026-10-09',
+          timezone: 'America/Phoenix',
+          departure_time: '09:00:00',
+          checkpoints: [
+            { id: '1', name: 'Stop 1', lat: 34.0, lng: -111.0, target_time: '10:00:00' },
+            { id: '2', name: 'Stop 2', lat: 34.1, lng: -111.0, target_time: '11:00:00' },
+            { id: '3', name: 'Unrouted Stop', lat: 34.2, lng: -111.0 }, // no target_time
+          ],
+        },
+      ],
+    };
+
+    const parsed = parseItineraryJson(tripWithUnrouted);
+    const serialized = serializeTripToItineraryJson(parsed, { preserveTargetTimes: true });
+    const cps = (serialized as { days: Array<{ checkpoints: Array<{ target_time?: string }> }> }).days[0].checkpoints;
+    expect(cps[0].target_time).toBe('10:00:00');
+    expect(cps[1].target_time).toBe('11:00:00');
+    expect(cps[2].target_time).toBeUndefined();
+  });
 });

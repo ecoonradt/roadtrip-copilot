@@ -274,7 +274,10 @@ export function App() {
       return;
     }
 
+    const currentDayIdx = activeDayIndex;
+    const currentCoordKey = coordKey;
     let isSubscribed = true;
+
     const updateRoute = async () => {
       setIsLoadingRoute(true);
       setRouteError(null);
@@ -285,6 +288,43 @@ export function App() {
         if (isSubscribed) {
           setRoute(routeData);
         }
+
+        // Regardless of active day tab, commit the resolved road cascade to this day's waypoints
+        setTrip((prevTrip) => {
+          const targetDay = prevTrip.days[currentDayIdx];
+          if (!targetDay) return prevTrip;
+          const targetCoordKey = (targetDay.waypoints || []).map((w) => `${w.lat.toFixed(6)},${w.lng.toFixed(6)}`).join(';');
+          if (targetCoordKey !== currentCoordKey) return prevTrip;
+
+          const durations = routeData.legs?.map((l) => l.durationSeconds);
+          const distances = routeData.legs?.map((l) => l.distanceMiles);
+          const isAdHocDay = targetDay.isAdHoc || prevTrip.isAdHoc;
+
+          const cascade = calculateTimelineCascade({
+            baseDate: targetDay.date,
+            departureTime: targetDay.departureTime || '09:00:00',
+            waypoints: targetDay.waypoints,
+            driveDurationsSeconds: durations,
+            driveDistancesMiles: distances,
+            isAdHoc: isAdHocDay,
+          });
+
+          const updatedWaypoints = targetDay.waypoints.map((w, idx) => {
+            const stop = cascade.stops[idx];
+            return {
+              ...w,
+              target_time: isAdHocDay ? undefined : (stop?.arrivalTime || w.target_time),
+              offset_minutes_from_start: stop?.offsetMinutesFromStart ?? w.offset_minutes_from_start,
+            };
+          });
+
+          const nextDays = [...prevTrip.days];
+          nextDays[currentDayIdx] = {
+            ...targetDay,
+            waypoints: updatedWaypoints,
+          };
+          return { ...prevTrip, days: nextDays };
+        });
       } catch (err: unknown) {
         if (isSubscribed) {
           const msg = err instanceof Error ? err.message : 'Failed to calculate route';
@@ -303,7 +343,7 @@ export function App() {
     return () => {
       isSubscribed = false;
     };
-  }, [coordKey, isInitializing]);
+  }, [coordKey, isInitializing, activeDayIndex]);
 
   // Extract pairwise driving durations and distances from OSRM route
   const { driveDurationsSeconds, driveDistancesMiles } = useMemo(() => {
@@ -426,13 +466,14 @@ export function App() {
       type: resolvedType,
       lat: result.lat,
       lng: result.lng,
+      timezone: currentDay.timezone || 'America/Phoenix',
       dwell_minutes: defaultDwell,
       trigger_radius_miles: 2.0,
       ...(result.placeName ? { place_name: result.placeName } : {}),
       ...(result.address ? { address: result.address } : {}),
     };
     updateCurrentDayWaypoints([...waypoints, newWaypoint]);
-  }, [updateCurrentDayWaypoints, waypoints]);
+  }, [updateCurrentDayWaypoints, waypoints, currentDay.timezone]);
 
   const handleMapClick = useCallback((lat: number, lng: number) => {
     const isFirstStop = waypoints.length === 0;
@@ -443,11 +484,12 @@ export function App() {
       type: isFirstStop ? 'origin' : 'scenic_pull_off',
       lat,
       lng,
+      timezone: currentDay.timezone || 'America/Phoenix',
       dwell_minutes: isFirstStop ? 0 : 15,
       trigger_radius_miles: 2.0,
     };
     updateCurrentDayWaypoints([...waypoints, newWaypoint]);
-  }, [updateCurrentDayWaypoints, waypoints]);
+  }, [updateCurrentDayWaypoints, waypoints, currentDay.timezone]);
 
   const handleDeleteWaypoint = useCallback((id: string) => {
     updateCurrentDayWaypoints(waypoints.filter((w) => w.id !== id));
