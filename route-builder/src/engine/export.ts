@@ -150,7 +150,7 @@ export function formatCheckpointV2(
     trigger_radius_miles: normalizeTriggerRadius(item.trigger_radius_miles),
   };
 
-  const isRelativeAdHoc = targetTime && (/^\+\d+h/i.test(targetTime) || targetTime === 'Start');
+  const isRelativeAdHoc = targetTime && (/^\+\d+[hm]/i.test(targetTime) || targetTime === 'Start');
   if (targetTime && !options?.omitTargetTime && !isRelativeAdHoc) {
     checkpoint.target_time = targetTime;
   }

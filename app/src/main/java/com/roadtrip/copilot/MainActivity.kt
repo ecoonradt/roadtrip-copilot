@@ -152,7 +152,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val permissionLauncher = registerForActivityResult(
+    private val permissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>> = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineLocation = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
@@ -165,13 +165,27 @@ class MainActivity : AppCompatActivity() {
             appendLog("Notice: Notification permission not granted. Heads-up cards will be disabled.")
         }
 
-        if (fineLocation || coarseLocation) {
-            appendLog("Location permission granted.")
+        if (fineLocation) {
+            appendLog("Precise location permission granted.")
             startCopilotService()
+        } else if (coarseLocation) {
+            appendLog("Notice: Only approximate location granted. Precise GPS is required for waypoint tracking.")
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("Precise Location Required")
+                .setMessage("Roadtrip Co-Pilot requires precise (fine) GPS location to trigger waypoint alerts along your route. Approximate location cannot accurately track road coordinates.")
+                .setPositiveButton("Grant Precise Location") { _, _ ->
+                    requestFineLocation()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         } else {
             Toast.makeText(this, "Location permission is required for GPS tracking.", Toast.LENGTH_LONG).show()
             appendLog("Error: Location permission denied.")
         }
+    }
+
+    private fun requestFineLocation() {
+        permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
     }
 
     private fun startQrScanner() {
@@ -342,8 +356,8 @@ class MainActivity : AppCompatActivity() {
                     .trim('_')
                     .takeIf { it.isNotBlank() }
 
-                val rawName = if (fileName.isBlank() || fileName == "scanned_itinerary.json") {
-                    sanitizedTripName?.let { "$it.json" } ?: "scanned_itinerary.json"
+                val rawName = if (fileName.isBlank() || fileName == "scanned_itinerary.json" || fileName == "imported_trip.json") {
+                    sanitizedTripName?.let { "$it.json" } ?: fileName.ifBlank { "imported_trip.json" }
                 } else {
                     fileName
                 }
@@ -372,6 +386,16 @@ class MainActivity : AppCompatActivity() {
                         targetFile.writeText(jsonContent, Charsets.UTF_8)
                         tempFile.delete()
                     }
+
+                    // Clear any persisted visited state for this route file so re-imported routes start fresh
+                    val locPrefs = getSharedPreferences("copilot_location_prefs", Context.MODE_PRIVATE)
+                    val allKeys = locPrefs.all.keys.filter { it.contains(targetFile.name) }
+                    if (allKeys.isNotEmpty()) {
+                        val editor = locPrefs.edit()
+                        allKeys.forEach { editor.remove(it) }
+                        editor.apply()
+                    }
+
                     val updatedRoutes = repo.refreshRoutes()
                     updatedRoutes.find { it.routeFile == targetFile.name }
                 }
@@ -520,18 +544,6 @@ class MainActivity : AppCompatActivity() {
         if (file.isNotBlank()) {
             val trip = tripGroups.find { it.routeFile == file }
             if (trip != null) {
-                // If co-pilot is idle and trip is multi-day, auto-select today's day if matched (Finding 8)
-                if (!CopilotService.isRunning.value && trip.days.size > 1) {
-                    val todayIso = java.time.LocalDate.now().toString()
-                    val todayDay = trip.days.find { it.date == todayIso }
-                    if (todayDay != null && todayDay.dayNumber != day) {
-                        CopilotService.setSelectedRoute(this@MainActivity, file, todayDay.dayNumber)
-                        Toast.makeText(this@MainActivity, "Auto-switched to Day ${todayDay.dayNumber} for today", Toast.LENGTH_SHORT).show()
-                        appendLog("Auto-selected Day ${todayDay.dayNumber} based on today's date ($todayIso)")
-                        return
-                    }
-                }
-
                 binding.tvActiveRouteTitle.text = trip.title
                 binding.tvActiveRouteSubtitle.text = "${trip.routeFile} • ${trip.days.size} Day${if (trip.days.size > 1) "s" else ""}"
                 if (trip.days.size > 1) {
@@ -649,7 +661,7 @@ class MainActivity : AppCompatActivity() {
             .setMessage("Are you sure you want to remove \"${trip.title}\" (${trip.routeFile})? This will delete the file from your device.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
-                if (CopilotService.isRunning.value) {
+                if (CopilotService.isRunning.value && trip.routeFile == CopilotService.activeRouteFile.value) {
                     stopCopilotService()
                 }
 
@@ -734,6 +746,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 checkPermissionsAndStart()
             }
+        }
+
+        binding.btnResetProgress.setOnClickListener {
+            CopilotService.resetProgress(this)
+            Toast.makeText(this, "Route progress reset to departure", Toast.LENGTH_SHORT).show()
+            appendLog("Route progress reset to departure.")
         }
 
         binding.btnTestAudio.setOnClickListener {

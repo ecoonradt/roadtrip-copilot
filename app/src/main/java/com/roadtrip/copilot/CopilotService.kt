@@ -42,8 +42,10 @@ class CopilotService : Service() {
         private val _telemetryFlow = MutableStateFlow<EvaluationResult?>(null)
         val telemetryFlow = _telemetryFlow.asStateFlow()
 
-        private val _eventLogFlow = MutableSharedFlow<String>(replay = 5)
+        private val _eventLogFlow = MutableSharedFlow<String>(replay = 1)
         val eventLogFlow = _eventLogFlow.asSharedFlow()
+
+        const val ACTION_RESET_PROGRESS = "com.roadtrip.copilot.RESET_PROGRESS"
 
         private val _activeRouteTitle = MutableStateFlow("No Route Loaded")
         val activeRouteTitle = _activeRouteTitle.asStateFlow()
@@ -239,6 +241,34 @@ class CopilotService : Service() {
             }
             context.startService(intent)
         }
+
+        fun resetProgress(context: Context) {
+            val service = instance
+            if (service != null) {
+                service.resetProgress()
+            } else {
+                val file = _activeRouteFile.value
+                val day = _activeDayNumber.value
+                if (file.isNotBlank()) {
+                    val routeId = "${file}_day_${day}"
+                    context.getSharedPreferences("copilot_location_prefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .remove("visited_$routeId")
+                        .remove("visited_${routeId}_ts")
+                        .apply()
+                }
+                val firstCp = _activeCheckpoints.value.firstOrNull()
+                _telemetryFlow.value = EvaluationResult(
+                    currentLat = 0.0,
+                    currentLng = 0.0,
+                    speedMph = 0.0,
+                    alerts = emptyList(),
+                    nextCheckpoint = firstCp,
+                    distanceToNextMiles = null,
+                    scheduleDelta = com.roadtrip.copilot.model.ScheduleDelta(0, "Awaiting Departure", true)
+                )
+            }
+        }
     }
 
     private val binder = LocalBinder()
@@ -247,6 +277,7 @@ class CopilotService : Service() {
     private lateinit var notificationEngine: NotificationEngine
     private lateinit var audioDuckEngine: AudioDuckEngine
     private lateinit var locationTracker: LocationTracker
+    private var lastForegroundNotificationKey: String? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): CopilotService = this@CopilotService
@@ -269,13 +300,24 @@ class CopilotService : Service() {
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
         audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", true)
 
-        locationTracker = LocationTracker(this) { evalResult ->
-            handleEvaluationResult(evalResult)
-        }
+        locationTracker = LocationTracker(
+            context = this,
+            onError = { errMsg ->
+                emitLog("Location Error: $errMsg")
+            },
+            onEvaluationResult = { evalResult ->
+                handleEvaluationResult(evalResult)
+            }
+        )
     }
 
     fun setPauseMusicInsteadOfDuck(pause: Boolean) {
         audioDuckEngine.pauseMusicInsteadOfDuck = pause
+    }
+
+    fun resetProgress() {
+        locationTracker.resetProgress()
+        emitLog("Route progress reset to departure.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -284,6 +326,11 @@ class CopilotService : Service() {
 
         if (action == ACTION_STOP) {
             stopCopilot()
+            return START_NOT_STICKY
+        }
+
+        if (action == ACTION_RESET_PROGRESS) {
+            resetProgress()
             return START_NOT_STICKY
         }
 
@@ -320,10 +367,20 @@ class CopilotService : Service() {
             .putInt(PREF_DAY_NUMBER, dayNumber)
             .apply()
 
-        startForegroundServiceWithNotification()
-        loadItineraryAndStart(routeFile, dayNumber)
-
-        return START_STICKY
+        try {
+            startForegroundServiceWithNotification()
+            loadItineraryAndStart(routeFile, dayNumber)
+            return START_STICKY
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground service (background restriction): ${e.message}", e)
+            emitLog("Error restarting co-pilot in background: ${e.message}")
+            notificationEngine.postResumeNotification(
+                title = "Co-Pilot Paused",
+                message = "Tap to resume road trip co-pilot tracking."
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        }
     }
 
     private fun startForegroundServiceWithNotification() {
@@ -388,15 +445,21 @@ class CopilotService : Service() {
         val targetTime = result.nextCheckpoint?.formattedTargetTime
         val pace = result.scheduleDelta?.statusText ?: "On Schedule"
 
-        val updatedNotification = notificationEngine.buildForegroundNotification(
-            nextCheckpoint = nextCpName,
-            distanceMiles = dist,
-            targetTime = targetTime,
-            paceStatus = pace
-        )
+        val distStr = dist?.let { (Math.round(it * 10.0) / 10.0).toString() } ?: "null"
+        val notificationKey = "$nextCpName|$distStr|$targetTime|$pace"
 
-        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-        notificationManager.notify(NotificationEngine.FOREGROUND_NOTIFICATION_ID, updatedNotification)
+        if (notificationKey != lastForegroundNotificationKey) {
+            lastForegroundNotificationKey = notificationKey
+            val updatedNotification = notificationEngine.buildForegroundNotification(
+                nextCheckpoint = nextCpName,
+                distanceMiles = dist,
+                targetTime = targetTime,
+                paceStatus = pace
+            )
+
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            notificationManager.notify(NotificationEngine.FOREGROUND_NOTIFICATION_ID, updatedNotification)
+        }
 
         // Process triggered geofence alerts
         for (alert in result.alerts) {

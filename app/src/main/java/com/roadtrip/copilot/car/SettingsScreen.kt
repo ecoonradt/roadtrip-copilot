@@ -72,13 +72,26 @@ class SettingsScreen(carContext: CarContext) : Screen(carContext) {
                 .build()
         )
 
-        // 6. Select Route / Day
+        // 5. Select Route / Day
         listBuilder.addItem(
             Row.Builder()
                 .setTitle("Select Route / Day")
                 .addText("Switch itinerary leg or choose test route")
                 .setOnClickListener {
                     screenManager.push(RouteListScreen(carContext))
+                }
+                .build()
+        )
+
+        // 6. Reset Route Progress
+        listBuilder.addItem(
+            Row.Builder()
+                .setTitle("Reset Route Progress")
+                .addText("Clear visited waypoints and restart route from departure")
+                .setOnClickListener {
+                    CopilotService.resetProgress(carContext)
+                    carContext.getCarService(androidx.car.app.AppManager::class.java)
+                        .showToast("Route progress reset to departure", androidx.car.app.CarToast.LENGTH_SHORT)
                 }
                 .build()
         )

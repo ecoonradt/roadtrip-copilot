@@ -98,7 +98,35 @@ class NotificationEngine(private val context: Context) {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
             .build()
+    }
+
+    /**
+     * Posts a notification requesting the user to tap to resume tracking when background start is restricted.
+     */
+    fun postResumeNotification(title: String, message: String) {
+        val resumeIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("action", "start_route")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            1002,
+            resumeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_STATUS_ID)
+            .setSmallIcon(R.drawable.ic_copilot)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        notificationManager.notify(1002, notification)
     }
 
     /**

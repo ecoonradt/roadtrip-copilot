@@ -488,4 +488,85 @@ class LocationTrackerLoopRouteTest {
 
         tracker1.clearVisitedState(routeId)
     }
+
+    @Test
+    fun testReRunningCompletedRouteAutoResets() {
+        val routeId = "test_completed_route_run"
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+        tracker.clearVisitedState(routeId)
+
+        val startTime = System.currentTimeMillis()
+        tracker.setCheckpoints(loopCheckpoints, startTime, routeIdentifier = routeId)
+
+        // Complete the entire route: origin -> cumberland -> haswell -> boght -> dest
+        tracker.evaluate(42.65260, -73.75620, 0.0) // origin
+        tracker.evaluate(42.7402, -73.7355, 15.0)    // cumberland
+        tracker.evaluate(42.7483, -73.7274, 25.0)    // haswell
+        tracker.evaluate(42.7365, -73.7129, 25.0)    // boght
+        tracker.evaluate(42.65260, -73.75620, 0.0) // dest
+
+        // Now all checkpoints are visited
+        assertNull(lastResult!!.nextCheckpoint)
+
+        // Simulate re-running the route later (e.g. mock test or driving the loop again)
+        val secondTracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+        secondTracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis(), routeIdentifier = routeId, restorePersisted = true)
+
+        // Should have auto-reset because all checkpoints were previously visited!
+        assertEquals("origin_home", lastResult!!.nextCheckpoint?.id)
+        assertEquals("Awaiting Departure", lastResult!!.scheduleDelta?.statusText)
+
+        secondTracker.clearVisitedState(routeId)
+    }
+
+    @Test
+    fun testExpiredVisitedStateClearsAutomatically() {
+        val routeId = "test_expired_route_run"
+        val prefs = context.getSharedPreferences("copilot_location_prefs", Context.MODE_PRIVATE)
+
+        // Write a visited set with timestamp 13 hours in the past
+        val thirteenHoursAgo = System.currentTimeMillis() - (13 * 60 * 60 * 1000L)
+        prefs.edit()
+            .putStringSet("visited_$routeId", setOf("origin_home", "cumberland_farms"))
+            .putLong("visited_${routeId}_ts", thirteenHoursAgo)
+            .apply()
+
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+        tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis(), routeIdentifier = routeId, restorePersisted = true)
+
+        // Expired visited state must be cleared: starts fresh at origin_home
+        assertEquals("origin_home", lastResult!!.nextCheckpoint?.id)
+        assertEquals("Awaiting Departure", lastResult!!.scheduleDelta?.statusText)
+
+        tracker.clearVisitedState(routeId)
+    }
+
+    @Test
+    fun testResetProgressExplicitCall() {
+        val routeId = "test_reset_progress_call"
+        val tracker = LocationTracker(context) { result ->
+            lastResult = result
+        }
+        tracker.clearVisitedState(routeId)
+
+        tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis(), routeIdentifier = routeId)
+        tracker.evaluate(42.65260, -73.75620, 0.0) // origin
+        tracker.evaluate(42.7402, -73.7355, 15.0)    // cumberland
+
+        assertEquals("haswell_rd", lastResult!!.nextCheckpoint?.id)
+
+        // Explicitly reset progress
+        tracker.resetProgress()
+
+        assertEquals("origin_home", lastResult!!.nextCheckpoint?.id)
+        assertEquals("Awaiting Departure", lastResult!!.scheduleDelta?.statusText)
+
+        tracker.clearVisitedState(routeId)
+    }
 }

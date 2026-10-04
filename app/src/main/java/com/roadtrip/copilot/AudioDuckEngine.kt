@@ -24,6 +24,7 @@ class AudioDuckEngine(
 
     private var currentFocusRequest: AudioFocusRequest? = null
     private var currentFocusGain: Int? = null
+    @Volatile
     private var activeUtteranceId: String? = null
 
     companion object {
@@ -43,12 +44,6 @@ class AudioDuckEngine(
                 isTtsReady = true
                 applyCurrentAudioAttributes()
                 Log.i(TAG, "Offline TextToSpeech initialized successfully.")
-
-                // Flush any speech that was requested before TTS finished initializing
-                while (pendingSpeechQueue.isNotEmpty()) {
-                    val queued = pendingSpeechQueue.removeFirst()
-                    speakWithDucking(queued)
-                }
             }
 
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -89,6 +84,17 @@ class AudioDuckEngine(
                     }
                 }
             })
+
+            // Flush any speech that was requested before TTS finished initializing
+            if (isTtsReady) {
+                var first = true
+                while (pendingSpeechQueue.isNotEmpty()) {
+                    val queued = pendingSpeechQueue.removeFirst()
+                    val mode = if (first) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                    speakWithDucking(queued, mode)
+                    first = false
+                }
+            }
         } else {
             Log.e(TAG, "TTS initialization failed with status: $status")
         }

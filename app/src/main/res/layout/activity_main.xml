@@ -350,24 +350,45 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Primary Drive Action Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnToggleService"
+        <!-- Primary Drive Action Buttons -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="56dp"
+            android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:backgroundTint="@color/accent"
-            android:text="@string/btn_start"
-            android:textAllCaps="false"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:textColor="@color/bg_dark"
-            android:textSize="17sp"
-            android:textStyle="bold"
-            app:icon="@drawable/ic_navigation"
-            app:iconGravity="textStart"
-            app:iconTint="@color/bg_dark"
-            app:cornerRadius="14dp" />
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnToggleService"
+                android:layout_width="0dp"
+                android:layout_height="56dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/accent"
+                android:text="@string/btn_start"
+                android:textAllCaps="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/bg_dark"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                app:icon="@drawable/ic_navigation"
+                app:iconGravity="textStart"
+                app:iconTint="@color/bg_dark"
+                app:cornerRadius="14dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnResetProgress"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:layout_marginStart="8dp"
+                android:text="Reset"
+                android:textAllCaps="false"
+                android:textColor="@color/text_light"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                app:strokeColor="#475569"
+                app:cornerRadius="14dp" />
+        </LinearLayout>
 
         <!-- In-Car Audio & Calibration (Collapsible) -->
         <com.google.android.material.card.MaterialCardView

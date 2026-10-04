@@ -19,8 +19,14 @@ import kotlin.math.sqrt
 
 class LocationTracker(
     private val context: Context,
+    private val onError: ((String) -> Unit)? = null,
     private val onEvaluationResult: (EvaluationResult) -> Unit
 ) : LocationListener {
+
+    constructor(
+        context: Context,
+        onEvaluationResult: (EvaluationResult) -> Unit
+    ) : this(context, null, onEvaluationResult)
 
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var activeCheckpoints: List<Checkpoint> = emptyList()
@@ -34,23 +40,66 @@ class LocationTracker(
     companion object {
         private const val TAG = "LocationTracker"
         private const val EARTH_RADIUS_MILES = 3958.8
+        private const val VISITED_EXPIRY_MS = 12 * 60 * 60 * 1000L // 12 hours
     }
 
     private fun persistVisited() {
         val routeKey = currentRouteId ?: return
-        locationPrefs.edit().putStringSet("visited_$routeKey", visitedCheckpoints.toSet()).apply()
+        locationPrefs.edit()
+            .putStringSet("visited_$routeKey", visitedCheckpoints.toSet())
+            .putLong("visited_${routeKey}_ts", System.currentTimeMillis())
+            .apply()
     }
 
     private fun loadPersistedVisited(routeKey: String): Set<String> {
+        val savedTs = locationPrefs.getLong("visited_${routeKey}_ts", 0L)
+        val now = System.currentTimeMillis()
+        if (savedTs > 0 && (now - savedTs) > VISITED_EXPIRY_MS) {
+            Log.i(TAG, "Persisted visited state for $routeKey expired (>12h). Clearing.")
+            clearVisitedState(routeKey)
+            return emptySet()
+        }
         return locationPrefs.getStringSet("visited_$routeKey", emptySet()) ?: emptySet()
     }
 
     fun clearVisitedState(routeIdentifier: String? = null) {
         val key = routeIdentifier ?: currentRouteId
         if (key != null) {
-            locationPrefs.edit().remove("visited_$key").apply()
+            locationPrefs.edit()
+                .remove("visited_$key")
+                .remove("visited_${key}_ts")
+                .apply()
         }
         visitedCheckpoints.clear()
+    }
+
+    fun resetProgress() {
+        clearVisitedState()
+        lastVisitedPace = ScheduleDelta(0, "Awaiting Departure", true)
+        val lastKnown = try {
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        } catch (e: SecurityException) {
+            null
+        }
+
+        if (lastKnown != null) {
+            val speedMph = if (lastKnown.hasSpeed()) lastKnown.speed * 2.23694 else 0.0
+            evaluate(lastKnown.latitude, lastKnown.longitude, speedMph)
+        } else {
+            val firstCp = activeCheckpoints.firstOrNull()
+            onEvaluationResult(
+                EvaluationResult(
+                    currentLat = 0.0,
+                    currentLng = 0.0,
+                    speedMph = 0.0,
+                    alerts = emptyList(),
+                    nextCheckpoint = firstCp,
+                    distanceToNextMiles = null,
+                    scheduleDelta = lastVisitedPace
+                )
+            )
+        }
     }
 
     fun setCheckpoints(
@@ -65,7 +114,11 @@ class LocationTracker(
 
         if (restorePersisted && routeIdentifier != null) {
             val restored = loadPersistedVisited(routeIdentifier)
-            if (restored.isNotEmpty()) {
+            val allIds = checkpoints.map { it.id }.toSet()
+            if (restored.isNotEmpty() && allIds.isNotEmpty() && restored.containsAll(allIds)) {
+                Log.i(TAG, "All checkpoints for $routeIdentifier were already visited. Resetting for new run.")
+                clearVisitedState(routeIdentifier)
+            } else if (restored.isNotEmpty()) {
                 visitedCheckpoints.addAll(restored)
                 Log.i(TAG, "Restored ${restored.size} visited checkpoints from storage for $routeIdentifier.")
             }
@@ -134,10 +187,14 @@ class LocationTracker(
                 isTracking = true
                 Log.i(TAG, "Network Provider fallback tracking started.")
             } else {
-                Log.e(TAG, "No location provider enabled.")
+                val errorMsg = "No location provider enabled on device. Turn on GPS/Location."
+                Log.e(TAG, errorMsg)
+                onError?.invoke(errorMsg)
             }
         } catch (e: SecurityException) {
-            Log.e(TAG, "Location permission missing: ${e.message}")
+            val errorMsg = "Precise location permission missing: ${e.message}"
+            Log.e(TAG, errorMsg)
+            onError?.invoke(errorMsg)
         }
     }
 

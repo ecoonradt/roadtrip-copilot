@@ -16,7 +16,7 @@ import java.io.InputStreamReader
  * Repository responsible for discovering, caching, loading, and managing road trip itineraries.
  *
  * Scans internal and external app storage directories for user-imported custom `.json` itineraries,
- * while preserving the 6 bundled asset itineraries as permanent fallback defaults.
+ * while discovering any bundled asset itineraries as fallback options.
  *
  * All disk I/O and JSON deserialization are strictly dispatched to [Dispatchers.IO] to guarantee
  * zero main-thread blocking.
@@ -327,10 +327,6 @@ class RouteRepository(
         return results
     }
 
-    private fun loadAssetRoutes(): List<RouteOption> {
-        return emptyList()
-    }
-
     private fun logE(tag: String, msg: String, tr: Throwable? = null) {
         logListener?.invoke("ERROR", tag, msg, tr)
         try {
@@ -346,15 +342,6 @@ class RouteRepository(
             android.util.Log.w(tag, msg)
         } catch (e: RuntimeException) {
             println("[$tag] WARN: $msg")
-        }
-    }
-
-    private fun logD(tag: String, msg: String) {
-        logListener?.invoke("DEBUG", tag, msg, null)
-        try {
-            android.util.Log.d(tag, msg)
-        } catch (e: RuntimeException) {
-            println("[$tag] DEBUG: $msg")
         }
     }
 
@@ -393,10 +380,5 @@ class RouteRepository(
         fun setInstanceForTesting(repository: RouteRepository?) {
             instance = repository
         }
-
-        /**
-         * Permanent default route options (empty list when no assets bundled).
-         */
-        val DEFAULT_ASSET_OPTIONS: List<RouteOption> = emptyList()
     }
 }
