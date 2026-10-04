@@ -19,11 +19,13 @@ class NotificationReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
-        val notifId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
+        val notifId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, NotificationEngine.ALERT_NOTIFICATION_ID)
         Log.i(TAG, "Notification action received: $action for notification id: $notifId")
 
         when (action) {
             ACTION_MARK_AS_READ -> {
+                NotificationEngine.cancelAlerts(context, "action_mark_as_read")
+                CopilotService.getInstance()?.cancelAlerts("action_mark_as_read")
                 if (notifId != -1) {
                     NotificationManagerCompat.from(context).cancel(notifId)
                 }
@@ -32,6 +34,8 @@ class NotificationReceiver : BroadcastReceiver() {
                 val remoteInput = RemoteInput.getResultsFromIntent(intent)
                 val replyText = remoteInput?.getCharSequence(KEY_TEXT_REPLY)?.toString()
                 Log.i(TAG, "Android Auto voice reply received: $replyText")
+                NotificationEngine.cancelAlerts(context, "action_reply")
+                CopilotService.getInstance()?.cancelAlerts("action_reply")
                 if (notifId != -1) {
                     NotificationManagerCompat.from(context).cancel(notifId)
                 }

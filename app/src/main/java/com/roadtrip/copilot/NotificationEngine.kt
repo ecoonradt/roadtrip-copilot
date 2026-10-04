@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.CarExtender
 import androidx.core.app.NotificationManagerCompat
@@ -16,14 +17,48 @@ import androidx.core.app.RemoteInput
 class NotificationEngine(private val context: Context) {
 
     companion object {
+        private const val TAG = "NotificationEngine"
         const val CHANNEL_STATUS_ID = "copilot_status_channel"
         const val CHANNEL_ALERT_ID = "copilot_alert_channel_v4"
         const val FOREGROUND_NOTIFICATION_ID = 1001
-        private const val ALERT_NOTIFICATION_ID_BASE = 2000
+        const val ALERT_NOTIFICATION_ID = 2000
+        const val ALERT_NOTIFICATION_ID_LEGACY_MAX = 2049
+        const val ALERT_SHORTCUT_ID = "copilot_alerts"
+
+        /**
+         * Cancels active alert notification and sweeps any leftover legacy rotating alert IDs (2000..2049).
+         */
+        fun cancelAlerts(context: Context, reason: String = "unspecified") {
+            Log.i(TAG, "Cancelling alerts (reason: $reason)")
+            val sysManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            var sweepCount = 0
+            try {
+                val activeNotifs = sysManager?.activeNotifications
+                if (activeNotifs != null) {
+                    for (sbn in activeNotifs) {
+                        if (sbn.id in ALERT_NOTIFICATION_ID..ALERT_NOTIFICATION_ID_LEGACY_MAX) {
+                            sysManager.cancel(sbn.id)
+                            sweepCount++
+                        }
+                    }
+                } else {
+                    sysManager?.cancel(ALERT_NOTIFICATION_ID)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to inspect active notifications: ${e.message}")
+                sysManager?.cancel(ALERT_NOTIFICATION_ID)
+            }
+            // Explicitly ensure stable ID is cancelled even if activeNotifications was empty or uninspected
+            sysManager?.cancel(ALERT_NOTIFICATION_ID)
+            Log.i(TAG, "Alert cancellation complete: swept $sweepCount notifications (reason: $reason)")
+        }
     }
 
     private val notificationManager = NotificationManagerCompat.from(context)
-    private var alertCounter = 0
+
+    fun cancelAlerts(reason: String = "unspecified") {
+        cancelAlerts(context, reason)
+    }
 
     init {
         createNotificationChannels()
@@ -133,7 +168,8 @@ class NotificationEngine(private val context: Context) {
      * Posts a high-priority heads-up card over Google Maps in Android Auto.
      */
     fun postHeadsUpAlert(title: String, message: String) {
-        val alertId = ALERT_NOTIFICATION_ID_BASE + (alertCounter++ % 50)
+        val alertId = ALERT_NOTIFICATION_ID
+        Log.i(TAG, "Posting heads-up alert: \"$title\" (id: $alertId)")
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -221,6 +257,7 @@ class NotificationEngine(private val context: Context) {
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERT_ID)
             .setContentTitle(title)
             .setContentText(message)
+            .setShortcutId(ALERT_SHORTCUT_ID)
             .setStyle(messagingStyle)
             .setSmallIcon(R.drawable.ic_copilot)
             .setContentIntent(pendingIntent)
@@ -239,6 +276,7 @@ class NotificationEngine(private val context: Context) {
             notificationManager.notify(alertId, notification)
         } catch (e: SecurityException) {
             // Handled when POST_NOTIFICATIONS permission not yet granted
+            Log.w(TAG, "SecurityException posting notification: ${e.message}")
         }
     }
 }

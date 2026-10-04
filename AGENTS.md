@@ -45,6 +45,17 @@
   * Actions: Actionable voice `RemoteInput` reply ("Acknowledge") and mark-as-read ("Dismiss") wired to `NotificationReceiver`.
   * Automotive Descriptor: Declared in `res/xml/automotive_app_desc.xml` (`<uses name="notification" />`) and registered via `<meta-data>` in `AndroidManifest.xml`.
   * Channel: `IMPORTANCE_HIGH`, Category: `CATEGORY_MESSAGE`, Extender: `NotificationCompat.CarExtender()`.
+* **Alert Lifecycle Hygiene & Dismissal Engine:**
+  * Uses a single stable alert notification ID (`ALERT_NOTIFICATION_ID = 2000`) so consecutive waypoints update in-place rather than accumulating rotating IDs.
+  * Assigns a stable conversation identity via `setShortcutId("copilot_alerts")` to prevent Gearhead from instantiating isolated conversation tasks for each distinct waypoint title.
+  * Retains `setTimeoutAfter(15000)` as the OS-level backstop to guarantee message cards never linger indefinitely.
+  * Auto-cancel triggers & sweep points:
+    * **Service Start (`onCreate`):** Sweeps any active alerts in the `2000..2049` range (clearing driveway test alerts or leftovers from prior runs).
+    * **Car App Opened (`CopilotCarSession.onCreateScreen`):** Sweeps active alerts so the Car App Library dashboard never competes with an orphaned message card.
+    * **Speech Finished (`UtteranceProgressListener` onDone/onError):** Triggers a delayed auto-dismissal after an 8-second glanceability grace period (`ALERT_DISMISSAL_GRACE_PERIOD_MS = 8000L`).
+    * **New Alert Posted:** Cancels any pending delayed dismissal timers before dispatching the new card and TTS speech.
+    * **Trip Stopped / Service Destroyed (`stopCopilot()`, `onDestroy()`):** Immediately cancels all active alerts.
+    * **User Dismiss / Voice Reply:** Cancels the alert immediately via `NotificationReceiver`.
 * **Required In-Car Device Settings (One-time setup for sideloaded / ADB builds):**
   * Android Auto blocks sideloaded apps by default. In Android Auto settings, unlock Developer Settings (tap Version 10 times) $\to$ open Developer Settings $\to$ check **"Unknown sources"**.
   * Under Android Auto Notification settings: ensure **"Show message notifications"** and **"Show first line of conversations"** are toggled **ON**.

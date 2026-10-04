@@ -14,8 +14,10 @@ import com.roadtrip.copilot.model.Itinerary
 import com.roadtrip.copilot.model.RouteRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -33,6 +35,7 @@ class CopilotService : Service() {
         const val ACTION_TEST_ALERT = "com.roadtrip.copilot.ACTION_TEST_ALERT"
         const val ACTION_TEST_AUDIO = "com.roadtrip.copilot.ACTION_TEST_AUDIO"
         const val ACTION_CALIBRATE_AUDIO = "com.roadtrip.copilot.ACTION_CALIBRATE_AUDIO"
+        const val ALERT_DISMISSAL_GRACE_PERIOD_MS = 8000L
         const val EXTRA_ROUTE_FILE = "extra_route_file"
         const val EXTRA_DAY_NUMBER = "extra_day_number"
 
@@ -279,6 +282,10 @@ class CopilotService : Service() {
     private lateinit var locationTracker: LocationTracker
     private var lastForegroundNotificationKey: String? = null
 
+    private var alertDismissalJob: Job? = null
+    @Volatile
+    private var hasActiveAlert: Boolean = false
+
     inner class LocalBinder : Binder() {
         fun getService(): CopilotService = this@CopilotService
     }
@@ -291,11 +298,19 @@ class CopilotService : Service() {
         Log.i(TAG, "Creating CopilotService...")
 
         notificationEngine = NotificationEngine(this)
-        audioDuckEngine = AudioDuckEngine(this) { isSpeaking, text ->
-            if (isSpeaking) {
-                emitLog("Speaking: \"$text\"")
+        notificationEngine.cancelAlerts("service_created")
+
+        audioDuckEngine = AudioDuckEngine(
+            context = this,
+            onSpeechStatusChanged = { isSpeaking, text ->
+                if (isSpeaking) {
+                    emitLog("Speaking: \"$text\"")
+                }
+            },
+            onSpeechFinished = {
+                handleSpeechFinished()
             }
-        }
+        )
 
         val prefs = getSharedPreferences("copilot_prefs", Context.MODE_PRIVATE)
         audioDuckEngine.pauseMusicInsteadOfDuck = prefs.getBoolean("pref_pause_music", true)
@@ -309,6 +324,30 @@ class CopilotService : Service() {
                 handleEvaluationResult(evalResult)
             }
         )
+    }
+
+    @Synchronized
+    fun cancelPendingAlertDismissal() {
+        alertDismissalJob?.cancel()
+        alertDismissalJob = null
+    }
+
+    @Synchronized
+    fun cancelAlerts(reason: String = "unspecified") {
+        cancelPendingAlertDismissal()
+        hasActiveAlert = false
+        notificationEngine.cancelAlerts(reason)
+    }
+
+    @Synchronized
+    private fun handleSpeechFinished() {
+        if (!hasActiveAlert) return
+        cancelPendingAlertDismissal()
+        alertDismissalJob = serviceScope.launch {
+            delay(ALERT_DISMISSAL_GRACE_PERIOD_MS)
+            hasActiveAlert = false
+            notificationEngine.cancelAlerts("speech_grace_period_expired")
+        }
     }
 
     fun setPauseMusicInsteadOfDuck(pause: Boolean) {
@@ -464,6 +503,8 @@ class CopilotService : Service() {
         // Process triggered geofence alerts
         for (alert in result.alerts) {
             emitLog("Alert: ${alert.title} — ${alert.message}")
+            cancelPendingAlertDismissal()
+            hasActiveAlert = true
             // 1. Android Auto heads-up card
             notificationEngine.postHeadsUpAlert(alert.title, alert.message)
             // 2. Audio Duck speech over car speakers
@@ -485,6 +526,8 @@ class CopilotService : Service() {
     fun testAlert() {
         val currentPace = _telemetryFlow.value?.scheduleDelta?.statusText ?: "On schedule"
         emitLog("Posting Android Auto heads-up card and speaking...")
+        cancelPendingAlertDismissal()
+        hasActiveAlert = true
         notificationEngine.postHeadsUpAlert(
             "Scenic Vista • $currentPace",
             "Approaching Oak Creek Vista pull-off. Android Auto heads-up alert and audio ducking operational."
@@ -508,6 +551,7 @@ class CopilotService : Service() {
     }
 
     private fun stopCopilot() {
+        cancelAlerts("service_stopped")
         locationTracker.stopTracking()
         _isRunning.value = false
         val firstCp = _activeCheckpoints.value.firstOrNull()
@@ -534,6 +578,7 @@ class CopilotService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
+        cancelAlerts("service_destroyed")
         locationTracker.stopTracking()
         audioDuckEngine.shutdown()
         serviceScope.cancel()

@@ -14,7 +14,8 @@ import java.util.UUID
 
 class AudioDuckEngine(
     private val context: Context,
-    private val onSpeechStatusChanged: ((isSpeaking: Boolean, text: String) -> Unit)? = null
+    private val onSpeechStatusChanged: ((isSpeaking: Boolean, text: String) -> Unit)? = null,
+    private val onSpeechFinished: (() -> Unit)? = null
 ) : TextToSpeech.OnInitListener {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -56,6 +57,7 @@ class AudioDuckEngine(
                     if (utteranceId == activeUtteranceId) {
                         abandonFocus()
                         onSpeechStatusChanged?.invoke(false, "")
+                        onSpeechFinished?.invoke()
                     }
                 }
 
@@ -73,6 +75,7 @@ class AudioDuckEngine(
                     if (utteranceId == activeUtteranceId) {
                         abandonFocus()
                         onSpeechStatusChanged?.invoke(false, "")
+                        onSpeechFinished?.invoke()
                     }
                 }
 
@@ -81,6 +84,7 @@ class AudioDuckEngine(
                     if (utteranceId == activeUtteranceId) {
                         abandonFocus()
                         onSpeechStatusChanged?.invoke(false, "")
+                        onSpeechFinished?.invoke()
                     }
                 }
             })
