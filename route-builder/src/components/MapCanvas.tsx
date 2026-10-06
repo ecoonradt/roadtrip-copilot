@@ -266,12 +266,12 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     return route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
   }, [route]);
 
-  // Default center around current waypoints or Arizona / New Mexico corridor
+  // Default center when no waypoints exist: contiguous US overview
   const defaultCenter = useMemo<[number, number]>(() => {
     if (waypoints.length > 0) {
       return [waypoints[0].lat, waypoints[0].lng];
     }
-    return [34.8, -111.8];
+    return [39.8283, -98.5795]; // Geographic center of contiguous US
   }, [waypoints]);
 
   return (
@@ -297,7 +297,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
 
       <MapContainer
         center={defaultCenter}
-        zoom={7}
+        zoom={waypoints.length > 0 ? 7 : 4}
         className="w-full h-full"
         zoomControl={false}
       >

@@ -101,7 +101,7 @@ data class Itinerary(
         val rawCheckpoints = getCheckpointsForDay(dayNumber)
         val day = days?.find { it.day == dayNumber }
         val dateStr = day?.date?.takeIf { it.isNotBlank() } ?: this.date
-        val dayTz = day?.timezone?.takeIf { it.isNotBlank() } ?: this.timezone ?: "America/Phoenix"
+        val dayTz = day?.timezone?.takeIf { it.isNotBlank() } ?: this.timezone?.takeIf { it.isNotBlank() }
 
         val timeFormatter = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US)
         val monthDayTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("MMM d, h:mm a", java.util.Locale.US)
@@ -111,17 +111,19 @@ data class Itinerary(
                 triggerRadiusMiles = cp.effectiveRadiusMiles
             )
 
-            // Per-checkpoint timezone overrides day timezone (critical for cross-timezone days, e.g. AZ -> NM)
+            // Per-checkpoint timezone overrides day timezone (critical for cross-timezone days)
             val cpTz = cp.timezone?.takeIf { it.isNotBlank() } ?: dayTz
-            val zoneId = try {
-                java.time.ZoneId.of(cpTz)
-            } catch (e: Exception) {
-                java.time.ZoneId.systemDefault()
+            val zoneId = cpTz?.let {
+                try {
+                    java.time.ZoneId.of(it)
+                } catch (e: Exception) {
+                    null
+                }
             }
 
             var resolvedSuccessfully = false
 
-            if (!cp.targetTime.isNullOrBlank() && !dateStr.isNullOrBlank()) {
+            if (!cp.targetTime.isNullOrBlank() && !dateStr.isNullOrBlank() && zoneId != null) {
                 // Fixed Itinerary: Parse ISO date + target_time + timezone
                 try {
                     val localDate = java.time.LocalDate.parse(dateStr)
@@ -149,7 +151,8 @@ data class Itinerary(
                 val epoch = tripStartTimeMillis + (cp.offsetMinutesFromStart * 60_000L)
                 resolved.targetEpochMillis = epoch
                 val targetInstant = java.time.Instant.ofEpochMilli(epoch)
-                val targetZoned = targetInstant.atZone(zoneId)
+                val displayZone = zoneId ?: java.time.ZoneId.systemDefault()
+                val targetZoned = targetInstant.atZone(displayZone)
                 resolved.formattedTargetTime = targetZoned.format(timeFormatter)
             }
             resolved

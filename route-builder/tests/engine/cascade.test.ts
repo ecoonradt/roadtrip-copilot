@@ -8,7 +8,6 @@ import {
   getTimezoneDetails,
   haversineMiles,
   estimateDriveDurationSeconds,
-  AZ_NM_LONGITUDE_BOUNDARY,
 } from '../../src/engine/cascade';
 import type { TimelineCascadeWaypoint, TimelineCascadeInput } from '../../src/engine/types';
 

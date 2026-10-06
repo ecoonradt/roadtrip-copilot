@@ -1,6 +1,6 @@
 import type { Waypoint, WaypointType } from '../types/routing';
 import type { ScheduledStop, CoordinateLocation, SchedulingMode } from './types';
-import { detectTimezone } from './cascade';
+import { detectTimezone, DEFAULT_TIMEZONE } from './cascade';
 import { generateGoogleMapsUrls } from './googleMapsUrl';
 
 export interface ItineraryNotificationV2 {
@@ -251,8 +251,10 @@ export function formatMultiDayItinerary(options: FormatMultiDayOptions): MultiDa
     const lastStopName = checkpoints[checkpoints.length - 1]?.name;
 
     const firstCp = checkpoints[0];
-    const inferredDayTz = firstCp ? detectTimezone(firstCp.lat, firstCp.lng) : 'America/Phoenix';
-    const dayTz = dayInput.timezone && dayInput.timezone !== 'America/Phoenix' ? dayInput.timezone : inferredDayTz;
+    const inferredDayTz = firstCp && typeof firstCp.lat === 'number' && typeof firstCp.lng === 'number'
+      ? detectTimezone(firstCp.lat, firstCp.lng)
+      : undefined;
+    const dayTz = (dayInput.timezone && dayInput.timezone.trim()) || inferredDayTz || DEFAULT_TIMEZONE;
 
     const navLocations: CoordinateLocation[] = checkpoints.map((cp) => ({
       lat: cp.lat,
@@ -335,8 +337,10 @@ export function formatSingleRouteItinerary(options: FormatSingleRouteOptions): S
   const lastStopName = checkpoints[checkpoints.length - 1]?.name;
 
   const firstCp = checkpoints[0];
-  const inferredTz = firstCp ? detectTimezone(firstCp.lat, firstCp.lng) : 'America/Phoenix';
-  const resolvedTimezone = options.timezone && options.timezone !== 'America/Phoenix' ? options.timezone : inferredTz;
+  const inferredTz = firstCp && typeof firstCp.lat === 'number' && typeof firstCp.lng === 'number'
+    ? detectTimezone(firstCp.lat, firstCp.lng)
+    : undefined;
+  const resolvedTimezone = (options.timezone && options.timezone.trim()) || inferredTz || DEFAULT_TIMEZONE;
 
   const navLocations: CoordinateLocation[] = checkpoints.map((cp) => ({
     lat: cp.lat,

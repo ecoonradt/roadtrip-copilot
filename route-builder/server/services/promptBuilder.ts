@@ -6,15 +6,13 @@ import type { WaypointContext } from '../types/ai.js';
 export function formatHighwayPronunciation(highway: string): string {
   if (!highway) return '';
   return highway
-    .replace(/\bAZ-(\d+)\b/gi, 'Highway $1')
     .replace(/\bUS-(\d+)([A-Z]?)\b/gi, 'Highway $1$2')
     .replace(/\bI-(\d+)\s*([NSEW])\b/gi, (_m, num, dir) => {
       const dirMap: Record<string, string> = { N: 'North', S: 'South', E: 'East', W: 'West' };
       return `Interstate ${num} ${dirMap[dir.toUpperCase()] || dir}`;
     })
     .replace(/\bI-(\d+)\b/gi, 'Interstate $1')
-    .replace(/\bSR-(\d+)\b/gi, 'State Route $1')
-    .replace(/\bNM-(\d+)\b/gi, 'New Mexico Highway $1');
+    .replace(/\bSR-(\d+)\b/gi, 'State Route $1');
 }
 
 /**

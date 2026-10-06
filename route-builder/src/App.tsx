@@ -13,6 +13,7 @@ import {
   calculateTimelineCascade,
   calculateBackwardSchedule,
   detectTimezone,
+  DEFAULT_TIMEZONE,
 } from './engine/cascade';
 import { generateGoogleMapsUrls } from './engine/googleMapsUrl';
 import type { SchedulingMode, TimelineCascadeResult } from './engine/types';
@@ -488,12 +489,12 @@ export function App() {
         ...waypoint, target_time: undefined, offset_minutes_from_start: undefined,
       });
       const originTz = resolved[0]?.lat !== undefined && resolved[0]?.lng !== undefined
-        ? (resolved[0].timezone || detectTimezone(resolved[0].lat, resolved[0].lng, current.timezone || 'America/Phoenix'))
+        ? (resolved[0].timezone || detectTimezone(resolved[0].lat, resolved[0].lng, current.timezone || DEFAULT_TIMEZONE))
         : current.timezone;
 
       nextDays[activeDayIndex] = {
         ...current,
-        timezone: originTz || current.timezone || 'America/Phoenix',
+        timezone: originTz || current.timezone || DEFAULT_TIMEZONE,
         waypoints: updated,
       };
       return { ...prev, days: nextDays };
@@ -511,7 +512,7 @@ export function App() {
       type: resolvedType,
       lat: result.lat,
       lng: result.lng,
-      timezone: detectTimezone(result.lat, result.lng, currentDay.timezone || 'America/Phoenix'),
+      timezone: detectTimezone(result.lat, result.lng, currentDay.timezone || DEFAULT_TIMEZONE),
       dwell_minutes: defaultDwell,
       trigger_radius_miles: 2.0,
       ...(result.placeName ? { place_name: result.placeName } : {}),
@@ -529,7 +530,7 @@ export function App() {
       type: isFirstStop ? 'origin' : 'scenic_pull_off',
       lat,
       lng,
-      timezone: detectTimezone(lat, lng, currentDay.timezone || 'America/Phoenix'),
+      timezone: detectTimezone(lat, lng, currentDay.timezone || DEFAULT_TIMEZONE),
       dwell_minutes: isFirstStop ? 0 : 15,
       trigger_radius_miles: 2.0,
     };
@@ -549,7 +550,7 @@ export function App() {
           (updates.lat !== undefined || updates.lng !== undefined) &&
           updates.timezone === undefined
         ) {
-          updated.timezone = detectTimezone(updated.lat, updated.lng, updated.timezone || currentDay.timezone || 'America/Phoenix');
+          updated.timezone = detectTimezone(updated.lat, updated.lng, updated.timezone || currentDay.timezone || DEFAULT_TIMEZONE);
         }
         return updated;
       })
@@ -642,7 +643,7 @@ export function App() {
         type: (suggestion.type as WaypointType) || 'scenic_pull_off',
         lat: suggestion.lat,
         lng: suggestion.lng,
-        timezone: detectTimezone(suggestion.lat, suggestion.lng, currentDay.timezone || 'America/Phoenix'),
+        timezone: detectTimezone(suggestion.lat, suggestion.lng, currentDay.timezone || DEFAULT_TIMEZONE),
         dwell_minutes: suggestion.dwell_minutes ?? 15,
         trigger_radius_miles: suggestion.trigger_radius_miles ?? 1.5,
         target_time: '12:00:00',
@@ -767,7 +768,7 @@ export function App() {
           ...d,
           date: isRouteReady ? computedBaseDate : d.date,
           departureTime: isRouteReady ? computedDepartureTime : d.departureTime,
-          timezone: originTz || d.timezone || 'America/Phoenix',
+          timezone: originTz || d.timezone || DEFAULT_TIMEZONE,
           isAdHoc,
           schedulingMode,
           targetArrivalTime: schedulingMode === 'backward' ? targetArrivalTime : d.targetArrivalTime,
@@ -853,7 +854,7 @@ export function App() {
       date: nextDate,
       title: `Day ${nextDayNum}`,
       departureTime: '09:00:00',
-      timezone: lastDay?.timezone || 'America/Phoenix',
+      timezone: lastDay?.timezone || DEFAULT_TIMEZONE,
       schedulingMode: 'forward',
       isAdHoc: false,
       waypoints: initialWps,

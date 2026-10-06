@@ -10,16 +10,12 @@ import type {
 import tzlookup from 'tz-lookup';
 
 /**
- * Approximate Arizona/New Mexico state border, retained for corridor metadata.
- * State borders are not timezone borders: the Navajo Nation observes DST.
- * Timezones must be resolved geographically rather than from this longitude.
+ * Default fallback timezone for the roadtrip co-pilot (uses device timezone or UTC).
  */
-export const AZ_NM_LONGITUDE_BOUNDARY = -109.0452;
-
-/**
- * Default fallback timezone for the roadtrip co-pilot.
- */
-export const DEFAULT_TIMEZONE = 'America/Phoenix';
+export const DEFAULT_TIMEZONE =
+  typeof Intl !== 'undefined' && Intl.DateTimeFormat
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    : 'UTC';
 
 /**
  * Detects timezone based on geographic coordinates or returns the fallback.

@@ -18,6 +18,7 @@ import {
   type ItineraryMetadataSummary,
 } from '../services/api';
 import { parseItineraryJson, type ParsedTrip } from '../engine/itineraryParser';
+import { DEFAULT_TIMEZONE } from '../engine/cascade';
 
 interface RouteSelectorModalProps {
   isOpen: boolean;
@@ -181,7 +182,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
           date: newTripDate,
           title: newTripName.trim() || 'Day 1',
           departureTime: '09:00:00',
-          timezone: 'America/Phoenix',
+          timezone: DEFAULT_TIMEZONE,
           waypoints: [],
         },
       ],

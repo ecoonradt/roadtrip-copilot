@@ -1,5 +1,5 @@
 import type { Waypoint, WaypointType } from '../types/routing';
-import { detectTimezone, calculateTimelineCascade, parseLocalToUtcEpoch } from './cascade';
+import { detectTimezone, calculateTimelineCascade, parseLocalToUtcEpoch, DEFAULT_TIMEZONE } from './cascade';
 import type { ScheduledStop, CoordinateLocation, SchedulingMode } from './types';
 import { generateGoogleMapsUrls } from './googleMapsUrl';
 
@@ -114,8 +114,8 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
       const firstCp = rawCheckpoints[0];
       const inferredTz = firstCp && typeof firstCp.lat === 'number' && typeof firstCp.lng === 'number'
         ? detectTimezone(firstCp.lat, firstCp.lng)
-        : 'America/Phoenix';
-      const tz = typeof d.timezone === 'string' && d.timezone !== 'America/Phoenix' ? d.timezone : inferredTz;
+        : undefined;
+      const tz = typeof d.timezone === 'string' && d.timezone.trim() ? d.timezone.trim() : inferredTz || DEFAULT_TIMEZONE;
 
       const waypoints = rawCheckpoints.map((cp, idx) =>
         convertRawCheckpointToWaypoint(cp, idx, rawCheckpoints.length, tz)
@@ -156,8 +156,8 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     const firstCp = rawCheckpoints[0];
     const inferredTz = firstCp && typeof firstCp.lat === 'number' && typeof firstCp.lng === 'number'
       ? detectTimezone(firstCp.lat, firstCp.lng)
-      : 'America/Phoenix';
-    const tz = typeof data.timezone === 'string' && data.timezone !== 'America/Phoenix' ? data.timezone : inferredTz;
+      : undefined;
+    const tz = typeof data.timezone === 'string' && data.timezone.trim() ? data.timezone.trim() : inferredTz || DEFAULT_TIMEZONE;
     const date = typeof data.date === 'string' ? data.date : new Date().toISOString().slice(0, 10);
 
     const waypoints = rawCheckpoints.map((cp, idx) =>
@@ -423,8 +423,8 @@ function isTargetBeforeDeparture(
   if (!baseDate) {
     return targetTime < departureTime;
   }
-  const tzA = targetTimezone || departureTimezone || 'America/Phoenix';
-  const tzB = departureTimezone || targetTimezone || 'America/Phoenix';
+  const tzA = targetTimezone || departureTimezone || DEFAULT_TIMEZONE;
+  const tzB = departureTimezone || targetTimezone || DEFAULT_TIMEZONE;
   try {
     const epochTarget = parseLocalToUtcEpoch(baseDate, targetTime, tzA);
     const epochDep = parseLocalToUtcEpoch(baseDate, departureTime, tzB);
@@ -497,7 +497,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
       return {
         day: day.dayNumber,
         date: day.date,
-        timezone: day.timezone || 'America/Phoenix',
+        timezone: day.timezone || DEFAULT_TIMEZONE,
         title: day.title,
         origin: day.origin,
         destination: day.destination,
@@ -551,7 +551,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
   const singleDay = trip.days[0] || {
     date: new Date().toISOString().slice(0, 10),
     departureTime: '09:00:00',
-    timezone: 'America/Phoenix',
+    timezone: DEFAULT_TIMEZONE,
     waypoints: [],
   };
 
@@ -586,7 +586,7 @@ export function serializeTripToItineraryJson(trip: ParsedTrip, options?: Seriali
 
   const result: Record<string, unknown> = {
     trip_name: trip.tripName,
-    timezone: singleDay.timezone || 'America/Phoenix',
+    timezone: singleDay.timezone || DEFAULT_TIMEZONE,
     departure_time: singleDay.departureTime,
     ...(singleDay.schedulingMode ? { scheduling_mode: singleDay.schedulingMode } : {}),
     ...(singleDay.targetArrivalTime ? { target_arrival_time: singleDay.targetArrivalTime } : {}),

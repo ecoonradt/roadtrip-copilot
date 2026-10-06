@@ -39,11 +39,10 @@ describe('AI Co-Pilot Prompt Generator', () => {
   });
 
   it('Formats highway pronunciations accurately', () => {
-    expect(formatHighwayPronunciation('AZ-179')).toBe('Highway 179');
+    expect(formatHighwayPronunciation('SR-179')).toBe('State Route 179');
     expect(formatHighwayPronunciation('I-17 N')).toBe('Interstate 17 North');
     expect(formatHighwayPronunciation('I-40 W')).toBe('Interstate 40 West');
     expect(formatHighwayPronunciation('US-89A')).toBe('Highway 89A');
-    expect(formatHighwayPronunciation('NM-64')).toBe('New Mexico Highway 64');
   });
 
   it('Handles missing optional waypoint fields with sensible defaults', () => {
