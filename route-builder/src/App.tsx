@@ -1089,6 +1089,7 @@ export function App() {
           activeDayIndex={activeDayIndex}
           activeDay={currentDay}
           waypoints={waypoints}
+          scheduledStops={cascadeResult.stops}
           scope={scoutScope}
           onChangeScope={setScoutScope}
           onAddWaypoint={handleAddWaypointFromScout}

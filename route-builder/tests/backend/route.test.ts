@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createApp } from '../../server/app.js';
-import { RouteService, OSRM_SPEED_CALIBRATION_FACTOR } from '../../server/services/routeService.js';
+import { RouteService, OSRM_SPEED_CALIBRATION_FACTOR, adjustStepDuration } from '../../server/services/routeService.js';
 import { RouteCache } from '../../server/services/routeCache.js';
 import type { OsrmRawResponse } from '../../server/types/index.js';
 
@@ -252,5 +252,73 @@ describe('OSRM Routing Proxy (/api/routing/route)', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toContain('calibration');
+  });
+
+  describe('North American Statutory Highway Speed Normalization', () => {
+    it('elevates untagged rural US Highway steps (40 mph OSRM default) to statutory 62 mph', () => {
+      // 10 miles at 40.4 mph raw OSRM (~891 seconds)
+      const distMeters = 16093.44; // 10 miles
+      const rawSec = 891; // ~40.4 mph
+      const step = {
+        distance: distMeters,
+        duration: rawSec,
+        ref: 'US 60',
+        name: 'Historic US Route 60',
+      };
+
+      const adjustedSec = adjustStepDuration(step, OSRM_SPEED_CALIBRATION_FACTOR);
+      const adjustedMph = 10 / (adjustedSec / 3600);
+      expect(adjustedMph).toBeCloseTo(62, 0);
+      expect(adjustedSec).toBe(Math.round((10 / 62) * 3600));
+    });
+
+    it('elevates untagged rural State Highway steps across all US states to statutory 58 mph', () => {
+      const stateRefs = ['AZ 260', 'NY 17', 'CA 1', 'TX 130', 'NC 12', 'FL 417', 'WA 20', 'M 28', 'BC 99'];
+
+      stateRefs.forEach((ref) => {
+        const distMeters = 1609.344 * 20; // 20 miles
+        const rawSec = 1782; // ~40.4 mph
+        const step = {
+          distance: distMeters,
+          duration: rawSec,
+          ref,
+          name: 'Highway Segment',
+        };
+
+        const adjustedSec = adjustStepDuration(step, OSRM_SPEED_CALIBRATION_FACTOR);
+        const adjustedMph = 20 / (adjustedSec / 3600);
+        expect(adjustedMph).toBeCloseTo(58, 0);
+      });
+    });
+
+    it('elevates slow Interstate steps to statutory 70 mph', () => {
+      const distMeters = 1609.344 * 15; // 15 miles
+      const rawSec = 1080; // 50 mph
+      const step = {
+        distance: distMeters,
+        duration: rawSec,
+        ref: 'I 40',
+        name: 'Interstate 40',
+      };
+
+      const adjustedSec = adjustStepDuration(step, OSRM_SPEED_CALIBRATION_FACTOR);
+      const adjustedMph = 15 / (adjustedSec / 3600);
+      expect(adjustedMph).toBeCloseTo(70, 0);
+    });
+
+    it('preserves standard baseline calibration for urban, short (<1.5 mi), or local streets', () => {
+      // Short downtown street: 0.5 miles at 25 mph raw
+      const distMeters = 804.672; // 0.5 miles
+      const rawSec = 72; // 25 mph
+      const step = {
+        distance: distMeters,
+        duration: rawSec,
+        ref: '',
+        name: 'Main Street',
+      };
+
+      const adjustedSec = adjustStepDuration(step, 0.77);
+      expect(adjustedSec).toBe(Math.round(72 * 0.77));
+    });
   });
 });

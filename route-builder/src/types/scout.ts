@@ -22,6 +22,10 @@ export interface ScoutWaypointSummary {
   address?: string;
   google_place_id?: string;
   is_route_anchor?: boolean;
+  drive_duration_minutes?: number;
+  drive_distance_miles?: number;
+  drive_speed_mph?: number;
+  timezone?: string;
   notification?: {
     title: string;
     message: string;

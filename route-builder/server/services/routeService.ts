@@ -1,4 +1,4 @@
-import type { OsrmRawResponse, RouteResponse } from '../types/index.js';
+import type { OsrmRawResponse, RouteResponse, OsrmRawStep } from '../types/index.js';
 import { RouteCache, defaultRouteCache } from './routeCache.js';
 
 export const OSRM_BASE_URL = 'https://router.project-osrm.org/route/v1/driving';
@@ -15,6 +15,62 @@ export const OSRM_BASE_URL = 'https://router.project-osrm.org/route/v1/driving';
  * A calibration factor of 0.77 (or ~1.30x speedup) aligns OSRM driving durations with real-world Google Maps telemetry.
  */
 export const OSRM_SPEED_CALIBRATION_FACTOR = 0.77;
+
+/**
+ * Normalizes an individual OSRM step duration using North American statutory highway rules.
+ *
+ * OSRM's public demo server uses the European car.lua profile which:
+ * 1. Multiplies all speeds by speed_reduction = 0.8 (automatic 20% penalty).
+ * 2. Defaults untagged rural highways (common in OpenStreetMap across North America) to conservative
+ *    European rural defaults (primary = 65 km/h / 40.4 mph) rather than North American rural cruising speeds
+ *    (60-65 mph on US highways, 70-75 mph on interstates).
+ *
+ * For designated Interstate, US, and State highway corridors outside of dense urban stop-and-go segments,
+ * this normalizes durations to North American statutory cruising speeds.
+ */
+export function adjustStepDuration(
+  step: OsrmRawStep,
+  baselineCalibration = OSRM_SPEED_CALIBRATION_FACTOR
+): number {
+  const distMeters = step.distance;
+  const distMiles = distMeters / 1609.344;
+  const rawSec = step.duration;
+  if (rawSec <= 0 || distMiles <= 0) return rawSec;
+
+  const rawMph = distMiles / (rawSec / 3600);
+  const ref = (step.ref || '').trim();
+  const name = (step.name || '').trim();
+
+  // All 50 US States, DC, PR, and 10 Canadian provinces/territories
+  const STATE_AND_PROVINCE_CODES =
+    'AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR|AB|BC|MB|NB|NL|NS|ON|PE|QC|SK|YT|NT|NU';
+
+  const isInterstate = /(?:^|[;\s])I[- ]?\d+[A-Z]?\b/i.test(ref) || /\bInterstate\b/i.test(name);
+  const isUsHighway =
+    /(?:^|[;\s])US[- ]?\d+[A-Z]?\b/i.test(ref) || /\b(?:US|U\.S\.)[- ](?:Highway|Route|Hwy)\b/i.test(name);
+  const isStateHighway =
+    new RegExp(`(?:^|[;\\s])(?:${STATE_AND_PROVINCE_CODES}|SR|SH|SP|M|FM|RM)[- ]?\\d+[A-Z]?\\b`, 'i').test(ref) ||
+    /\b(?:State (?:Route|Hwy|Highway|Road)|State Rd|Highway|Hwy|Parkway)\b/i.test(name);
+
+  // For open rural highway stretches (>= 1.5 miles) where OSRM fell back to European defaults:
+  if (distMiles >= 1.5) {
+    if (isInterstate && rawMph < 65) {
+      // Elevate to statutory Interstate cruising speed (70 mph)
+      return Math.round((distMiles / 70) * 3600);
+    }
+    if (isUsHighway && rawMph < 55) {
+      // Elevate to statutory US Highway rural cruising speed (62 mph)
+      return Math.round((distMiles / 62) * 3600);
+    }
+    if (isStateHighway && rawMph < 50) {
+      // Elevate to statutory State Highway cruising speed (58 mph)
+      return Math.round((distMiles / 58) * 3600);
+    }
+  }
+
+  // Non-highway steps, short urban steps (< 1.5 mi), and city intersections use baseline calibration
+  return Math.round(rawSec * baselineCalibration);
+}
 
 export interface CoordinatePair {
   lon: number;
@@ -93,7 +149,7 @@ export class RouteService {
       return cached;
     }
 
-    const url = `${this.baseUrl}/${formattedCoords}?overview=full&geometries=geojson`;
+    const url = `${this.baseUrl}/${formattedCoords}?overview=full&geometries=geojson&steps=true`;
 
     const res = await fetch(url, {
       method: 'GET',
@@ -124,7 +180,10 @@ export class RouteService {
 
     const legs = primaryRoute.legs?.map((leg) => {
       const distMeters = Math.round(leg.distance);
-      const durSec = Math.round(leg.duration * effectiveCalibration);
+      const durSec =
+        leg.steps && leg.steps.length > 0
+          ? leg.steps.reduce((acc, step) => acc + adjustStepDuration(step, effectiveCalibration), 0)
+          : Math.round(leg.duration * effectiveCalibration);
       return {
         distanceMeters: distMeters,
         distanceMiles: Number((distMeters / 1609.344).toFixed(2)),

@@ -33,6 +33,7 @@ import type {
 } from '../types/scout';
 import type { ParsedTrip, ParsedDay } from '../engine/itineraryParser';
 import type { Waypoint, WaypointType } from '../types/routing';
+import type { ScheduledStop } from '../engine/types';
 import type { ScoutPreviewPin } from './MapCanvas';
 import { chatWithScoutStream, fetchScoutQuickPrompts } from '../services/api';
 
@@ -43,6 +44,7 @@ export interface RouteScoutDrawerProps {
   activeDayIndex: number;
   activeDay: ParsedDay;
   waypoints: Waypoint[];
+  scheduledStops?: ScheduledStop[];
   scope: ScoutScope;
   onChangeScope: (newScope: ScoutScope) => void;
   onAddWaypoint: (suggestion: ScoutSuggestion) => void;
@@ -257,6 +259,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   activeDayIndex,
   activeDay,
   waypoints,
+  scheduledStops,
   scope,
   onChangeScope,
   onAddWaypoint,
@@ -564,39 +567,66 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           activeDay.origin && activeDay.destination
             ? `${activeDay.origin} → ${activeDay.destination}`
             : undefined,
-        waypoints: waypoints.map((w) => ({
-          id: w.id,
-          name: w.name,
-          type: w.type,
-          lat: w.lat,
-          lng: w.lng,
-          target_time: w.target_time,
-          dwell_minutes: w.dwell_minutes,
-          trigger_radius_miles: w.trigger_radius_miles,
-          notes: w.notes,
-          place_name: w.place_name,
-          notification: w.notification,
-          address: w.address,
-          google_place_id: w.google_place_id,
-          is_route_anchor: w.is_route_anchor,
-        })),
+        waypoints: waypoints.map((w, idx) => {
+          const stop = scheduledStops?.[idx];
+          const legDriveSec = stop?.driveDurationFromPreviousSeconds ?? 0;
+          const legDistMi = stop?.driveDistanceMilesFromPrevious ?? 0;
+          const driveSpeedMph =
+            legDriveSec > 0 && legDistMi > 0
+              ? Number((legDistMi / (legDriveSec / 3600)).toFixed(1))
+              : undefined;
+
+          return {
+            id: w.id,
+            name: w.name,
+            type: w.type,
+            lat: w.lat,
+            lng: w.lng,
+            target_time: w.target_time,
+            dwell_minutes: w.dwell_minutes,
+            trigger_radius_miles: w.trigger_radius_miles,
+            notes: w.notes,
+            place_name: w.place_name,
+            notification: w.notification,
+            address: w.address,
+            google_place_id: w.google_place_id,
+            is_route_anchor: w.is_route_anchor,
+            drive_duration_minutes: idx === 0 ? 0 : Math.round(legDriveSec / 60),
+            drive_distance_miles: idx === 0 ? 0 : legDistMi,
+            drive_speed_mph: driveSpeedMph,
+            timezone: stop?.timezone || w.timezone,
+          };
+        }),
         focusedWaypoint: focusedWp
-          ? {
-              id: focusedWp.id,
-              name: focusedWp.name,
-              type: focusedWp.type,
-              lat: focusedWp.lat,
-              lng: focusedWp.lng,
-              target_time: focusedWp.target_time,
-              dwell_minutes: focusedWp.dwell_minutes,
-              trigger_radius_miles: focusedWp.trigger_radius_miles,
-              notes: focusedWp.notes,
-              place_name: focusedWp.place_name,
-              notification: focusedWp.notification,
-              address: focusedWp.address,
-              google_place_id: focusedWp.google_place_id,
-              is_route_anchor: focusedWp.is_route_anchor,
-            }
+          ? (() => {
+              const stop = focusedWpIndex >= 0 ? scheduledStops?.[focusedWpIndex] : undefined;
+              const legDriveSec = stop?.driveDurationFromPreviousSeconds ?? 0;
+              const legDistMi = stop?.driveDistanceMilesFromPrevious ?? 0;
+              const driveSpeedMph =
+                legDriveSec > 0 && legDistMi > 0
+                  ? Number((legDistMi / (legDriveSec / 3600)).toFixed(1))
+                  : undefined;
+              return {
+                id: focusedWp.id,
+                name: focusedWp.name,
+                type: focusedWp.type,
+                lat: focusedWp.lat,
+                lng: focusedWp.lng,
+                target_time: focusedWp.target_time,
+                dwell_minutes: focusedWp.dwell_minutes,
+                trigger_radius_miles: focusedWp.trigger_radius_miles,
+                notes: focusedWp.notes,
+                place_name: focusedWp.place_name,
+                notification: focusedWp.notification,
+                address: focusedWp.address,
+                google_place_id: focusedWp.google_place_id,
+                is_route_anchor: focusedWp.is_route_anchor,
+                drive_duration_minutes: focusedWpIndex === 0 ? 0 : Math.round(legDriveSec / 60),
+                drive_distance_miles: focusedWpIndex === 0 ? 0 : legDistMi,
+                drive_speed_mph: driveSpeedMph,
+                timezone: stop?.timezone || focusedWp.timezone,
+              };
+            })()
           : undefined,
         focusedWaypointIndex: focusedWpIndex >= 0 ? focusedWpIndex + 1 : undefined,
         totalWaypoints: waypoints.length,

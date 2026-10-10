@@ -82,17 +82,28 @@ export interface RouteResponse {
   cached?: boolean;
 }
 
+export interface OsrmRawStep {
+  distance: number; // in meters
+  duration: number; // in seconds
+  name?: string;
+  ref?: string;
+  mode?: string;
+}
+
+export interface OsrmRawLeg {
+  distance: number;
+  duration: number;
+  summary?: string;
+  steps?: OsrmRawStep[];
+}
+
 export interface OsrmRawRoute {
   geometry: RouteGeometry;
   distance: number; // in meters
   duration: number; // in seconds
   weight?: number;
   weight_name?: string;
-  legs?: Array<{
-    distance: number;
-    duration: number;
-    summary?: string;
-  }>;
+  legs?: OsrmRawLeg[];
 }
 
 export interface OsrmRawWaypoint {

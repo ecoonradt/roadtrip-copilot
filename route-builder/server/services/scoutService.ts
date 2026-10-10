@@ -32,6 +32,11 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
         contextBlock += `  ${idx + 1}. [${wp.id}] "${wp.name}" (${wp.type}) @ ${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}`;
         if (wp.target_time) contextBlock += ` | Target: ${wp.target_time}`;
         if (wp.dwell_minutes) contextBlock += ` | Dwell: ${wp.dwell_minutes}m`;
+        if (idx > 0 && wp.drive_duration_minutes !== undefined && wp.drive_distance_miles !== undefined) {
+          const mph = wp.drive_speed_mph ? ` @ ${wp.drive_speed_mph} mph` : '';
+          contextBlock += ` | Leg Drive: ${wp.drive_duration_minutes}m, ${wp.drive_distance_miles} mi${mph}`;
+        }
+        if (wp.timezone) contextBlock += ` | TZ: ${wp.timezone}`;
         if (wp.notes) contextBlock += ` | Notes: "${wp.notes}"`;
         if (wp.place_name) contextBlock += ` | PlaceName: "${wp.place_name}"`;
         if (wp.address) contextBlock += ` | Address: "${wp.address}"`;
@@ -67,6 +72,11 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
       }
       if (focused.target_time) contextBlock += `- Scheduled Target Time: ${focused.target_time}\n`;
       if (focused.dwell_minutes !== undefined) contextBlock += `- Planned Dwell Duration: ${focused.dwell_minutes} minutes\n`;
+      if (focused.drive_duration_minutes !== undefined && focused.drive_distance_miles !== undefined) {
+        const mph = focused.drive_speed_mph ? ` (~${focused.drive_speed_mph} mph average speed)` : '';
+        contextBlock += `- Driving Leg from Preceding Stop: ${focused.drive_duration_minutes} min, ${focused.drive_distance_miles} miles${mph}\n`;
+      }
+      if (focused.timezone) contextBlock += `- Local Timezone: ${focused.timezone}\n`;
       if (focused.trigger_radius_miles) contextBlock += `- Heads-Up Alert Radius: ${focused.trigger_radius_miles} miles\n`;
       if (focused.notes) contextBlock += `- Driver Notes: ${focused.notes}\n`;
       if (focused.notification) {
@@ -168,6 +178,10 @@ GUIDELINES:
        - The final stop of a day's driving route is the overnight destination. It does not have a departure time. Preserve dwell_minutes as 0 (overnight) for final lodging stops.
      * KEEP AUDITING FAST & LEAN:
        - You do NOT need to perform forensic sub-meter lane calculations or run loops. Provide an authentic commercial address, recognizable roundabout/junction coordinate, and clean highway placement.
+13. AUDIT LEG DRIVING SPEEDS & OFF-HIGHWAY ANOMALIES:
+   - When evaluating schedules, daylight timing, or answering driver questions about pacing and stops, inspect the "Leg Drive" duration, distance, and average speed (mph) between consecutive waypoints.
+   - Normal highway cruising legs average 50-65 mph.
+   - If a driving leg between highway waypoints shows an unusually low average speed (< 25-30 mph) over a multi-mile distance along an active highway corridor, warn the driver that the preceding or target waypoint is likely misplaced off the highway on unpaved dirt tracks or residential streets rather than on the highway centerline.
 
 JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendations):
 \`\`\`json:suggestions

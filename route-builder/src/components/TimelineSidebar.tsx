@@ -183,6 +183,17 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
   };
 
+  const formatDisplayTime = (timeStr?: string): string => {
+    if (!timeStr || timeStr === 'Start' || timeStr.startsWith('+')) return timeStr || '';
+    const match = timeStr.match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return timeStr;
+    const hours = parseInt(match[1], 10);
+    const minutes = match[2];
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = hours % 12 || 12;
+    return `${hours12}:${minutes} ${ampm}`;
+  };
+
   const handleBatchGenerateAll = async () => {
     if (waypoints.length === 0 || isBatchGenerating) return;
 
@@ -541,34 +552,78 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                           </div>
 
                           {/* Time & Dwell Summary */}
-                          <div className="flex items-center gap-2 mt-1 text-xs text-slate-300">
-                            <div className="flex items-center gap-1 font-mono font-semibold text-slate-200">
-                              <Clock className="w-3 h-3 text-sky-400" />
-                              <span>{stop.arrivalShortTime}</span>
-                              {isLast ? (
-                                <>
-                                  <span className="text-slate-500">&bull;</span>
-                                  <span className="text-amber-300 font-normal whitespace-nowrap">
-                                    {stop.type === 'lodging' ? '🌙 Overnight Stay' : '🏁 Final Stop'}
-                                  </span>
-                                </>
-                              ) : stop.dwell_minutes > 0 ? (
-                                <>
-                                  <span className="text-slate-500">&rarr;</span>
-                                  <span>{stop.departureShortTime}</span>
-                                </>
-                              ) : null}
-                            </div>
+                          {(() => {
+                            const isFixedTime = Boolean(
+                              stop.arrivalShortTime &&
+                                stop.arrivalShortTime !== 'Start' &&
+                                !stop.arrivalShortTime.startsWith('+')
+                            );
 
-                            {!isLast && stop.dwell_minutes > 0 && (
-                              <>
-                                <span className="text-slate-600">&bull;</span>
-                                <span className="text-[11px] text-slate-400 font-mono">
-                                  {stop.dwell_minutes}m dwell
-                                </span>
-                              </>
-                            )}
-                          </div>
+                            return (
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-xs text-slate-300">
+                                <div className="flex items-center gap-1 font-mono text-slate-200">
+                                  <Clock className="w-3 h-3 text-sky-400 shrink-0" />
+                                  {isFixedTime ? (
+                                    isFirst ? (
+                                      <span className="flex items-center gap-1">
+                                        <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                                          Dep
+                                        </span>
+                                        <span className="font-semibold text-slate-100">
+                                          {formatDisplayTime(stop.arrivalShortTime)}
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-1">
+                                        <span
+                                          className={`text-[10px] font-sans font-bold uppercase tracking-wider ${
+                                            isLast ? 'text-emerald-400' : 'text-sky-400'
+                                          }`}
+                                        >
+                                          ETA
+                                        </span>
+                                        <span className="font-semibold text-slate-100">
+                                          {formatDisplayTime(stop.arrivalShortTime)}
+                                        </span>
+                                      </span>
+                                    )
+                                  ) : (
+                                    <span className="font-semibold text-slate-100">
+                                      {stop.arrivalShortTime}
+                                    </span>
+                                  )}
+
+                                  {isLast ? (
+                                    <>
+                                      <span className="text-slate-500">&bull;</span>
+                                      <span className="text-amber-300 font-normal whitespace-nowrap">
+                                        {stop.type === 'lodging' ? '🌙 Overnight Stay' : '🏁 Final Stop'}
+                                      </span>
+                                    </>
+                                  ) : stop.dwell_minutes > 0 ? (
+                                    <>
+                                      <span className="text-slate-500">&rarr;</span>
+                                      {isFixedTime && (
+                                        <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                                          Dep
+                                        </span>
+                                      )}
+                                      <span className="text-slate-300">
+                                        {formatDisplayTime(stop.departureShortTime)}
+                                      </span>
+                                    </>
+                                  ) : null}
+                                </div>
+
+                                {!isLast && stop.dwell_minutes > 0 && (
+                                  <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono">
+                                    <span className="text-slate-600">&bull;</span>
+                                    <span>{stop.dwell_minutes}m dwell</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {/* Co-Pilot Alert Status Tag (if configured) */}
                           {hasActiveAlert && !isEditing && (
