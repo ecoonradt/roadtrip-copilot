@@ -138,16 +138,16 @@ roadtrip-copilot/
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/
-        ├── test/              # JUnit & Robolectric unit tests (RouteRepositoryTest, RouteListScreenTest, ItineraryTest)
+        ├── test/              # JUnit & Robolectric unit tests (RouteRepositoryTest, RouteListScreenTest, ItineraryTest, WaypointRowModelTest)
         └── main/
             ├── AndroidManifest.xml
             ├── res/
-            │   ├── layout/    # Dashboard (activity_main.xml), route library bottom sheet (bottom_sheet_routes.xml, item_route_manage.xml)
+            │   ├── layout/    # Dashboard (activity_main.xml, incl. collapsible read-only Itinerary card), route library bottom sheet (bottom_sheet_routes.xml, item_route_manage.xml), itinerary stop row (item_waypoint_row.xml)
             │   ├── drawable/  # Vector assets
             │   └── xml/
             │       └── automotive_app_desc.xml
             └── java/com/roadtrip/copilot/
-                ├── MainActivity.kt        # Phone dashboard, active route card, route library sheet, SAF import & volume calibration
+                ├── MainActivity.kt        # Phone dashboard, active route card, read-only itinerary progress list, route library sheet, SAF import & volume calibration
                 ├── CopilotService.kt      # Foreground service lifecycle, dynamic route loading & pace telemetry
                 ├── LocationTracker.kt     # Event-driven GPS, sequential progression & pace resolution
                 ├── AudioDuckEngine.kt     # Audio focus, stream routing & TTS manager
@@ -163,6 +163,7 @@ roadtrip-copilot/
                 └── model/
                     ├── RouteRepository.kt # Singleton scanning storage & dynamic ingestion, StateFlow<List<RouteOption>>
                     ├── RouteOption.kt     # Unified route metadata class
+                    ├── WaypointRowModel.kt# Pure presentation mapper for the phone itinerary list (passed/next/upcoming, arrive/stay/depart text)
                     ├── AssetProvider.kt   # Interface abstraction for pure JVM unit testing
                     └── ItineraryModels.kt # Itinerary data classes (V1 & V2 schemas), pace resolution
 ```

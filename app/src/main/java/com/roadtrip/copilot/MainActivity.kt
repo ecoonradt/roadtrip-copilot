@@ -32,13 +32,19 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.roadtrip.copilot.databinding.ActivityMainBinding
 import com.roadtrip.copilot.databinding.BottomSheetRoutesBinding
 import com.roadtrip.copilot.databinding.ItemRouteManageBinding
+import com.roadtrip.copilot.databinding.ItemWaypointRowBinding
 import com.google.gson.Gson
+import com.roadtrip.copilot.model.Checkpoint
 import com.roadtrip.copilot.model.Itinerary
 import com.roadtrip.copilot.model.RouteOption
 import com.roadtrip.copilot.model.RouteRepository
+import com.roadtrip.copilot.model.WaypointRows
+import com.roadtrip.copilot.model.WaypointStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -74,6 +80,9 @@ class MainActivity : AppCompatActivity() {
 
     private var isAudioSetupExpanded = false
     private var isEventLogExpanded = false
+    private var isItineraryExpanded = true
+    private var lastRenderedNextId: String? = null
+    private var hasRenderedItinerary = false
     private var eventCount = 0
 
     private val importLauncher = registerForActivityResult(
@@ -708,6 +717,73 @@ class MainActivity : AppCompatActivity() {
         binding.ivAudioChevron.animate().rotation(if (isAudioSetupExpanded) 180f else 0f).setDuration(200).start()
     }
 
+    private fun toggleItinerary() {
+        isItineraryExpanded = !isItineraryExpanded
+        binding.layoutItineraryBody.visibility = if (isItineraryExpanded) View.VISIBLE else View.GONE
+        binding.ivItineraryChevron.animate().rotation(if (isItineraryExpanded) 180f else 0f).setDuration(200).start()
+    }
+
+    /**
+     * Read-only presentation of the loaded itinerary: arrival, dwell and departure per stop,
+     * with passed / next / upcoming progress derived from the existing telemetry flow.
+     */
+    private fun renderItinerary(checkpoints: List<Checkpoint>, hasTelemetry: Boolean, nextId: String?) {
+        if (checkpoints.isEmpty()) {
+            binding.cardItinerary.visibility = View.GONE
+            hasRenderedItinerary = false
+            return
+        }
+        binding.cardItinerary.visibility = View.VISIBLE
+
+        val rows = WaypointRows.build(checkpoints, nextId, hasTelemetry)
+        binding.tvItineraryProgress.text = if (hasTelemetry) {
+            "${WaypointRows.passedCount(rows)} of ${rows.size} passed"
+        } else {
+            "${rows.size} stops"
+        }
+
+        val container = binding.layoutItineraryBody
+        container.removeAllViews()
+        var nextRowView: View? = null
+        rows.forEach { row ->
+            val rowBinding = ItemWaypointRowBinding.inflate(layoutInflater, container, false)
+            rowBinding.tvWaypointName.text = row.name
+            rowBinding.tvWaypointDetail.text = row.detail
+            rowBinding.tvWaypointDetail.visibility = if (row.detail.isBlank()) View.GONE else View.VISIBLE
+            when (row.status) {
+                WaypointStatus.PASSED -> {
+                    rowBinding.tvWaypointBadge.text = "✓"
+                    rowBinding.tvWaypointBadge.backgroundTintList = ColorStateList.valueOf(getColor(R.color.success))
+                    rowBinding.tvWaypointBadge.setTextColor(getColor(R.color.bg_dark))
+                    rowBinding.layoutWaypointRow.alpha = 0.55f
+                }
+                WaypointStatus.NEXT -> {
+                    rowBinding.tvWaypointBadge.text = row.number.toString()
+                    rowBinding.tvWaypointBadge.backgroundTintList = ColorStateList.valueOf(getColor(R.color.accent))
+                    rowBinding.tvWaypointBadge.setTextColor(getColor(R.color.bg_dark))
+                    rowBinding.layoutWaypointRow.setBackgroundResource(R.drawable.bg_waypoint_next)
+                    rowBinding.tvWaypointNextTag.visibility = View.VISIBLE
+                    nextRowView = rowBinding.root
+                }
+                WaypointStatus.UPCOMING -> {
+                    rowBinding.tvWaypointBadge.text = row.number.toString()
+                    rowBinding.tvWaypointBadge.backgroundTintList = ColorStateList.valueOf(0xFF334155.toInt())
+                    rowBinding.tvWaypointBadge.setTextColor(getColor(R.color.text_light))
+                }
+            }
+            container.addView(rowBinding.root)
+        }
+
+        // After the first render, gently reveal the next stop when progress advances.
+        val advanced = hasRenderedItinerary && nextId != lastRenderedNextId
+        hasRenderedItinerary = true
+        lastRenderedNextId = nextId
+        val target = nextRowView
+        if (advanced && isItineraryExpanded && target != null) {
+            target.post { target.requestRectangleOnScreen(android.graphics.Rect(0, 0, target.width, target.height)) }
+        }
+    }
+
     private fun toggleEventLog() {
         isEventLogExpanded = !isEventLogExpanded
         binding.layoutLogBody.visibility = if (isEventLogExpanded) View.VISIBLE else View.GONE
@@ -725,6 +801,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.layoutAudioHeader.setOnClickListener {
             toggleAudioSetup()
+        }
+
+        binding.layoutItineraryHeader.setOnClickListener {
+            toggleItinerary()
         }
 
         binding.layoutLogHeader.setOnClickListener {
@@ -923,6 +1003,19 @@ class MainActivity : AppCompatActivity() {
                                 binding.tvTargetTime.text = "Target: --"
                             }
                         }
+                    }
+                }
+
+                launch {
+                    combine(
+                        CopilotService.activeCheckpoints,
+                        CopilotService.telemetryFlow
+                            .map { (it != null) to it?.nextCheckpoint?.id }
+                            .distinctUntilChanged()
+                    ) { checkpoints, (hasTelemetry, nextId) ->
+                        Triple(checkpoints, hasTelemetry, nextId)
+                    }.collectLatest { (checkpoints, hasTelemetry, nextId) ->
+                        renderItinerary(checkpoints, hasTelemetry, nextId)
                     }
                 }
 
