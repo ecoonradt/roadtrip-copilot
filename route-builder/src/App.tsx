@@ -6,7 +6,7 @@ import { DayTabBar } from './components/DayTabBar';
 import { RouteSelectorModal } from './components/RouteSelectorModal';
 import { ExportModal } from './components/ExportModal';
 import { RouteScoutDrawer } from './components/RouteScoutDrawer';
-import { fetchRoute, fetchItinerary, saveItinerary, fetchAiStatus } from './services/api';
+import { fetchRoute, fetchItinerary, saveItinerary, fetchAiStatus, generateDayTitle } from './services/api';
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
 import type { ScoutScope, ScoutSuggestion } from './types/scout';
 import {
@@ -698,6 +698,33 @@ export function App() {
     [updateCurrentDayWaypoints, waypoints, currentDay.timezone]
   );
 
+  const handleRenameTrip = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setTrip((prev) => (prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed }));
+  }, []);
+
+  const handleRenameDay = useCallback((index: number, title: string) => {
+    const trimmed = title.trim();
+    setTrip((prev) => {
+      const current = prev.days[index];
+      if (!current || current.title === trimmed) return prev;
+      const nextDays = [...prev.days];
+      nextDays[index] = { ...current, title: trimmed || `Day ${current.dayNumber}` };
+      return { ...prev, days: nextDays };
+    });
+  }, []);
+
+  const handleSuggestDayTitle = useCallback(async (index: number) => {
+    const day = trip.days[index];
+    if (!day || day.waypoints.length === 0) return;
+    const { title } = await generateDayTitle(
+      day.dayNumber,
+      day.waypoints.map((w) => ({ name: w.name, type: w.type }))
+    );
+    handleRenameDay(index, title);
+  }, [trip.days, handleRenameDay]);
+
   const handleSetBaseDate = useCallback((newDate: string) => {
     setTrip((prev) => {
       const nextDays = [...prev.days];
@@ -1014,6 +1041,7 @@ export function App() {
         googleMapsRoute={googleMapsRoute}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         currentTripName={trip.tripName}
+        onRenameTrip={handleRenameTrip}
         onOpenRouteSelector={() => setIsRouteSelectorOpen(true)}
         onSaveTrip={handleSaveTrip}
         isSaving={isSaving}
@@ -1031,6 +1059,9 @@ export function App() {
         onSelectDay={handleSelectDay}
         onAddDay={handleAddDay}
         onDeleteDay={handleDeleteDay}
+        onRenameDay={handleRenameDay}
+        onSuggestDayTitle={handleSuggestDayTitle}
+        aiAvailable={aiAvailable}
       />
 
       {/* Main App Workspace: Left Waypoints Panel + Middle Map Canvas + Right Route Scout */}

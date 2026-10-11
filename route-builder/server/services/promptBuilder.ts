@@ -1,4 +1,4 @@
-import type { WaypointContext } from '../types/ai.js';
+import type { DayTitleContext, WaypointContext } from '../types/ai.js';
 
 /**
  * Phonetic pronunciation hint for highways commonly found in road trip routes.
@@ -98,4 +98,20 @@ Respond in strict JSON with an object where each key is the waypoint ID and the 
     "recommended_trigger_radius_miles": 2.0
   }
 }`;
+}
+
+/**
+ * Builds a prompt asking for a short, descriptive day title based on the actual stops.
+ */
+export function buildDayTitlePrompt(ctx: DayTitleContext): string {
+  const stops = ctx.stops
+    .map((s, i) => `${i + 1}. ${s.name}${s.type ? ` (${s.type})` : ''}`)
+    .join('\n');
+  return [
+    `You name days of a road trip. Write one short, evocative but accurate title for Day ${ctx.dayNumber}, based ONLY on these stops in order:`,
+    stops,
+    '',
+    'Rules: at most 50 characters, no "Day N" prefix, no quotes, mention the start and end area or the highlight of the drive.',
+    'Respond with ONLY JSON: {"title": "..."}',
+  ].join('\n');
 }

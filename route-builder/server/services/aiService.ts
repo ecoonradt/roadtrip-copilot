@@ -6,12 +6,15 @@ import type {
   CopilotAlert,
   GenerateAlertResult,
   BatchAlertResult,
+  DayTitleContext,
+  DayTitleResult,
 } from '../types/ai.js';
 import type { ScoutActivity } from '../types/scout.js';
 
 import {
   buildSingleWaypointPrompt,
   buildBatchWaypointPrompt,
+  buildDayTitlePrompt,
 } from './promptBuilder.js';
 import {
   parseCopilotAlert,
@@ -611,6 +614,43 @@ export class AiService {
       recommended_trigger_radius_miles: templateAlert.recommended_trigger_radius_miles,
       engine: 'template',
     };
+  }
+
+  /**
+   * Suggests a day title from the actual stops (agy -> cloud -> deterministic template).
+   */
+  async generateDayTitle(
+    ctx: DayTitleContext,
+    options: GenerationOptions = {}
+  ): Promise<DayTitleResult> {
+    const apiKey = options.apiKey || this.defaultApiKey;
+    const preferredEngine = options.preferredEngine || 'auto';
+    const prompt = buildDayTitlePrompt(ctx);
+
+    const attempt = async (id: 'agy' | 'cloud', key?: string): Promise<DayTitleResult | null> => {
+      const adapter = this.adapters.get(id);
+      if (!adapter) return null;
+      try {
+        const parsed = parseModelOutput(await adapter.generate(prompt, key));
+        const raw = parsed && typeof parsed === 'object' ? (parsed as { title?: unknown }).title : parsed;
+        const title = typeof raw === 'string' ? raw.replace(/^day\s*\d+\s*[:\-–]\s*/i, '').trim() : '';
+        return title ? { title: title.slice(0, 60), engine: id } : null;
+      } catch {
+        return null;
+      }
+    };
+
+    if (preferredEngine !== 'template' && preferredEngine !== 'cloud') {
+      const r = await attempt('agy');
+      if (r) return r;
+    }
+    if (preferredEngine !== 'template' && apiKey) {
+      const r = await attempt('cloud', apiKey);
+      if (r) return r;
+    }
+    const first = ctx.stops[0]?.name.split(',')[0] || 'Start';
+    const last = ctx.stops[ctx.stops.length - 1]?.name.split(',')[0] || 'End';
+    return { title: `${first} to ${last}`.slice(0, 60), engine: 'template' };
   }
 
   /**

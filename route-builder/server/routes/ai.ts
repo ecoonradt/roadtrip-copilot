@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { AiService, defaultAiService } from '../services/aiService.js';
-import type { WaypointContext, AiEngineType } from '../types/ai.js';
+import type { WaypointContext, AiEngineType, DayTitleContext } from '../types/ai.js';
 
 export interface AiPluginOptions {
   aiService?: AiService;
@@ -53,6 +53,27 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'AI generation error';
         fastify.log.error({ err }, `AI alert generation failed: ${message}`);
+        return reply.status(500).send({ error: message });
+      }
+    }
+  );
+
+  // POST /api/copilot/day-title
+  fastify.post<{ Body: Partial<DayTitleContext> & { apiKey?: string; preferredEngine?: AiEngineType | 'auto' } }>(
+    '/api/copilot/day-title',
+    async (request, reply) => {
+      const { dayNumber, stops, apiKey, preferredEngine } = request.body || {};
+      if (!Array.isArray(stops) || stops.length === 0) {
+        return reply.status(400).send({ error: 'Request body must contain a non-empty "stops" array' });
+      }
+      try {
+        const result = await aiService.generateDayTitle(
+          { dayNumber: dayNumber ?? 1, stops },
+          { apiKey, preferredEngine }
+        );
+        return reply.status(200).send(result);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Day title generation error';
         return reply.status(500).send({ error: message });
       }
     }

@@ -14,6 +14,7 @@ import {
   Save,
   Loader2,
 } from 'lucide-react';
+import { InlineEdit } from './InlineEdit';
 import type { RouteResponse } from '../types/routing';
 import type {
   TimelineCascadeResult,
@@ -39,6 +40,7 @@ interface AppHeaderProps {
   googleMapsRoute: GoogleMapsRouteResult;
   onOpenExportModal: () => void;
   currentTripName?: string;
+  onRenameTrip?: (name: string) => void;
   onOpenRouteSelector?: () => void;
   onSaveTrip?: () => void;
   isSaving?: boolean;
@@ -66,6 +68,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   googleMapsRoute,
   onOpenExportModal,
   currentTripName = 'Phoenix to Albuquerque Road Trip',
+  onRenameTrip,
   onOpenRouteSelector,
   onSaveTrip,
   isSaving = false,
@@ -165,17 +168,26 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Route / Trip Selector Trigger */}
         {onOpenRouteSelector && (
-          <button
-            onClick={onOpenRouteSelector}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-200 border border-slate-700/80 rounded-xl text-xs font-medium transition-colors cursor-pointer shadow-sm ml-1"
-            title="Switch itinerary, import JSON file, or start a new route"
-          >
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 border border-slate-700/80 rounded-xl text-xs font-medium shadow-sm ml-1 min-w-0">
             <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-            <span className="text-sm font-semibold text-white truncate max-w-[130px] sm:max-w-[190px]">
-              {currentTripName}
-            </span>
-            <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-          </button>
+            {onRenameTrip ? (
+              <InlineEdit
+                value={currentTripName}
+                onCommit={onRenameTrip}
+                tooltip="Rename this trip"
+                className="text-sm font-semibold text-white max-w-[200px] sm:max-w-[300px]"
+              />
+            ) : (
+              <span className="text-sm font-semibold text-white truncate max-w-[200px] sm:max-w-[300px]">{currentTripName}</span>
+            )}
+            <button
+              onClick={onOpenRouteSelector}
+              className="p-0.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer shrink-0"
+              title="Switch itinerary, import JSON file, or start a new route"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+          </div>
         )}
       </div>
 

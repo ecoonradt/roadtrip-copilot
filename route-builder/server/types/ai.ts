@@ -31,3 +31,13 @@ export interface BatchAlertResult {
   results: Array<{ id: string; alert: CopilotAlert }>;
   engine: AiEngineType;
 }
+
+export interface DayTitleContext {
+  dayNumber: number;
+  stops: Array<{ name: string; type?: string }>;
+}
+
+export interface DayTitleResult {
+  title: string;
+  engine: AiEngineType;
+}

@@ -1,5 +1,6 @@
-import React from 'react';
-import { Calendar, Plus, MapPin, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Calendar, Plus, MapPin, Trash2, Sparkles, Loader2 } from 'lucide-react';
+import { InlineEdit } from './InlineEdit';
 import type { ParsedDay } from '../engine/itineraryParser';
 
 interface DayTabBarProps {
@@ -8,6 +9,9 @@ interface DayTabBarProps {
   onSelectDay: (index: number) => void;
   onAddDay: () => void;
   onDeleteDay?: (index: number) => void;
+  onRenameDay?: (index: number, title: string) => void;
+  onSuggestDayTitle?: (index: number) => Promise<void>;
+  aiAvailable?: boolean;
 }
 
 export const DayTabBar: React.FC<DayTabBarProps> = ({
@@ -16,7 +20,25 @@ export const DayTabBar: React.FC<DayTabBarProps> = ({
   onSelectDay,
   onAddDay,
   onDeleteDay,
+  onRenameDay,
+  onSuggestDayTitle,
+  aiAvailable = true,
 }) => {
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState(false);
+  const canSuggest = !!onSuggestDayTitle && aiAvailable && (days[activeDayIndex]?.waypoints?.length ?? 0) > 0;
+  const handleSuggest = async () => {
+    if (!onSuggestDayTitle) return;
+    setIsSuggesting(true);
+    setSuggestError(false);
+    try {
+      await onSuggestDayTitle(activeDayIndex);
+    } catch {
+      setSuggestError(true);
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
   if (!days || days.length === 0) {
     return null;
   }
@@ -100,15 +122,37 @@ export const DayTabBar: React.FC<DayTabBarProps> = ({
 
       {/* Active Day Title Summary */}
       {days[activeDayIndex] && (
-        <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-400 truncate max-w-sm">
+        <div className="flex flex-1 min-w-[160px] items-center gap-1.5 text-xs text-slate-400 pl-3 border-l border-slate-800">
           <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
-          <span className="text-slate-200 font-medium truncate">
-            {days[activeDayIndex].title || `Day ${days[activeDayIndex].dayNumber}`}
-          </span>
-          {days[activeDayIndex].origin && days[activeDayIndex].destination && (
-            <span className="text-slate-400 text-[11px] truncate">
-              ({days[activeDayIndex].origin.split(',')[0]} &rarr; {days[activeDayIndex].destination.split(',')[0]})
+          {onRenameDay ? (
+            <InlineEdit
+              value={days[activeDayIndex].title || `Day ${days[activeDayIndex].dayNumber}`}
+              onCommit={(t) => onRenameDay(activeDayIndex, t)}
+              tooltip={`${days[activeDayIndex].title} (click to rename)`}
+              className="text-slate-200 font-medium"
+            />
+          ) : (
+            <span className="text-slate-200 font-medium truncate">
+              {days[activeDayIndex].title || `Day ${days[activeDayIndex].dayNumber}`}
             </span>
+          )}
+          {onSuggestDayTitle && (
+            <button
+              onClick={handleSuggest}
+              disabled={!canSuggest || isSuggesting}
+              title={
+                !aiAvailable
+                  ? 'AI engine unavailable'
+                  : suggestError
+                    ? 'Could not suggest a name. Click to retry.'
+                    : 'Suggest a day name from this day\'s stops'
+              }
+              className={`p-1 rounded transition-colors shrink-0 ${
+                canSuggest ? 'text-amber-400 hover:bg-slate-800 cursor-pointer' : 'text-slate-600 cursor-not-allowed'
+              }`}
+            >
+              {isSuggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            </button>
           )}
         </div>
       )}

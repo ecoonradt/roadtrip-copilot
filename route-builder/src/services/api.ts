@@ -356,3 +356,20 @@ export async function fetchScoutQuickPrompts(scope: ScoutScope): Promise<string[
   const data = (await res.json()) as { prompts?: string[] };
   return data.prompts || [];
 }
+
+export async function generateDayTitle(
+  dayNumber: number,
+  stops: Array<{ name: string; type?: string }>,
+  options: GenerateAlertRequestOptions = {}
+): Promise<{ title: string; engine: AiEngineType }> {
+  const res = await fetch('/api/copilot/day-title', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dayNumber, stops, ...options }),
+  });
+  if (!res.ok) {
+    const errorData = (await res.json().catch(() => ({ error: 'Day title generation failed' }))) as { error?: string };
+    throw new Error(errorData.error || `Day title generation failed with HTTP ${res.status}`);
+  }
+  return (await res.json()) as { title: string; engine: AiEngineType };
+}
