@@ -2,7 +2,7 @@
 
 This document defines the architecture for evolving the **Roadtrip Co-Pilot Android App (`app/`)** from a strictly read-only itinerary player into an interactive co-pilot capable of **on-the-fly route modifications** (both 100% offline and cloud-assisted via Route Scout).
 
-It serves as the companion specification to [route_scout_cloud_architecture.md](route_scout_cloud_architecture.md).
+It serves as the companion specification to [route_scout_cloud_architecture.md](../route-scout-cloud/route_scout_cloud_architecture.md).
 
 ---
 
@@ -115,7 +115,7 @@ Inspecting `CopilotService.kt` and `LocationTracker.kt` shows that the app is al
 
 ## 3. Tier 2: Cloud-Connected Route Scout & 2-Way Sync on Android (Online)
 
-When the phone has internet connectivity, the Android app becomes a second native client of the AWS Fastify backend defined in [route_scout_cloud_architecture.md](route_scout_cloud_architecture.md).
+When the phone has internet connectivity, the Android app becomes a second native client of the AWS Fastify backend defined in [route_scout_cloud_architecture.md](../route-scout-cloud/route_scout_cloud_architecture.md).
 
 ### A. Native Authentication via Android Credential Manager
 * Instead of opening a web browser cookie flow, the Android app uses the official **Android Credential Manager API (`androidx.credentials` + Google ID)** for 1-tap native Google Sign-In.

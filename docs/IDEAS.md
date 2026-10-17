@@ -28,7 +28,7 @@ The server architecture is built around the `AiHarnessAdapter` interface (`route
   * Base URL + API key interface allowing self-hosted models (vLLM, LocalAI, OpenRouter, Groq).
 
 ### Production Cloud Architecture & Tool Calling
-* For a comprehensive blueprint of how Route Scout transitions from local CLI execution (`agy`) to production cloud APIs with native tool calling (OSRM snapping, Google Places, Google Search Grounding, and structured JSON schemas), see [Route Scout Cloud Architecture](route_scout_cloud_architecture.md).
+* For a comprehensive blueprint of how Route Scout transitions from local CLI execution (`agy`) to production cloud APIs with native tool calling (OSRM snapping, Google Places, Google Search Grounding, and structured JSON schemas), see [Route Scout Cloud Architecture](projects/route-scout-cloud/route_scout_cloud_architecture.md).
 
 ---
 

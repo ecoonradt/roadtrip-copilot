@@ -1,5 +1,9 @@
 # Android Auto Multitasking & Dashboard Architecture
 
+> [!NOTE]
+> **STATUS: LIVING REFERENCE ARCHITECTURE — Platform Constraints & Windowing Model**  
+> This document is the authoritative engineering reference explaining Android Auto's windowing pipeline, the dual-slot Navigation vs. Media model, and why Roadtrip Co-Pilot is architected as an unobtrusive background service rather than a split-screen dashboard tile.
+
 This document explains the technical windowing model of Android Auto (the "Coolwalk" split-screen dashboard), analyzes how first-party and third-party apps interact with screen slots, and details why Roadtrip Co-Pilot is architected as an unobtrusive background service rather than a split-screen dashboard tile.
 
 ---
@@ -119,10 +123,10 @@ Because Android Auto reserves its two visual slots for Navigation (Google Maps) 
 
 ### On-Demand In-Car Dashboard (`CopilotCarAppService.kt`)
 For times when the vehicle is parked or stopped at an overlook, Roadtrip Co-Pilot still provides a full in-car interface via `androidx.car.app`:
-* [`CopilotDashboardScreen.kt`](../app/src/main/java/com/roadtrip/copilot/car/CopilotDashboardScreen.kt): Displays next waypoint, distance, target time, pace delta, and GPS speed.
-* [`WaypointListScreen.kt`](../app/src/main/java/com/roadtrip/copilot/car/WaypointListScreen.kt): Full chronological milestone list.
-* [`RouteListScreen.kt`](../app/src/main/java/com/roadtrip/copilot/car/RouteListScreen.kt): Distraction-compliant 6-item paginated route switcher.
-* [`SettingsScreen.kt`](../app/src/main/java/com/roadtrip/copilot/car/SettingsScreen.kt): Audio ducking and speech calibration controls.
+* [`CopilotDashboardScreen.kt`](../../app/src/main/java/com/roadtrip/copilot/car/CopilotDashboardScreen.kt): Displays next waypoint, distance, target time, pace delta, and GPS speed.
+* [`WaypointListScreen.kt`](../../app/src/main/java/com/roadtrip/copilot/car/WaypointListScreen.kt): Full chronological milestone list.
+* [`RouteListScreen.kt`](../../app/src/main/java/com/roadtrip/copilot/car/RouteListScreen.kt): Distraction-compliant 6-item paginated route switcher.
+* [`SettingsScreen.kt`](../../app/src/main/java/com/roadtrip/copilot/car/SettingsScreen.kt): Audio ducking and speech calibration controls.
 
 When the driver resumes driving and returns to Google Maps, Roadtrip Co-Pilot cleanly returns to the background, ensuring the driver never has to choose between their driving map, their music, and their itinerary co-pilot.
 

@@ -137,4 +137,4 @@ The Route Builder is architected as a decoupled client-server application:
 * **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout streaming SSE service, and ADB device synchronization.
 * **Testing (`tests/`):** Automated Vitest unit and integration tests validating routing proxies, timeline calculations, AI adapters, and V2 schema exports.
 
-For detailed developer specifications, directory layouts, and design contracts, see [AGENTS.md](AGENTS.md) and [docs/route_builder_research_and_architecture.md](../docs/route_builder_research_and_architecture.md).
+For detailed developer specifications, directory layouts, and design contracts, see [AGENTS.md](AGENTS.md) and [docs/archive/route_builder_research_and_architecture.md](../docs/archive/route_builder_research_and_architecture.md).

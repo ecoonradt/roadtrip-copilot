@@ -109,11 +109,31 @@ roadtrip-copilot/
 │   ├── .gitignore             # Ignores *.json while tracking sample_itinerary.json
 │   └── sample_itinerary.json  # Bundled sample route (Phoenix → Sedona → Flagstaff)
 ├── docs/
-│   ├── IDEAS.md               # Feature backlog and roadmap proposals
-│   ├── android_auto_multitasking_architecture.md # Coolwalk multitasking model, slot mechanics & design rationale
-│   ├── android_route_editing_and_cloud_client.md # Android on-the-fly offline editing & cloud Route Scout client blueprint
-│   ├── route_builder_research_and_architecture.md # Technical specification & domain architecture
-│   └── route_scout_cloud_architecture.md # Production cloud model API architecture & function calling blueprint
+│   ├── README.md              # Documentation directory map & architectural taxonomy
+│   ├── IDEAS.md               # Feature backlog and uncommitted ideas (incubator)
+│   ├── projects/              # Major multi-session initiatives (with 3-tier planning & ADRs)
+│   │   ├── route-scout-cloud/ # [ACTIVE PROJECT] Production Cloud Architecture, Auth, Bedrock AI & AWS Deployment
+│   │   │   ├── route_scout_cloud_architecture.md # Tier 1 Architectural Blueprint
+│   │   │   ├── WORKING_MODEL.md   # Project planning model, orchestrator-worker protocol & ADR rules
+│   │   │   ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
+│   │   │   ├── decisions/         # Standalone Architecture Decision Record (ADR) files
+│   │   │   └── plan/              # Rolling-wave planning directory
+│   │   │       ├── active/        # Single active Work Package (Tier 3)
+│   │   │       └── archive/       # Completed and retired Work Packages
+│   │   └── android-route-client/  # [QUEUED PROJECT — Phase 2, blocked by cloud] Android Route Editing & Cloud Co-Pilot
+│   │       ├── android_route_editing_and_cloud_client.md # Tier 1 Architectural Blueprint
+│   │       ├── WORKING_MODEL.md   # Project working model, sequencing & dependency rules
+│   │       ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
+│   │       ├── decisions/         # Standalone Architecture Decision Record (ADR) files
+│   │       └── plan/              # Rolling-wave planning directory (queued)
+│   │           ├── active/        # Single active Work Package (Tier 3)
+│   │           └── archive/       # Completed and retired Work Packages
+│   ├── reference/             # Living platform invariants & architectural rationales
+│   │   └── android_auto_multitasking_architecture.md # Coolwalk multitasking model, slot mechanics & design rationale
+│   ├── tasks/                 # Standalone tactical spike plans & feature experiments
+│   │   └── carapp_notification_experiment_implementation_plan.md # Car App Library notification experiment plan
+│   └── archive/               # Completed historical research & superseded specifications
+│       └── route_builder_research_and_architecture.md # Technical specification & domain architecture
 ├── scripts/                   # Environment setup & run scripts (run_dhu.sh, setup_env.sh)
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
 ├── settings.gradle.kts        # Multi-project gradle settings
@@ -230,7 +250,7 @@ roadtrip-copilot/
 ---
 
 ## 5. Rules for Contributing Developers & Agents
-1. **Never add cloud API dependencies to the Android in-car drive loop:** Do not introduce Retrofit, Firebase, Google Maps API keys, or web geocoding into `app/`. The Android foreground service must operate 100% offline.
+1. **Never add cloud API dependencies to the Android in-car drive loop:** `CopilotService`, `LocationTracker`, `AudioDuckEngine`, `NotificationEngine`, and Tier 1 local route editing must operate 100% offline with zero network calls. (Optional Phase 2 Tier 2 cloud sync and mobile Route Scout live strictly on the phone UI when online and must never block or enter the active drive loop).
 2. **Strict Battery & Threading Discipline:** In Android, use Kotlin Coroutines (`Dispatchers.IO` for disk/storage/assets, `Dispatchers.Default` for math/JSON parsing, `Dispatchers.Main` for UI/notifications). In Node/Fastify, keep network I/O asynchronous and use LRU caching for routing calls.
 3. **Preserve Backward Compatibility in Itineraries:** The Android app must seamlessly parse both V1 schemas (bundled static assets) and V2 schemas (`dwell_minutes`, `type`, `metadata`). Never remove fields from `ItineraryModels.kt`.
 4. **Strict TypeScript in `route-builder/`:** Enforce `strict: true` with **zero `any` types**. Catch blocks must use `err: unknown` with `err instanceof Error` narrowing.
@@ -240,3 +260,35 @@ roadtrip-copilot/
 8. **Maintain Clean, Human-Friendly UI:** Never introduce internal debug text or verification claims into `route-builder/`. All UI updates must adhere to Section 2G Human-Centered UI/UX Principles.
 9. **Maintain Directory Layout in Section 3:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in Section 3 so that developers and agents can quickly navigate the codebase without scanning the entire tree.
 10. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused. Never leak harness-specific tool bans, terminal commands, or background task mechanics into the domain prompt. Implement all harness capabilities, tool allowlists, and response cleaning via the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
+11. **Adhere to the Project & Task Working Models (Section 6):** Frontier models act as orchestrators (authoring plans, conducting research, verifying code) and delegate implementation to `flash` subagents (`invoke_subagent` with `TypeName: 'self'`, `Model: 'flash'`) to optimize developer quota. For major initiatives in `docs/projects/`, never modify code without an active Work Package, and record all technical surprises in ADRs (`decisions/`) and `DECISIONS.md` before continuing.
+
+---
+
+## 6. Planning & Execution Working Models (Large Projects vs. Smaller Tasks)
+For full architectural details and mechanics, see [`docs/README.md`](docs/README.md), [`docs/projects/route-scout-cloud/WORKING_MODEL.md`](docs/projects/route-scout-cloud/WORKING_MODEL.md), and [`docs/projects/android-route-client/WORKING_MODEL.md`](docs/projects/android-route-client/WORKING_MODEL.md).
+
+### A. Large Multi-Session Projects (`docs/projects/`) — 3-Tier Rolling Wave
+1. **Tier 1: Architectural North Star:** Complete system specification (`route_scout_cloud_architecture.md` / `android_route_editing_and_cloud_client.md`).
+2. **Tier 2: The Phase Roadmap (`plan/ROADMAP.md`):** Milestone sequence and strict Definition of Done (DoD). **No premature micro-tasks for future milestones.**
+3. **Tier 3: The Active Work Package (`plan/active/WP-XX-*.md`):** Single active work package (1–2 session scope) detailing exact file touchpoints, test suites, discoveries, and session handoffs. (On Session 1 or between milestones when `plan/active/` is empty, the Orchestrator's first step is authoring `ROADMAP.md` and the next `WP-XX` before any code edits).
+4. **ADRs & Decision Index (`DECISIONS.md` + `decisions/`):** Compact Table of Contents scanned before every session, backed by standalone ADR files created from `0000-template.md`. If an unexpected technical constraint forces a divergence from the plan, pause and record an ADR before continuing code modifications. At project completion, decisions with lasting cross-project relevance are hoisted to `docs/reference/` and `AGENTS.md`.
+
+### B. Smaller Tactical Tasks & Spikes (`docs/tasks/`) — Single-File Plan
+* **Scope:** Self-contained experiments, bug investigations, or 1–2 session tactical features (e.g., `docs/tasks/carapp_notification_experiment_implementation_plan.md`).
+* **Lightweight Ceremony:** No separate `ROADMAP.md` or `DECISIONS.md` directory. The single task markdown file holds the specification, implementation steps, verification matrix, and inline findings/handoff checklist.
+* **Retirement:** Once completed or superseded, move the task file to `docs/archive/` and promote any permanent architectural lessons to `docs/reference/` or `AGENTS.md`.
+
+### C. Orchestrator-Worker Delegation Model (Applies to Both Projects & Tasks)
+* **Primary Agent (Frontier Orchestrator):** Authors plans (`ROADMAP.md`, `WP-XX`, or task specs), handles architectural research, defines interfaces/boundaries, formulates subagent prompts, reviews diffs, and runs final verification test suites.
+* **Subagent Workers (Gemini 3.8 Flash High via `invoke_subagent`):** Handles concrete implementation, boilerplate, isolated utility classes, schema formatting, and unit tests. Invoke with `TypeName: 'self'` and `Model: 'flash'` so the subagent has file-write and test-runner capabilities (use `TypeName: 'research'` with `Model: 'flash'` only for read-only exploration).
+
+### D. Session Lifecycle (Multi-Session Projects)
+1. **Kickoff:** Read `DECISIONS.md` and `plan/active/` (or bootstrap `ROADMAP.md` + `WP-01` on Session 1) $\to$ confirm scope.
+2. **In-Flight:** Orchestrator delegates bounded implementation tasks to `flash` subagents (`TypeName: 'self'`, `Model: 'flash'`) $\to$ logs ADR if unexpected surprises arise.
+3. **Wrap-Up:** Run test suites $\to$ update active Work Package checklist and handoff log $\to$ archive to `plan/archive/` once Definition of Done is verified.
+
+### E. Project Sequencing & Dependencies
+1. **Phase 1 [ACTIVE]: `docs/projects/route-scout-cloud/`:** Focus all current planning and execution on the cloud backend (AWS Bedrock, Fastify Lambda, S3 persistence, dual-mode auth).
+2. **Phase 2 [QUEUED]: `docs/projects/android-route-client/`:** Strictly blocked until Phase 1 cloud deliverables reach their Definition of Done. No work packages in `docs/projects/android-route-client/plan/active/` may begin execution until Phase 1 completes.
+
+

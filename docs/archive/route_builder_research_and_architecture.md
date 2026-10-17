@@ -1,9 +1,8 @@
 # Roadtrip Co-Pilot: Route Builder Architecture & Research Proposal
 
 > [!NOTE]
-> **IMPLEMENTATION STATUS: COMPLETE & IN PRODUCTION**  
-> The architectural design and mathematical specifications in this proposal have been fully implemented in the Route Builder Web Studio (`route-builder/`) and the native Android app (`app/src/main/java/com/roadtrip/copilot/`).  
-> This document remains the authoritative engineering reference for domain logic, timeline cascade formulas, OSRM/Nominatim contracts, and the "Engine + Scribe" architecture.
+> **STATUS: ARCHIVED HISTORICAL PROPOSAL — Implemented in route-builder/ & in Production**  
+> This research proposal evaluated form factors (Web vs. Native Android vs. CLI) and established the original timeline cascade math and OSRM contracts. The Web Studio has been fully implemented in `route-builder/` and is in production with 200+ tests. This file is preserved for historical reference and should not be treated as an in-flight roadmap.
 
 ## 1. Executive Summary & Problem Context
 
@@ -349,7 +348,7 @@ Respond in strict JSON:
      - Anthropic Claude Adapter
      - OpenAI ChatGPT Adapter
      - Local offline models (Ollama, llama.cpp)
-   - Detailed proposals for these providers are tracked in [IDEAS.md](IDEAS.md).
+   - Detailed proposals for these providers are tracked in [IDEAS.md](../IDEAS.md).
 
 4. **Deterministic Template Fallback (`TemplateHarnessAdapter`):**
    - If neither `agy` nor an API key is available, context-aware deterministic templates generate alerts without failing.
@@ -537,7 +536,7 @@ gantt
 
 ## 7. Future Horizons & Feature Backlog
 
-*A detailed feature backlog, including multi-provider AI adapters (Anthropic Claude, OpenAI, Ollama), elevation profiles, weather radar overlays, and custom voice narration, is maintained in [IDEAS.md](IDEAS.md).*
+*A detailed feature backlog, including multi-provider AI adapters (Anthropic Claude, OpenAI, Ollama), elevation profiles, weather radar overlays, and custom voice narration, is maintained in [IDEAS.md](../IDEAS.md).*
 
 Key architectural opportunities include:
 - **Multi-Provider AI Harnesses:** Pluggable adapters for Anthropic Claude, OpenAI, and local offline models (Ollama).

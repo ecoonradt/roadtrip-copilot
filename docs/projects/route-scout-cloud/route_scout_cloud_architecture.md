@@ -54,7 +54,7 @@ flowchart LR
    * Operates under **Rule 1**: *Never add cloud API dependencies to the Android in-car drive loop*. In national parks, mountain passes, and desert corridors, cellular connectivity drops to zero. Android Auto heads-up cards, audio ducking, GNSS location tracking, schedule telemetry, and Tier 1 on-the-fly route adjustments (deleting or skipping a stop, adjusting dwell time, and regenerating Google Maps links) run entirely on-device without internet access.
 2. **The Cloud Backend (`route-builder/server/`) Moves to AWS & Serves Both Web and Android:**
    * **Web Client:** Planners design, edit, and audit multi-day road trips via desktop browsers, tablets, or mobile web without installing Node.js, Python, or the Antigravity CLI (`agy`).
-   * **Android Client (When Online):** When cellular or Wi-Fi connectivity is available, the Android app acts as a second native client to the same Fastify cloud API—enabling 2-way cloud itinerary sync from S3 and on-the-fly conversational Route Scout queries from the passenger seat, rest stop, or hotel. (See [android_route_editing_and_cloud_client.md](android_route_editing_and_cloud_client.md) for the dedicated Android client specification.)
+   * **Android Client (When Online):** When cellular or Wi-Fi connectivity is available, the Android app acts as a second native client to the same Fastify cloud API—enabling 2-way cloud itinerary sync from S3 and on-the-fly conversational Route Scout queries from the passenger seat, rest stop, or hotel. (See [android_route_editing_and_cloud_client.md](../android-route-client/android_route_editing_and_cloud_client.md) for the dedicated Android client specification.)
 
 ### Advanced Domain Capabilities Acquired by the App
 The modern cloud AI system natively understands and honors core road-trip domain constraints:
@@ -441,7 +441,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
 
 ### Phase 2: Android Cloud Client & Multi-User Cost-Recovery Expansion
 - [ ] **Step 6: Android Tier 1 (Offline Editing) & Tier 2 (Cloud Route Scout & Sync)**
-  - Implement on-the-fly stop deletion/skipping, local cascade, and offline Google Maps URL regeneration on Android (see [android_route_editing_and_cloud_client.md](android_route_editing_and_cloud_client.md)).
+  - Implement on-the-fly stop deletion/skipping, local cascade, and offline Google Maps URL regeneration on Android (see [android_route_editing_and_cloud_client.md](../android-route-client/android_route_editing_and_cloud_client.md)).
   - Connect Android app to `/api/itineraries` (2-way S3 sync) and `/api/ai/scout/chat/stream` (mobile Route Scout bottom sheet) using native Google Sign-In.
 - [ ] **Step 7: Stripe Prepaid Checkout & S3 Atomic Wallet Ledger**
   - Add Stripe Checkout session on the Web Studio for users to deposit $5.00 or $10.00 credit.
