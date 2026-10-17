@@ -111,6 +111,7 @@ roadtrip-copilot/
 ├── docs/
 │   ├── IDEAS.md               # Feature backlog and roadmap proposals
 │   ├── android_auto_multitasking_architecture.md # Coolwalk multitasking model, slot mechanics & design rationale
+│   ├── android_route_editing_and_cloud_client.md # Android on-the-fly offline editing & cloud Route Scout client blueprint
 │   ├── route_builder_research_and_architecture.md # Technical specification & domain architecture
 │   └── route_scout_cloud_architecture.md # Production cloud model API architecture & function calling blueprint
 ├── scripts/                   # Environment setup & run scripts (run_dhu.sh, setup_env.sh)
