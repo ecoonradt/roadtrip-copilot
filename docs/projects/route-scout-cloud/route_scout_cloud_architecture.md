@@ -339,6 +339,18 @@ Why use **Amazon S3** instead of DynamoDB or RDS for storing itineraries and use
 * **How it Works:** Package the Fastify server into a standard Docker container with the official **AWS Lambda Web Adapter** (`aws-lambda-adapter`) and `AWS_LWA_INVOKE_MODE=response_stream`.
 * **True Scale-to-Zero ($0.00/Month Base Cost):** Scales to 0 when idle. Includes AWS Lambda's perpetual free tier (**1,000,000 requests and 3,200,000 compute-seconds free every month**).
 
+### Local Feature Development Mode vs. Production AWS Runtime
+Even after the application is deployed to AWS for primary production use, **running the web application locally (`npm run dev`) remains a permanent requirement for developing and testing new features before opening a PR and deploying**.
+
+To prevent local development instances from colliding with or mutating the production data store, the backend enforces a clean separation between **Local Dev Mode** and **Production AWS Mode**:
+
+| Subsystem | Local Feature Development (`npm run dev`) | Production Cloud Runtime (AWS) | Rationale |
+| :--- | :--- | :--- | :--- |
+| **Itinerary & State Persistence** | **Local Filesystem (`itineraries/*.json`)** | **Amazon S3 (`s3://.../users/{email}/...`)** | Guarantees strict data store isolation so local feature work never reads, overwrites, or races against production S3 data. |
+| **AI Inference (Scout & Copywriter)** | **Amazon Bedrock** (via local AWS CLI / SSO credentials, plus mock/local adapters for tests) | **Amazon Bedrock** (via Lambda IAM Execution Role) | `@aws-sdk/client-bedrock-runtime` transparently uses the ambient credential chain in both environments so AI behavior matches production. |
+| **Authentication & Wallet Gate** | **Local Dev Bypass** (`AUTH_ENABLED !== 'true'`, optional toggle when testing auth) | **Google OIDC + `ALLOWED_EMAILS` + S3 Wallet** | Eliminates OAuth redirect and billing friction during routine UI/engine feature development. |
+| **Routing, Cascade & Grounding Tools** | **Local Fastify Process** (OSRM, Nominatim, Places, Web Search) | **Lambda Fastify Container** | Stateless outbound discovery/grounding calls work identically in both environments. |
+
 ---
 
 ## 7. Performance Benchmark: AWS Cloud Architecture vs. Local Harness

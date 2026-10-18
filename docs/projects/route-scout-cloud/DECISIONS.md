@@ -17,6 +17,7 @@ This document is the high-level Table of Contents and index for all Architecture
 | **ADR-0001** | 2026-10-17 | Amazon Bedrock for Unified Multi-Model AI Routing | Accepted | Unified multi-provider AI via `@aws-sdk/client-bedrock-runtime` (`ConverseStream`) under a single AWS invoice with zero idle fees. | [0001-amazon-bedrock-single-bill-ai.md](decisions/0001-amazon-bedrock-single-bill-ai.md) |
 | **ADR-0002** | 2026-10-17 | Stateless Dual-Mode Google OIDC Authentication | Accepted | Google OIDC SSO (Web Session Cookie + Android Bearer JWT) with admin allowlist gating and zero third-party auth fees. | [0002-stateless-dual-mode-oidc-auth.md](decisions/0002-stateless-dual-mode-oidc-auth.md) |
 | **ADR-0003** | 2026-10-17 | Amazon S3 Atomic JSON Persistence | Accepted | S3 object storage for itineraries and user wallets with conditional writes (`If-Match` / `If-None-Match`), ~$0.001/mo, zero DB maintenance. | [0003-s3-atomic-json-persistence.md](decisions/0003-s3-atomic-json-persistence.md) |
+| **ADR-0004** | 2026-10-18 | Hybrid Local Feature Development Mode | Accepted | Preserves `npm run dev` for feature engineering: itineraries/state stay strictly on local disk (isolated from prod S3) while AI uses Bedrock via local AWS credentials. | [0004-hybrid-local-dev-mode.md](decisions/0004-hybrid-local-dev-mode.md) |
 
 ---
 

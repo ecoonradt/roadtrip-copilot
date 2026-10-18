@@ -130,7 +130,7 @@ Every agent working on the Route Scout Cloud project must adhere to this three-p
    * Stop immediately before writing speculative workarounds.
    * Record the decision in a new ADR file in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and link it in [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md).
    * Update the "Discoveries & Deviations" section in the active Work Package.
-3. Preserve all non-negotiable architectural rules from [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md) (e.g., zero cloud dependencies in `app/` drive loop, literal semicolons in OSRM paths, strict TypeScript with zero `any` types).
+3. Preserve all non-negotiable architectural rules from [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (e.g., zero cloud dependencies in `app/` drive loop, isolated local disk storage in `npm run dev` alongside Bedrock AI per ADR-0004, literal semicolons in OSRM paths, strict TypeScript with zero `any` types).
 
 ### Phase C: Session Wrap-Up & Verification
 1. Run all relevant test suites (e.g. `npm test`, `npm run test:backend`).
