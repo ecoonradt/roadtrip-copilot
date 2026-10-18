@@ -141,4 +141,6 @@ Early iterations of Roadtrip Co-Pilot attempted to use Android's transient audio
 3. **Background Audio Hardening:** Android 17+ (API 37+) introduces Background Audio Hardening, which silently rejects background ducking requests from services without active UI interaction.
 
 **The Solution:** Roadtrip Co-Pilot defaults to `AUDIOFOCUS_GAIN_TRANSIENT` ("Pause music during alerts"). The system dispatches `AUDIOFOCUS_LOSS_TRANSIENT` to the active media player (Spotify, YouTube Music, podcasts), cleanly pausing playback for the duration of the alert and resuming playback instantly when TTS completes (`onDone`).
+ 
+**Architectural Invariant:** Do not revert default focus gain to `MAY_DUCK` or attempt volume slider hacks (`setStreamVolume`) to bypass audio focus mechanics. Volume modification disrupts driver audio control and fails under background execution restrictions.
 

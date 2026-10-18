@@ -108,7 +108,7 @@ A standalone, strict TypeScript AWS CDK v2 package at the repository root:
 
 ### 5. Non-Project Living Documentation Updates
 * Keep non-project docs synchronized in-flight:
-  * [`AGENTS.md`](../../../../AGENTS.md): Update Section 3 (Directory Layout) and Section 4 (Environment & Build Commands) to include `infra/`, `.github/workflows/`, `./scripts/ci_check.sh`, and `./scripts/deploy_cloud.sh`.
+  * [`docs/reference/directory-layout.md`](../../../../docs/reference/directory-layout.md) and [`AGENTS.md`](../../../../AGENTS.md) Section 4: Update directory layout and environment/build commands to include `infra/`, `.github/workflows/`, `./scripts/ci_check.sh`, and `./scripts/deploy_cloud.sh`.
   * [`README.md`](../../../../README.md), [`route-builder/AGENTS.md`](../../../../route-builder/AGENTS.md), [`route-builder/README.md`](../../../../route-builder/README.md), and [`docs/README.md`](../../../README.md): Document the CDK infrastructure directory, CI verification script, and cloud deployment commands.
 
 ---
@@ -164,4 +164,4 @@ A standalone, strict TypeScript AWS CDK v2 package at the repository root:
 ## 6. Next Session Handoff
 
 * **Current State:** `ADR-0005`, `DECISIONS.md`, `ROADMAP.md`, `WORKING_MODEL.md`, and `WP-00-cdk-and-cicd-foundation.md` are approved and committed. Repository is being scrubbed for PII and migrated to GitHub prior to starting M0 execution.
-* **Next Immediate Step:** Begin executing `WP-00-cdk-and-cicd-foundation.md`: delegate Steps 1–4 (`route-builder/Dockerfile` & `.dockerignore`, `infra/` CDK stack + unit tests, `scripts/ci_check.sh` + `scripts/deploy_cloud.sh`, `.github/workflows/ci.yml` + `deploy.yml`, and non-project living doc updates) to `flash` subagents (`TypeName: 'self'`, `Model: 'flash'`), then proceed to Step 5 (`cdk bootstrap` + `./scripts/deploy_cloud.sh`) and Step 6 (manual CloudFront verification).
+* **Next Immediate Step:** Begin executing `WP-00-cdk-and-cicd-foundation.md`: delegate Steps 1–4 (`route-builder/Dockerfile` & `.dockerignore`, `infra/` CDK stack + unit tests, `scripts/ci_check.sh` + `scripts/deploy_cloud.sh`, `.github/workflows/ci.yml` + `deploy.yml`, and non-project living doc updates) to worker subagents per the active harness adapter, then proceed to Step 5 (`cdk bootstrap` + `./scripts/deploy_cloud.sh`) and Step 6 (manual CloudFront verification).

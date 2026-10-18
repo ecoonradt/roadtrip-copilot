@@ -81,12 +81,12 @@ sequenceDiagram
     autonumber
     actor Developer as Developer (Eric)
     participant Orchestrator as Frontier Orchestrator (Primary Agent)
-    participant Worker as Subagent Worker (Gemini 3.8 Flash High)
+    participant Worker as Subagent Worker (Delegated Implementer)
     participant Workspace as Workspace Code & Tests
 
     Developer->>Orchestrator: Kick off session / milestone
     Note over Orchestrator: Reads DECISIONS.md & Active WP<br/>Defines task bounds & file scopes
-    Orchestrator->>Worker: invoke_subagent(TypeName: 'self', Model: 'flash', Role: 'Fastify Auth Implementer')
+    Orchestrator->>Worker: Dispatches bounded task per harness adapter
     Note over Worker: Writes targeted boilerplate,<br/>implements functions & unit tests
     Worker-->>Orchestrator: Reports completed code diff & initial test results
     Note over Orchestrator: Audits code diff against domain rules,<br/>runs verification suites, logs ADR if needed
@@ -105,7 +105,7 @@ sequenceDiagram
   * Running final verification test suites and writing handoff notes.
 
 ### Subagent Workers (Delegated Implementers)
-* **Model & Type:** Invoke with `TypeName: 'self'` and `Model: 'flash'` (**Gemini 3.8 Flash High**) via `invoke_subagent` (`TypeName: 'self'` is required so the worker has file-edit and command execution tools; use `TypeName: 'research'` with `Model: 'flash'` only for read-only lookups).
+* **Model & Harness Delegation:** Delegated per the active harness adapter (Antigravity: [`.agents/rules/antigravity-harness.md`](file:///home/eric/code/roadtrip-copilot/.agents/rules/antigravity-harness.md); OpenCode: [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)). Bound to cost-effective worker models / configured worker profiles to optimize developer quota.
 * **Responsibilities:**
   * Implementing concrete functions, endpoints, or utility classes specified by the orchestrator.
   * Writing unit tests against mock fixtures.
@@ -126,7 +126,7 @@ Every agent working on the Route Scout Cloud project must adhere to this three-p
 3. Explicitly state the active task scope and planned actions to the user before editing code.
 
 ### Phase B: Execution & In-Flight Discoveries
-1. Orchestrator defines interfaces, tests, and boundaries; delegates routine implementation to subagent workers (`TypeName: 'self'`, `Model: 'flash'`).
+1. Orchestrator defines interfaces, tests, and boundaries; delegates routine implementation to subagent workers per the active harness adapter.
 2. **If an unexpected technical constraint is discovered:**
    * Stop immediately before writing speculative workarounds.
    * Record the decision in a new ADR file in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and link it in [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md).

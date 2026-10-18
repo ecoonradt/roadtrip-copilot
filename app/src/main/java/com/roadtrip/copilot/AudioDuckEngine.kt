@@ -108,6 +108,8 @@ class AudioDuckEngine(
      * Defaults to true (AUDIOFOCUS_GAIN_TRANSIENT). Standard Android ducking (MAY_DUCK) only
      * attenuates by -14 dB (DUCK_VSHAPE), which is inaudible over car/road noise when mixed
      * across Android Auto's dual-channel projection. Pausing guarantees complete speech clarity.
+     * Architectural Invariant: Do not revert default focus gain to MAY_DUCK or attempt volume
+     * slider hacks (setStreamVolume) to bypass audio focus mechanics.
      */
     var pauseMusicInsteadOfDuck: Boolean = true
 

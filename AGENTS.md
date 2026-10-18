@@ -9,185 +9,18 @@
 
 ## 2. Core Architectural Pillars
 
-### A. Background Service Lifecycle (Foreground Service)
-* Modern Android (API 34 through API 36+) strictly enforces foreground service policies.
-* The service is declared in `AndroidManifest.xml` with:
-  ```xml
-  android:foregroundServiceType="location"
-  ```
-* Required permissions:
-  * `android.permission.FOREGROUND_SERVICE`
-  * `android.permission.FOREGROUND_SERVICE_LOCATION`
-  * `android.permission.ACCESS_FINE_LOCATION`
-  * `android.permission.ACCESS_COARSE_LOCATION`
-  * `android.permission.POST_NOTIFICATIONS`
-* A persistent low-priority ongoing notification keeps the service active so the Android OS does not kill it while driving.
-
-### B. Audio Ducking, Stream Routing & Calibration
-* When approaching a waypoint, the app pauses or optionally ducks whatever audio is playing (Spotify, podcasts) rather than talking over it.
-* Uses Android's `AudioManager` with `AudioFocusRequest`:
-  * Focus Gain: `AUDIOFOCUS_GAIN_TRANSIENT` (default, cleanly pauses music during alerts) or `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (when "Duck volume" is toggled for subtle -14 dB attenuation).
-  * Audio Usage: `AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` (car navigation guidance channel, matching Android Auto projection requirements).
-  * Content Type: `AudioAttributes.CONTENT_TYPE_SPEECH`.
-* **Architectural Rationale for Pausing over Ducking (`AUDIOFOCUS_GAIN_TRANSIENT`):**
-  * In Android's audio framework (`PlaybackActivityMonitor.java`), navigation ducking (`DUCK_VSHAPE`) is hardcoded to only $-14\text{ dB}$ ($20\%$ amplitude, perceived as $\approx 50\%$ volume over road noise). Strong ducking ($-35\text{ dB}$) is hardcoded exclusively for `USAGE_ASSISTANT`.
-  * Android Auto projects Media and Guidance across separate digital channels (`Mix:0` and `Mix:1`). Vehicle head unit DSPs mix them without aggressive attenuation, making $-14\text{ dB}$ ducking inaudible in the car.
-  * Modern Android (API 37+ AudioHardening) also silently rejects background ducking requests.
-  * Pausing (`AUDIOFOCUS_GAIN_TRANSIENT`) dispatches `AUDIOFOCUS_LOSS_TRANSIENT` to media apps (YouTube Music, Spotify), cleanly halting music and resuming it instantly upon speech completion across all head units. **Do not revert default focus gain to `MAY_DUCK` or attempt volume slider hacks (`setStreamVolume`).**
-* Provides a 12-second continuous calibration speech loop so the driver can adjust the car guidance volume knob in real time before driving.
-* Focus must be abandoned immediately upon speech completion (`TextToSpeech.OnUtteranceProgressListener.onDone`) so music smoothly returns to 100% volume.
-* Heads-up waypoint alert notifications use a dedicated silent channel (`setSound(null, null)`) to prevent notification chime collisions with simultaneous TTS speech.
-
-### C. Android Auto Heads-Up Notifications & Requirements
-* Approaching waypoints triggers an immediate high-priority heads-up notification projected onto the car screen over Google Maps.
-* Uses `NotificationCompat.Builder` with:
-  * Style: `NotificationCompat.MessagingStyle` with `setGroupConversation(false)` and `Person` sender formatted as `"Co-Pilot: <Waypoint Title>"`. (Setting 1-to-1 conversation prevents Android Auto from filtering alerts through its "Show group message notifications" mute filter).
-  * Actions: Actionable voice `RemoteInput` reply ("Acknowledge") and mark-as-read ("Dismiss") wired to `NotificationReceiver`.
-  * Automotive Descriptor: Declared in `res/xml/automotive_app_desc.xml` (`<uses name="notification" />`) and registered via `<meta-data>` in `AndroidManifest.xml`.
-  * Channel: `IMPORTANCE_HIGH`, Category: `CATEGORY_MESSAGE`, Extender: `NotificationCompat.CarExtender()`.
-* **Alert Lifecycle Hygiene & Dismissal Engine:**
-  * Uses a single stable alert notification ID (`ALERT_NOTIFICATION_ID = 2000`) so consecutive waypoints update in-place rather than accumulating rotating IDs.
-  * Assigns a stable conversation identity via `setShortcutId("copilot_alerts")` to prevent Gearhead from instantiating isolated conversation tasks for each distinct waypoint title.
-  * Retains `setTimeoutAfter(15000)` as the OS-level backstop to guarantee message cards never linger indefinitely.
-  * Auto-cancel triggers & sweep points:
-    * **Service Start (`onCreate`):** Sweeps any active alerts in the `2000..2049` range (clearing driveway test alerts or leftovers from prior runs).
-    * **Car App Opened (`CopilotCarSession.onCreateScreen`):** Sweeps active alerts so the Car App Library dashboard never competes with an orphaned message card.
-    * **Speech Finished (`UtteranceProgressListener` onDone/onError):** Triggers a delayed auto-dismissal after an 8-second glanceability grace period (`ALERT_DISMISSAL_GRACE_PERIOD_MS = 8000L`).
-    * **New Alert Posted:** Cancels any pending delayed dismissal timers before dispatching the new card and TTS speech.
-    * **Trip Stopped / Service Destroyed (`stopCopilot()`, `onDestroy()`):** Immediately cancels all active alerts.
-    * **User Dismiss / Voice Reply:** Cancels the alert immediately via `NotificationReceiver`.
-* **Required In-Car Device Settings (One-time setup for sideloaded / ADB builds):**
-  * Android Auto blocks sideloaded apps by default. In Android Auto settings, unlock Developer Settings (tap Version 10 times) $\to$ open Developer Settings $\to$ check **"Unknown sources"**.
-  * Under Android Auto Notification settings: ensure **"Show message notifications"** and **"Show first line of conversations"** are toggled **ON**.
-
-### D. Pace & Schedule Telemetry Engine
-* Dynamically calculates ahead/behind schedule deltas relative to planned waypoint target times.
-* Supports both fixed ISO-dated itineraries (with cross-state timezone offset adjustments) and dynamic ad-hoc drive routes (calculated relative to trip start time).
-* Locks in-transit pace telemetry to the last confirmed milestone to eliminate false ahead-of-schedule readings while parked before departure.
-
-### E. 100% Offline Resilience (Zero Cellular Dependency)
-* Many scenic road trip segments, national parks, and mountain passes have zero cellular connectivity.
-* **GPS:** Hardware GNSS satellite radio receives lat/long directly from orbit. No network calls.
-* **Proximity Math:** Local Haversine formula executed on-device.
-* **Data Source:** Waypoints, triggers, and announcement scripts are loaded from bundled assets or imported to `/sdcard/Android/data/com.roadtrip.copilot/files/itineraries/`.
-* **TTS Engine:** Uses Android's built-in `TextToSpeech` engine configured with local/offline English voice packs.
-
-### F. Route Authoring, Timeline Cascade & Device Handoff (The Route Builder Web Studio)
-* Located in `route-builder/`, providing a full-stack authoring studio (Vite/React frontend on `:5173`, Fastify/TypeScript backend on `:3001`).
-* **Architecture:**
-  * **Routing & Geocoding:** Backend proxies OSRM road graph directions and Nominatim geocoding (with compliant `User-Agent`). In-memory LRU caching deduplicates requests.
-  * **Timeline Schedule Cascade:** Recalculates arrival/departure times across waypoints; modifying dwell time on stop $k$ ripples through stops $k+1 \dots n$. Supports backward scheduling from destination deadlines ("Catch-up" mode).
-  * **Timezone Transitions:** Detects timezone boundary crossings, applying offset jumps in formatted local time while keeping epoch timestamps strictly linear.
-  * **AI Harness Adapter Architecture:** Built around `AiHarnessAdapter` (`server/services/aiService.ts`):
-    * Primary: `AgyHarnessAdapter` dynamically resolves and uses the newest Flash model from `agy models` (e.g. `gemini-3.8-flash-high`) via `agy -p "..." --output-format json`. Zero API keys required.
-    * Cloud Fallback: `GeminiStudioHarnessAdapter` connects to Google AI Studio, defaulting to `gemini-3.8-flash`.
-    * Graceful UI Disabling: AI features (alert copywriting and Route Scout) require an active AI engine or API key; when unavailable, the studio gracefully disables all AI buttons with informative tooltips.
-    * Enforces constraints: titles $\le 30$ chars, messages $\le 2$ lines, trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
-    * Roadmap: Support for Anthropic Claude, OpenAI, and Ollama/local models is tracked in [IDEAS.md](docs/IDEAS.md).
-  * **Route Scout Conversational Co-Pilot & Adapter Seam:** Interactive conversational assistant (`RouteScoutDrawer.tsx`, `scoutService.ts`, `/api/ai/scout/*`) operating across Day Scope and Waypoint Scope. Built on a clean architectural seam separating the pure road-trip domain prompt (`buildScoutDomainPrompt`) from harness-specific operational directives via `AiHarnessAdapter` lifecycle hooks (`decorateScoutPrompt` and `sanitizeResponse`). In `AgyHarnessAdapter`, grants Green-tier search tools (`search_web`, `read_url_content`) and fast synchronous checks for real-world coordinate & exit accuracy, while strictly forbidding background tasks, subagents, and file writes. Generates actionable candidate cards (`json:suggestions`) with 1-click timeline integration and live map preview pins. Operates under the **Human-in-the-Loop Verification** principle: Route Scout is an advisory discovery companion rather than an infallible autopilot; planners verify real-world waypoints via the on-map pin preview and the in-app "Test on Google Maps" link.
-  * **OSRM Routing Protocol Rule:** Coordinate paths sent to the upstream OSRM routing engine must use literal `;` delimiters (e.g. `/${formattedCoords}?overview=...`). **Never URL-encode semicolons as `%3B` in OSRM path segments**, as the router rejects `%3B` with HTTP 400 `InvalidUrl`.
-  * **Google Maps Navigation Links & Place Decoupling:** Generates multi-stop driving links with route-forcing anchors to preserve scenic byways over interstates. Drives exceeding 9 intermediate stops are automatically partitioned into consecutive legs ($\le 9$ intermediate stops each) with dedicated QR codes. Decouples human-friendly display titles (`name`) from clean Google Maps queries (`place_name`), supports positional intermediate `waypoint_place_ids` (`|ChIJ...||`), and auto-extracts base64url Place IDs directly from pasted Maps URLs in the edit drawer.
-  * **Device Handoff:** Supports instant 1-scan QR code phone handoff via Google Code Scanner (`com.google.android.gms:play-services-code-scanner`) and deep linking, local/cloud download staging (`GET /api/device/download/:filename`), and Android SAF file picker import.
-  * **Route Loading, Local Import & Multi-Day Navigation:** Discovers workspace itineraries via Fastify `/api/itineraries`. Supports local JSON file drag-and-drop import via `itineraryParser.ts`. Displays a multi-day leg switcher bar (`DayTabBar.tsx`) to view, edit, and cascade any day in multi-day road trips while keeping in-memory edits intact.
-
-### G. Human-Centered UI/UX Principles (Route Builder Studio)
-* **Clarity & Intuitiveness Over Clutter:** The web interface must be immediately intuitive to a road-tripper. Prioritize clean visual hierarchy, generous spacing, and self-explanatory controls.
-* **Zero Technical Jargon in Primary UI:** Do not display internal verification badges or raw math jargon in user-facing views. Keep cards clean and readable.
-* **Dedicated Top Bar for Global Controls:** Place trip-level controls (search bar, trip date, departure time / catch-up, drive/dwell metrics, Google Maps links, Export & Sync) in a horizontal top header (`AppHeader.tsx`), reserving vertical space in the left panel for the itinerary timeline.
-* **Scannable Waypoints via Progressive Disclosure:** Waypoint cards in `TimelineSidebar.tsx` must be compact and easily scannable by default (stop number badge with category color, stop name, arrival/departure time, dwell duration, and alert indicator). Detailed controls (renaming, category, dwell, trigger distance, speech scripts) belong in an inline expandable edit drawer.
-* **Explicit & Discoverable Actions:** Primary actions must be unmistakable: provide an obvious `+ Add Stop` button, clear inline edit buttons, reorder arrows, and delete icons.
-* **Resizable Workspace:** The waypoint sidebar must be draggable/resizable (320px–680px) with `localStorage` persistence and double-click reset.
+* **A. Background Service Lifecycle:** Runs as an Android Foreground Service (`location` type) with fine/coarse GPS and notification permissions to guarantee continuous background execution alongside Google Maps and media apps.
+* **B. Audio Focus & Transient Pausing:** Requests `AUDIOFOCUS_GAIN_TRANSIENT` on the `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` channel to cleanly pause music (Spotify, YouTube Music) during spoken waypoint alerts, resuming audio immediately on speech completion. Avoids hardcoded inaudible DSP ducking.
+* **C. Android Auto Heads-Up Notifications:** Dispatches high-priority `NotificationCompat.MessagingStyle` heads-up cards over Google Maps using a stable notification ID (`2000`) and conversation identity (`setShortcutId("copilot_alerts")`). Alerts auto-dismiss via speech completion grace period, car session open, or driver action. (See [`docs/reference/android_auto_multitasking_architecture.md`](docs/reference/android_auto_multitasking_architecture.md)).
+* **D. Pace & Schedule Telemetry Engine:** Calculates dynamic ahead/behind schedule deltas relative to planned waypoint milestones, supporting both fixed ISO-dated itineraries and relative ad-hoc routes. Locks in-transit telemetry to confirmed milestones to eliminate parked departure errors.
+* **E. 100% Offline Resilience:** Operates with zero network dependency during drives. GPS satellite reception, local Haversine proximity calculations, on-device JSON itineraries, and local offline TextToSpeech run completely offline.
+* **F. Route Builder Web Studio (`route-builder/`):** Full-stack authoring studio (Fastify backend on `:3001`, React frontend on `:5173`). Features OSRM routing proxies, timeline schedule cascading, multi-stop Google Maps chunking, AI alert generation, and Route Scout co-pilot. Governed by [`route-builder/AGENTS.md`](route-builder/AGENTS.md).
 
 ---
 
 ## 3. Directory Layout
-```
-roadtrip-copilot/
-├── AGENTS.md                  # This handbook
-├── README.md                  # Project overview and setup guide
-├── itineraries/               # Workspace itineraries directory (git-ignored custom routes)
-│   ├── .gitignore             # Ignores *.json while tracking sample_itinerary.json
-│   └── sample_itinerary.json  # Bundled sample route (Phoenix → Sedona → Flagstaff)
-├── docs/
-│   ├── README.md              # Documentation directory map & architectural taxonomy
-│   ├── IDEAS.md               # Feature backlog and uncommitted ideas (incubator)
-│   ├── projects/              # Major multi-session initiatives (with 3-tier planning & ADRs)
-│   │   ├── route-scout-cloud/ # [ACTIVE PROJECT] Production Cloud Architecture, Auth, Bedrock AI & AWS Deployment
-│   │   │   ├── route_scout_cloud_architecture.md # Tier 1 Architectural Blueprint
-│   │   │   ├── WORKING_MODEL.md   # Project planning model, orchestrator-worker protocol & ADR rules
-│   │   │   ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
-│   │   │   ├── decisions/         # Standalone Architecture Decision Record (ADR) files
-│   │   │   └── plan/              # Rolling-wave planning directory
-│   │   │       ├── active/        # Single active Work Package (Tier 3)
-│   │   │       └── archive/       # Completed and retired Work Packages
-│   │   └── android-route-client/  # [QUEUED PROJECT — Phase 2, blocked by cloud] Android Route Editing & Cloud Co-Pilot
-│   │       ├── android_route_editing_and_cloud_client.md # Tier 1 Architectural Blueprint
-│   │       ├── WORKING_MODEL.md   # Project working model, sequencing & dependency rules
-│   │       ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
-│   │       ├── decisions/         # Standalone Architecture Decision Record (ADR) files
-│   │       └── plan/              # Rolling-wave planning directory (queued)
-│   │           ├── active/        # Single active Work Package (Tier 3)
-│   │           └── archive/       # Completed and retired Work Packages
-│   ├── reference/             # Living platform invariants & architectural rationales
-│   │   └── android_auto_multitasking_architecture.md # Coolwalk multitasking model, slot mechanics & design rationale
-│   ├── tasks/                 # Standalone tactical spike plans & feature experiments
-│   │   └── carapp_notification_experiment_implementation_plan.md # Car App Library notification experiment plan
-│   └── archive/               # Completed historical research & superseded specifications
-│       └── route_builder_research_and_architecture.md # Technical specification & domain architecture
-├── scripts/                   # Environment setup & run scripts (run_dhu.sh, setup_env.sh)
-├── gradlew, gradlew.bat       # Gradle wrapper executable
-├── settings.gradle.kts        # Multi-project gradle settings
-├── build.gradle.kts           # Root build configuration
-├── route-builder/             # Full-Stack Web Studio
-│   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
-│   ├── README.md              # User-facing web studio documentation & setup
-│   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)
-│   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
-│   ├── server/                # Fastify TypeScript backend
-│   │   ├── app.ts             # Fastify app factory with CORS and routes
-│   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
-│   │   ├── routes/            # Fastify plugins (routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
-│   │   ├── services/          # Business logic (routeService, geocodeService, routeCache, aiService, deviceService, itineraryStorageService, scoutService)
-│   │   └── types/             # Strict TypeScript interfaces (0 any types)
-│   ├── src/                   # React frontend
-│   │   ├── App.tsx            # Main application layout & state coordinator
-│   │   ├── components/        # AppHeader, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
-│   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
-│   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
-│   │   └── types/             # Frontend data models (routing, ai, scout)
-│   └── tests/                 # Vitest suites: backend, engine, AI, schema/device, and React scheduling workflows (ui/)
-└── app/
-    ├── build.gradle.kts       # App module dependencies & SDK config
-    └── src/
-        ├── test/              # JUnit & Robolectric unit tests (RouteRepositoryTest, RouteListScreenTest, ItineraryTest, WaypointRowModelTest)
-        └── main/
-            ├── AndroidManifest.xml
-            ├── res/
-            │   ├── layout/    # Dashboard (activity_main.xml, incl. collapsible read-only Itinerary card), route library bottom sheet (bottom_sheet_routes.xml, item_route_manage.xml), itinerary stop row (item_waypoint_row.xml)
-            │   ├── drawable/  # Vector assets
-            │   └── xml/
-            │       └── automotive_app_desc.xml
-            └── java/com/roadtrip/copilot/
-                ├── MainActivity.kt        # Phone dashboard, active route card, read-only itinerary progress list, route library sheet, SAF import & volume calibration
-                ├── CopilotService.kt      # Foreground service lifecycle, dynamic route loading & pace telemetry
-                ├── LocationTracker.kt     # Event-driven GPS, sequential progression & pace resolution
-                ├── AudioDuckEngine.kt     # Audio focus, stream routing & TTS manager
-                ├── NotificationEngine.kt  # Android Auto MessagingStyle heads-up cards
-                ├── NotificationReceiver.kt# Broadcast receiver for AA voice reply & dismiss
-                ├── car/                   # Android Auto In-Car UI (Android for Cars App Library)
-                │   ├── CopilotCarAppService.kt   # Automotive app service & host validator
-                │   ├── CopilotCarSession.kt      # Automotive session manager
-                │   ├── CopilotDashboardScreen.kt # PaneTemplate car dashboard with live telemetry
-                │   ├── WaypointListScreen.kt     # ListTemplate for chronological milestones
-                │   ├── RouteListScreen.kt        # Dynamic ListTemplate with 6-item pagination & distraction compliance
-                │   └── SettingsScreen.kt         # ListTemplate for audio ducking toggles & calibration
-                └── model/
-                    ├── RouteRepository.kt # Singleton scanning storage & dynamic ingestion, StateFlow<List<RouteOption>>
-                    ├── RouteOption.kt     # Unified route metadata class
-                    ├── WaypointRowModel.kt# Pure presentation mapper for the phone itinerary list (passed/next/upcoming, arrive/stay/depart text)
-                    ├── AssetProvider.kt   # Interface abstraction for pure JVM unit testing
-                    └── ItineraryModels.kt # Itinerary data classes (V1 & V2 schemas), pace resolution
-```
+The full repository directory layout and component map is maintained in [`docs/reference/directory-layout.md`](docs/reference/directory-layout.md).
+Subproject directory details are maintained locally in their respective handbooks (e.g. [`route-builder/AGENTS.md`](route-builder/AGENTS.md)).
 
 ---
 
@@ -257,39 +90,65 @@ roadtrip-copilot/
 5. **Preserve Literal Semicolon in OSRM Coordinate Paths:** The OSRM routing engine strictly requires unencoded `;` delimiters in its URL path segment. Never call `encodeURIComponent` on coordinate strings passed in URL paths.
 6. **Preserve Android Auto Distraction Constraints:** List templates displayed while driving must never exceed 6 items per page. Always use pagination or truncation in `androidx.car.app` screens.
 7. **Idiomatic Code:** Write concise, null-safe Kotlin and modular, typed TypeScript with single-responsibility components.
-8. **Maintain Clean, Human-Friendly UI:** Never introduce internal debug text or verification claims into `route-builder/`. All UI updates must adhere to Section 2G Human-Centered UI/UX Principles.
-9. **Maintain Directory Layout in Section 3:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in Section 3 so that developers and agents can quickly navigate the codebase without scanning the entire tree.
+8. **Maintain Clean, Human-Friendly UI:** Never introduce internal debug text or verification claims into `route-builder/`. All UI updates must adhere to Human-Centered UI/UX Principles in [`route-builder/AGENTS.md`](route-builder/AGENTS.md) Section 2C.
+9. **Maintain Directory Layout:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in [`docs/reference/directory-layout.md`](docs/reference/directory-layout.md) so that developers and agents can quickly navigate the codebase without scanning the entire tree.
 10. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused. Never leak harness-specific tool bans, terminal commands, or background task mechanics into the domain prompt. Implement all harness capabilities, tool allowlists, and response cleaning via the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
-11. **Adhere to the Project & Task Working Models (Section 6):** Frontier models act as orchestrators (authoring plans, conducting research, verifying code) and delegate implementation to `flash` subagents (`invoke_subagent` with `TypeName: 'self'`, `Model: 'flash'`) to optimize developer quota. For major initiatives in `docs/projects/`, never modify code without an active Work Package, and record all technical surprises in ADRs (`decisions/`) and `DECISIONS.md` before continuing.
+11. **Adhere to the Project & Task Working Models (Section 6):** Frontier models act as orchestrators (authoring plans, conducting research, verifying code) and delegate implementation to cheaper worker subagents per the active harness adapter to optimize developer quota. For major initiatives in `docs/projects/`, never modify code without an active Work Package, and record all technical surprises in ADRs (`decisions/`) and `DECISIONS.md` before continuing.
 
 ---
 
-## 6. Planning & Execution Working Models (Large Projects vs. Smaller Tasks)
+## 6. Planning & Execution Working Models
 For full architectural details and mechanics, see [`docs/README.md`](docs/README.md), [`docs/projects/route-scout-cloud/WORKING_MODEL.md`](docs/projects/route-scout-cloud/WORKING_MODEL.md), and [`docs/projects/android-route-client/WORKING_MODEL.md`](docs/projects/android-route-client/WORKING_MODEL.md).
 
 ### A. Large Multi-Session Projects (`docs/projects/`) — 3-Tier Rolling Wave
-1. **Tier 1: Architectural North Star:** Complete system specification (`route_scout_cloud_architecture.md` / `android_route_editing_and_cloud_client.md`).
-2. **Tier 2: The Phase Roadmap (`plan/ROADMAP.md`):** Milestone sequence and strict Definition of Done (DoD). **No premature micro-tasks for future milestones.**
-3. **Tier 3: The Active Work Package (`plan/active/WP-XX-*.md`):** Single active work package (1–2 session scope) detailing exact file touchpoints, test suites, discoveries, and session handoffs. (On Session 1 or between milestones when `plan/active/` is empty, the Orchestrator's first step is authoring `ROADMAP.md` and the next `WP-XX` before any code edits).
-4. **ADRs & Decision Index (`DECISIONS.md` + `decisions/`):** Compact Table of Contents scanned before every session, backed by standalone ADR files created from `0000-template.md`. If an unexpected technical constraint forces a divergence from the plan, pause and record an ADR before continuing code modifications. At project completion, decisions with lasting cross-project relevance are hoisted to `docs/reference/` and `AGENTS.md`.
+1. Tier 1 Architectural North Star: the complete system specification in the project directory.
+2. Tier 2 Phase Roadmap (`plan/ROADMAP.md`): milestones and strict Definition of Done.
+   Never break milestone N+1 into micro-tasks before N is merged and verified.
+3. Tier 3 Active Work Package (`plan/active/WP-XX-*.md`): exactly ONE at a time, 1-2 session scope.
+4. ADRs (`DECISIONS.md` + `decisions/`): scan the index first; record surprises before coding on.
 
 ### B. Smaller Tactical Tasks & Spikes (`docs/tasks/`) — Single-File Plan
-* **Scope:** Self-contained experiments, bug investigations, or 1–2 session tactical features (e.g., `docs/tasks/carapp_notification_experiment_implementation_plan.md`).
-* **Lightweight Ceremony:** No separate `ROADMAP.md` or `DECISIONS.md` directory. The single task markdown file holds the specification, implementation steps, verification matrix, and inline findings/handoff checklist.
-* **Retirement:** Once completed or superseded, move the task file to `docs/archive/` and promote any permanent architectural lessons to `docs/reference/` or `AGENTS.md`.
+Self-contained experiments or 1-2 session features. One markdown file holds spec, steps,
+verification matrix, and findings. Retire to `docs/archive/` when done.
 
-### C. Orchestrator-Worker Delegation Model (Applies to Both Projects & Tasks)
-* **Primary Agent (Frontier Orchestrator):** Authors plans (`ROADMAP.md`, `WP-XX`, or task specs), handles architectural research, defines interfaces/boundaries, formulates subagent prompts, reviews diffs, and runs final verification test suites.
-* **Subagent Workers (Gemini 3.8 Flash High via `invoke_subagent`):** Handles concrete implementation, boilerplate, isolated utility classes, schema formatting, and unit tests. Invoke with `TypeName: 'self'` and `Model: 'flash'` so the subagent has file-write and test-runner capabilities (use `TypeName: 'research'` with `Model: 'flash'` only for read-only exploration).
+### C. Orchestrator-Worker Delegation Model
+The role split is fixed and harness-independent:
 
-### D. Session Lifecycle (Multi-Session Projects)
-1. **Kickoff:** Read `DECISIONS.md` and `plan/active/` (or bootstrap `ROADMAP.md` + `WP-01` on Session 1) $\to$ confirm scope.
-2. **In-Flight:** Orchestrator delegates bounded implementation tasks to `flash` subagents (`TypeName: 'self'`, `Model: 'flash'`) $\to$ logs ADR if unexpected surprises arise.
-3. **Wrap-Up:** Run test suites $\to$ update active Work Package checklist and handoff log $\to$ archive to `plan/archive/` once Definition of Done is verified.
+* **Orchestrator** (the primary agent) authors plans, researches external API contracts, defines
+  interfaces and boundaries, formulates task prompts, reviews every diff, and runs the
+  verification suites.
+* **Workers** (delegated subagents) implement bounded, explicitly specified units of work and
+  author their tests. Workers never decide architecture.
+
+Non-negotiable properties:
+
+1. **Fresh context.** Every worker starts with no memory. The orchestrator must pass all required
+   context — file paths, interfaces, acceptance criteria, relevant ADR excerpts — in the task prompt.
+2. **Single level only.** Workers cannot spawn further workers in any harness. The orchestrator owns
+   all fan-out and parallelism.
+3. **Bounded tasks only.** Never dispatch open-ended or ambiguous requests to a worker.
+4. **Surprises escalate.** If an unexpected constraint appears, stop and record an ADR (Section 3)
+   before writing any speculative workaround.
+5. **Verification is never delegated.** The orchestrator re-runs the suites and reviews the diff. A
+   worker's own report of success is not evidence.
+
+**Harness-specific mechanics are deliberately NOT defined here.** Which delegation tool to call,
+which worker types exist, and how models are bound belong to the harness in use. Consult your
+harness adapter before delegating:
+
+* **Antigravity:** `.agents/rules/antigravity-harness.md`
+* **OpenCode:** `.opencode/rules/harness.md`
+
+### D. Session Lifecycle
+1. **Kickoff:** read `DECISIONS.md` and the active Work Package. If `plan/active/` is empty, author
+   `ROADMAP.md` and the next WP before touching code. State scope to the user, then begin.
+2. **In-flight:** delegate bounded implementation; log ADRs on surprises.
+3. **Wrap-up:** run the verification suites, sync living docs, update the WP handoff log, archive the
+   WP once its Definition of Done is verified.
 
 ### E. Project Sequencing & Dependencies
-1. **Phase 1 [ACTIVE]: `docs/projects/route-scout-cloud/`:** Focus all current planning and execution on the cloud backend (AWS Bedrock, Fastify Lambda, S3 persistence, dual-mode auth).
-2. **Phase 2 [QUEUED]: `docs/projects/android-route-client/`:** Strictly blocked until Phase 1 cloud deliverables reach their Definition of Done. No work packages in `docs/projects/android-route-client/plan/active/` may begin execution until Phase 1 completes.
+1. **Phase 1 [ACTIVE]:** `docs/projects/route-scout-cloud/`.
+2. **Phase 2 [QUEUED]:** `docs/projects/android-route-client/`, blocked until Phase 1 is Done.
 
 ---
 
