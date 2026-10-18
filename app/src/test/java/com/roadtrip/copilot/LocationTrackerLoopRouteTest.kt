@@ -24,15 +24,15 @@ class LocationTrackerLoopRouteTest {
 
     private val loopCheckpoints = listOf(
         Checkpoint(
-            id = "origin_home",
-            name = "271 State Street",
-            lat = 42.65260,
-            lng = -73.75620,
+            id = "origin_park",
+            name = "The Crossings of Colonie",
+            lat = 42.7160,
+            lng = -73.7870,
             type = "origin",
             triggerRadiusMiles = 0.3,
             offsetMinutesFromStart = 0,
             notification = CheckpointNotification(
-                title = "State Street Departure",
+                title = "The Crossings Departure",
                 message = "Ready to begin your scenic drive.",
                 speech = "Welcome to your road trip departure point."
             )
@@ -80,17 +80,17 @@ class LocationTrackerLoopRouteTest {
             )
         ),
         Checkpoint(
-            id = "dest_home",
-            name = "Home (State Street)",
+            id = "dest_park",
+            name = "The Crossings of Colonie",
             lat = 42.7160,
             lng = -73.7870,
             type = "destination",
             triggerRadiusMiles = 0.5,
             offsetMinutesFromStart = 15,
             notification = CheckpointNotification(
-                title = "Arriving Home",
+                title = "Arriving at The Crossings",
                 message = "Test loop complete!",
-                speech = "Approaching final destination. You have returned home."
+                speech = "Approaching final destination. You have returned to the park."
             )
         )
     )
@@ -110,23 +110,23 @@ class LocationTrackerLoopRouteTest {
         val startTime = System.currentTimeMillis()
         tracker.setCheckpoints(loopCheckpoints, startTime)
 
-        // Step 1: Parked in driveway at Origin (lat: 42.65260, lng: -73.75620)
-        tracker.evaluate(42.65260, -73.75620, 0.0)
+        // Step 1: Parked at Origin (lat: 42.7160, lng: -73.7870)
+        tracker.evaluate(42.7160, -73.7870, 0.0)
 
         assertNotNull(lastResult)
         // Checkpoint 0 should trigger
         assertEquals(1, lastResult!!.alerts.size)
-        assertEquals("origin_home", lastResult!!.alerts[0].id)
+        assertEquals("origin_park", lastResult!!.alerts[0].id)
         assertTrue("Speech should be departure speech", lastResult!!.alerts[0].speech.contains("departure"))
 
-        // Next checkpoint MUST be Cumberland Farms, NOT Home
+        // Next checkpoint MUST be Cumberland Farms, NOT Destination
         assertEquals("cumberland_farms", lastResult!!.nextCheckpoint?.id)
 
-        // Step 2: Driving down State Street (0.2 miles from home, still within 0.5 mi of destination)
-        tracker.evaluate(42.7250, -73.7240, 30.0)
+        // Step 2: Driving down park road (0.11 miles from origin, still within 0.5 mi of destination)
+        tracker.evaluate(42.7175, -73.7860, 30.0)
 
         // Destination must NOT have triggered
-        assertTrue("No alert should trigger mid-street near home", lastResult!!.alerts.isEmpty())
+        assertTrue("No alert should trigger mid-street near park", lastResult!!.alerts.isEmpty())
         assertEquals("cumberland_farms", lastResult!!.nextCheckpoint?.id)
 
         // Step 3: Arriving at Cumberland Farms
@@ -145,13 +145,13 @@ class LocationTrackerLoopRouteTest {
         tracker.evaluate(42.7365, -73.7129, 25.0)
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("boght_rd", lastResult!!.alerts[0].id)
-        assertEquals("dest_home", lastResult!!.nextCheckpoint?.id)
+        assertEquals("dest_park", lastResult!!.nextCheckpoint?.id)
 
-        // Step 6: Returning Home
+        // Step 6: Returning to The Crossings
         tracker.evaluate(42.7160, -73.7870, 5.0)
         assertEquals(1, lastResult!!.alerts.size)
-        assertEquals("dest_home", lastResult!!.alerts[0].id)
-        assertTrue(lastResult!!.alerts[0].speech.contains("returned home"))
+        assertEquals("dest_park", lastResult!!.alerts[0].id)
+        assertTrue(lastResult!!.alerts[0].speech.contains("returned"))
         assertNull("All waypoints visited", lastResult!!.nextCheckpoint)
     }
 
@@ -163,8 +163,8 @@ class LocationTrackerLoopRouteTest {
 
         tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis())
 
-        // Start at driveway
-        tracker.evaluate(42.65260, -73.75620, 0.0)
+        // Start at park origin
+        tracker.evaluate(42.7160, -73.7870, 0.0)
         assertEquals("cumberland_farms", lastResult!!.nextCheckpoint?.id)
 
         // Visit Cumberland Farms
@@ -175,10 +175,10 @@ class LocationTrackerLoopRouteTest {
         tracker.evaluate(42.7473, -73.7204, 30.0)
         assertEquals("boght_rd", lastResult!!.nextCheckpoint?.id)
 
-        // Skip Boght Road and drive directly Home
+        // Skip Boght Road and drive directly back to Park
         tracker.evaluate(42.7160, -73.7870, 10.0)
         assertEquals(1, lastResult!!.alerts.size)
-        assertEquals("dest_home", lastResult!!.alerts[0].id)
+        assertEquals("dest_park", lastResult!!.alerts[0].id)
         assertNull("All waypoints completed after skip", lastResult!!.nextCheckpoint)
     }
 
@@ -191,8 +191,8 @@ class LocationTrackerLoopRouteTest {
         val routeWithGenericStop = listOf(
             Checkpoint(
                 id = "origin_start",
-                name = "Home Departure",
-                lat = 42.65260,
+                name = "Park Departure",
+                lat = 42.7160,
                 lng = -73.7870,
                 type = "origin",
                 triggerRadiusMiles = 0.3,
@@ -249,7 +249,7 @@ class LocationTrackerLoopRouteTest {
         tracker.setCheckpoints(routeWithGenericStop, startTime)
 
         // 1. Departure triggers origin alert
-        tracker.evaluate(42.65260, -73.7870, 0.0)
+        tracker.evaluate(42.7160, -73.7870, 0.0)
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("origin_start", lastResult!!.alerts[0].id)
         assertEquals("grocery_errand", lastResult!!.nextCheckpoint?.id)
@@ -286,8 +286,8 @@ class LocationTrackerLoopRouteTest {
         val routeWithClearedStop = listOf(
             Checkpoint(
                 id = "origin_start",
-                name = "Home Departure",
-                lat = 42.65260,
+                name = "Park Departure",
+                lat = 42.7160,
                 lng = -73.7870,
                 type = "origin",
                 triggerRadiusMiles = 0.3,
@@ -321,7 +321,7 @@ class LocationTrackerLoopRouteTest {
         tracker.setCheckpoints(routeWithClearedStop, startTime)
 
         // 1. Departure triggers origin alert
-        tracker.evaluate(42.65260, -73.7870, 0.0)
+        tracker.evaluate(42.7160, -73.7870, 0.0)
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("origin_start", lastResult!!.alerts[0].id)
 
@@ -349,8 +349,8 @@ class LocationTrackerLoopRouteTest {
         val legacyRoute = listOf(
             Checkpoint(
                 id = "origin_start",
-                name = "Home Departure",
-                lat = 42.65260,
+                name = "Park Departure",
+                lat = 42.7160,
                 lng = -73.7870,
                 triggerRadiusMiles = 0.3,
                 offsetMinutesFromStart = 0,
@@ -381,7 +381,7 @@ class LocationTrackerLoopRouteTest {
         tracker.setCheckpoints(legacyRoute, startTime)
 
         // 1. Departure triggers origin alert
-        tracker.evaluate(42.65260, -73.7870, 0.0)
+        tracker.evaluate(42.7160, -73.7870, 0.0)
         assertEquals(1, lastResult!!.alerts.size)
 
         // 2. Arriving at legacy untyped milestone
@@ -402,8 +402,8 @@ class LocationTrackerLoopRouteTest {
         val routeWithBlankSpeech = listOf(
             Checkpoint(
                 id = "origin_start",
-                name = "Home",
-                lat = 42.65260,
+                name = "Park",
+                lat = 42.7160,
                 lng = -73.7870,
                 type = "origin",
                 triggerRadiusMiles = 0.3,
@@ -426,7 +426,7 @@ class LocationTrackerLoopRouteTest {
         tracker.setCheckpoints(routeWithBlankSpeech, startTime)
 
         // 1. Departure
-        tracker.evaluate(42.65260, -73.7870, 0.0)
+        tracker.evaluate(42.7160, -73.7870, 0.0)
 
         // 2. Arriving at lookout point
         tracker.evaluate(42.7500, -73.7300, 10.0)
@@ -444,9 +444,9 @@ class LocationTrackerLoopRouteTest {
         tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis())
 
         // 1. Departure at origin
-        tracker.evaluate(42.65260, -73.75620, 0.0)
+        tracker.evaluate(42.7160, -73.7870, 0.0)
         assertEquals(1, lastResult!!.alerts.size)
-        assertEquals("origin_home", lastResult!!.alerts[0].id)
+        assertEquals("origin_park", lastResult!!.alerts[0].id)
         assertEquals("cumberland_farms", lastResult!!.nextCheckpoint?.id)
 
         // 2. Driver skips BOTH Cumberland Farms (stop 1) AND Haswell Road (stop 2),
@@ -456,8 +456,8 @@ class LocationTrackerLoopRouteTest {
         // Boght Road must trigger successfully even after skipping 2 consecutive stops!
         assertEquals(1, lastResult!!.alerts.size)
         assertEquals("boght_rd", lastResult!!.alerts[0].id)
-        // Next checkpoint must now be destination Home
-        assertEquals("dest_home", lastResult!!.nextCheckpoint?.id)
+        // Next checkpoint must now be destination
+        assertEquals("dest_park", lastResult!!.nextCheckpoint?.id)
     }
 
     @Test
@@ -472,7 +472,7 @@ class LocationTrackerLoopRouteTest {
         tracker1.setCheckpoints(loopCheckpoints, startTime, routeIdentifier = routeId)
 
         // Start and visit Cumberland Farms
-        tracker1.evaluate(42.65260, -73.75620, 0.0)
+        tracker1.evaluate(42.7160, -73.7870, 0.0)
         tracker1.evaluate(42.7402, -73.7355, 15.0)
         assertEquals("haswell_rd", lastResult!!.nextCheckpoint?.id)
 
@@ -482,7 +482,7 @@ class LocationTrackerLoopRouteTest {
         }
         tracker2.setCheckpoints(loopCheckpoints, startTime, routeIdentifier = routeId, restorePersisted = true)
 
-        // Tracker2 should restore that origin_home and cumberland_farms are already visited
+        // Tracker2 should restore that origin_park and cumberland_farms are already visited
         assertEquals("haswell_rd", lastResult!!.nextCheckpoint?.id)
         assertEquals("In Progress", lastResult!!.scheduleDelta?.statusText)
 
@@ -501,11 +501,11 @@ class LocationTrackerLoopRouteTest {
         tracker.setCheckpoints(loopCheckpoints, startTime, routeIdentifier = routeId)
 
         // Complete the entire route: origin -> cumberland -> haswell -> boght -> dest
-        tracker.evaluate(42.65260, -73.75620, 0.0) // origin
+        tracker.evaluate(42.7160, -73.7870, 0.0) // origin
         tracker.evaluate(42.7402, -73.7355, 15.0)    // cumberland
         tracker.evaluate(42.7483, -73.7274, 25.0)    // haswell
         tracker.evaluate(42.7365, -73.7129, 25.0)    // boght
-        tracker.evaluate(42.65260, -73.75620, 0.0) // dest
+        tracker.evaluate(42.7160, -73.7870, 0.0) // dest
 
         // Now all checkpoints are visited
         assertNull(lastResult!!.nextCheckpoint)
@@ -517,7 +517,7 @@ class LocationTrackerLoopRouteTest {
         secondTracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis(), routeIdentifier = routeId, restorePersisted = true)
 
         // Should have auto-reset because all checkpoints were previously visited!
-        assertEquals("origin_home", lastResult!!.nextCheckpoint?.id)
+        assertEquals("origin_park", lastResult!!.nextCheckpoint?.id)
         assertEquals("Awaiting Departure", lastResult!!.scheduleDelta?.statusText)
 
         secondTracker.clearVisitedState(routeId)
@@ -531,7 +531,7 @@ class LocationTrackerLoopRouteTest {
         // Write a visited set with timestamp 13 hours in the past
         val thirteenHoursAgo = System.currentTimeMillis() - (13 * 60 * 60 * 1000L)
         prefs.edit()
-            .putStringSet("visited_$routeId", setOf("origin_home", "cumberland_farms"))
+            .putStringSet("visited_$routeId", setOf("origin_park", "cumberland_farms"))
             .putLong("visited_${routeId}_ts", thirteenHoursAgo)
             .apply()
 
@@ -540,8 +540,8 @@ class LocationTrackerLoopRouteTest {
         }
         tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis(), routeIdentifier = routeId, restorePersisted = true)
 
-        // Expired visited state must be cleared: starts fresh at origin_home
-        assertEquals("origin_home", lastResult!!.nextCheckpoint?.id)
+        // Expired visited state must be cleared: starts fresh at origin_park
+        assertEquals("origin_park", lastResult!!.nextCheckpoint?.id)
         assertEquals("Awaiting Departure", lastResult!!.scheduleDelta?.statusText)
 
         tracker.clearVisitedState(routeId)
@@ -556,7 +556,7 @@ class LocationTrackerLoopRouteTest {
         tracker.clearVisitedState(routeId)
 
         tracker.setCheckpoints(loopCheckpoints, System.currentTimeMillis(), routeIdentifier = routeId)
-        tracker.evaluate(42.65260, -73.75620, 0.0) // origin
+        tracker.evaluate(42.7160, -73.7870, 0.0) // origin
         tracker.evaluate(42.7402, -73.7355, 15.0)    // cumberland
 
         assertEquals("haswell_rd", lastResult!!.nextCheckpoint?.id)
@@ -564,7 +564,7 @@ class LocationTrackerLoopRouteTest {
         // Explicitly reset progress
         tracker.resetProgress()
 
-        assertEquals("origin_home", lastResult!!.nextCheckpoint?.id)
+        assertEquals("origin_park", lastResult!!.nextCheckpoint?.id)
         assertEquals("Awaiting Departure", lastResult!!.scheduleDelta?.statusText)
 
         tracker.clearVisitedState(routeId)

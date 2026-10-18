@@ -51,17 +51,17 @@ class ItineraryTest {
 
     @Test
     fun testHaversineDistanceAccuracy() {
-        // Empire State Plaza Departure
-        val lat1 = 42.65260
-        val lon1 = -73.75620
+        // Empire State Plaza Albany Departure
+        val lat1 = 42.6526
+        val lon1 = -73.7562
 
-        // Nassau Destination
-        val lat2 = 42.81450
-        val lon2 = -73.94050
+        // Proctors Theatre Schenectady Destination
+        val lat2 = 42.8145
+        val lon2 = -73.9405
 
         val distance = haversineMiles(lat1, lon1, lat2, lon2)
-        // Straight line distance between Albany and Nassau is ~15.5 miles
-        assertTrue("Straight-line distance should be ~15.5 miles", distance in 15.0..16.0)
+        // Straight line distance between Albany and Schenectady is ~14.6 miles
+        assertTrue("Straight-line distance should be ~14.6 miles", distance in 14.0..15.0)
     }
 
     @Test
@@ -280,7 +280,7 @@ class ItineraryTest {
         // Sample Single-Route Itinerary exported from Route Builder
         val singleRouteJson = """
         {
-          "trip_name": "Albany to Nassau Single Route Test",
+          "trip_name": "Albany to Schenectady Single Route Test",
           "date": "2026-10-09",
           "timezone": "America/New_York",
           "metadata": {
@@ -289,14 +289,14 @@ class ItineraryTest {
             "created_at": "2026-09-10T12:00:00.000Z"
           },
           "origin": "Departure: Empire State Plaza",
-          "destination": "Destination: Nassau Proctors Theatre",
+          "destination": "Destination: Proctors Theatre",
           "checkpoints": [
             {
-              "id": "cp_Albany",
+              "id": "cp_albany",
               "name": "Departure: Empire State Plaza",
               "type": "origin",
-              "lat": 42.65260,
-              "lng": -73.75620,
+              "lat": 42.6526,
+              "lng": -73.7562,
               "offset_minutes_from_start": 0,
               "dwell_minutes": 0,
               "trigger_radius_miles": 0.5,
@@ -307,17 +307,17 @@ class ItineraryTest {
               }
             },
             {
-              "id": "cp_nassau",
-              "name": "Destination: Nassau Proctors Theatre",
+              "id": "cp_schenectady",
+              "name": "Destination: Proctors Theatre",
               "type": "destination",
-              "lat": 42.81450,
-              "lng": -73.94050,
+              "lat": 42.8145,
+              "lng": -73.9405,
               "offset_minutes_from_start": 30,
               "dwell_minutes": 15,
               "trigger_radius_miles": 1.0,
               "notification": {
                 "title": "Arrival",
-                "message": "Welcome to Nassau",
+                "message": "Welcome to Schenectady",
                 "speech": "Arrived at destination."
               }
             }
@@ -326,19 +326,19 @@ class ItineraryTest {
         """.trimIndent()
 
         val singleRouteItinerary = Gson().fromJson(singleRouteJson, Itinerary::class.java)
-        assertEquals("Albany to Nassau Single Route Test", singleRouteItinerary.tripName)
+        assertEquals("Albany to Schenectady Single Route Test", singleRouteItinerary.tripName)
         assertNotNull(singleRouteItinerary.checkpoints)
         assertEquals(2, singleRouteItinerary.checkpoints!!.size)
 
         val singleCp0 = singleRouteItinerary.checkpoints!![0]
-        assertEquals("cp_Albany", singleCp0.id)
+        assertEquals("cp_albany", singleCp0.id)
         assertEquals("origin", singleCp0.type)
         assertEquals(0, singleCp0.dwellMinutes)
         assertEquals(0, singleCp0.offsetMinutesFromStart)
         assertEquals(0.5, singleCp0.triggerRadiusMiles, 0.001)
 
         val singleCp1 = singleRouteItinerary.checkpoints!![1]
-        assertEquals("cp_nassau", singleCp1.id)
+        assertEquals("cp_schenectady", singleCp1.id)
         assertEquals("destination", singleCp1.type)
         assertEquals(15, singleCp1.dwellMinutes)
         assertEquals(30, singleCp1.offsetMinutesFromStart)

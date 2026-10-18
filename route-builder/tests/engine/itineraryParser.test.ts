@@ -99,22 +99,22 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
 
   it('correctly parses single-route itineraries (e.g. test_itinerary.json)', () => {
     const singleJson = {
-      trip_name: 'Test Run: Albany to Nassau',
+      trip_name: 'Test Run: Albany to Schenectady',
       date: '2026-09-06',
       timezone: 'America/New_York',
       checkpoints: [
         {
-          id: 'depart_Albany',
+          id: 'depart_albany',
           name: 'Departure: Empire State Plaza',
-          lat: 42.65260,
-          lng: -73.75620,
+          lat: 42.6526,
+          lng: -73.7562,
           trigger_radius_miles: 0.3,
         },
         {
-          id: 'dest_nassau',
+          id: 'dest_schenectady',
           name: 'Arrival: Proctors Theatre',
-          lat: 42.81450,
-          lng: -73.94050,
+          lat: 42.8145,
+          lng: -73.9405,
           trigger_radius_miles: 0.5,
         },
       ],
@@ -122,7 +122,7 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
 
     const trip = parseItineraryJson(singleJson, 'test_itinerary.json');
 
-    expect(trip.tripName).toBe('Test Run: Albany to Nassau');
+    expect(trip.tripName).toBe('Test Run: Albany to Schenectady');
     expect(trip.isMultiDay).toBe(false);
     expect(trip.days).toHaveLength(1);
     expect(trip.days[0].dayNumber).toBe(1);

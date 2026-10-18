@@ -339,13 +339,13 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
   describe('Single Route Itinerary Export', () => {
     it('preserves absolute targets without inventing relative offsets', () => {
       const itinerary = formatSingleRouteItinerary({
-        tripName: 'Test Run: Albany to Nassau',
+        tripName: 'Test Run: Albany to Schenectady',
         date: '2026-09-06',
         timezone: 'America/New_York',
         waypoints: sampleWaypoints,
       });
 
-      expect(itinerary.trip_name).toBe('Test Run: Albany to Nassau');
+      expect(itinerary.trip_name).toBe('Test Run: Albany to Schenectady');
       expect(itinerary.checkpoints).toHaveLength(3);
       expect(itinerary.google_maps_url).toContain('https://www.google.com/maps/dir/?api=1');
       expect(itinerary.checkpoints[0].offset_minutes_from_start).toBeUndefined();

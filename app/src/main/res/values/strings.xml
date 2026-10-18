@@ -14,7 +14,7 @@
     <string name="btn_calibrate">Calibrate Car Volume (12s Loop)</string>
     <string name="btn_clear_log">Clear Log</string>
     <string name="route_phx_abq">Phoenix to Albuquerque (Oct 9–12)</string>
-    <string name="route_ny_test">Albany to Nassau (NY 19-mi Test)</string>
+    <string name="route_ny_test">Albany to Schenectady (NY 15-mi Test)</string>
     <string name="channel_status_name">Roadtrip Status Service</string>
     <string name="channel_status_desc">Persistent background notification keeping the co-pilot alive.</string>
     <string name="channel_alert_name">Roadtrip Scenic &amp; Waypoint Alerts</string>

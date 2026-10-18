@@ -219,7 +219,7 @@ roadtrip-copilot/
   ```
 * **Simulate Location Mock via ADB:**
   ```bash
-  adb emu geo fix -73.75620 42.65260
+  adb emu geo fix -73.7562 42.6526
   ```
 
 ### Route Builder Web Studio Commands

@@ -184,19 +184,19 @@ describe('Nominatim Geocoding Proxy (/api/routing/geocode)', () => {
     const mockNominatimResponse: NominatimRawResult[] = [
       {
         place_id: 355370122,
-        lat: '42.65260',
-        lon: '-73.75620',
+        lat: '42.6525800',
+        lon: '-73.7562300',
         class: 'building',
         type: 'house',
         name: '',
-        display_name: '271, State Street, Newtonville, Latham, Town of Colonie, Albany County, New York, 12110, United States',
+        display_name: '100, State Street, Downtown, Albany, Albany County, New York, 12207, United States',
         address: {
-          house_number: '271',
+          house_number: '100',
           road: 'State Street',
-          village: 'Latham',
+          city: 'Albany',
           state: 'New York',
           'ISO3166-2-lvl4': 'US-NY',
-          postcode: '12110',
+          postcode: '12207',
           country: 'United States',
           country_code: 'us',
         },
@@ -212,19 +212,19 @@ describe('Nominatim Geocoding Proxy (/api/routing/geocode)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/routing/geocode?q=271+Albany+Shaker+Rd',
+      url: '/api/routing/geocode?q=100+State+St',
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body).toHaveLength(1);
     expect(body[0]).toEqual({
-      lat: 42.65260,
-      lng: -73.75620,
-      displayName: '271, State Street, Newtonville, Latham, Town of Colonie, Albany County, New York, 12110, United States',
-      name: '271 State Street',
-      placeName: '271 State Street',
-      address: '271 State Street, Latham, NY 12110',
+      lat: 42.65258,
+      lng: -73.75623,
+      displayName: '100, State Street, Downtown, Albany, Albany County, New York, 12207, United States',
+      name: '100 State Street',
+      placeName: '100 State Street',
+      address: '100 State Street, Albany, NY 12207',
       category: 'scenic_pull_off',
     });
   });
