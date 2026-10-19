@@ -107,6 +107,11 @@ The application works with zero configuration by default in an Antigravity envir
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
 | `PORT` | `3001` | Fastify backend listening port. |
+| `AUTH_ENABLED` | `false` | Set to `true` in cloud production to enforce Google OIDC + `ALLOWED_EMAILS` gating (`false` in `npm run dev` for local bypass). |
+| `ALLOWED_EMAILS` | *(None)* | Comma-separated allowlist of authorized Google account emails when `AUTH_ENABLED=true` (or resolved from SSM `/roadtrip-copilot/allowed-emails`). |
+| `GOOGLE_CLIENT_ID` | *(None)* | Google OAuth 2.0 Web Client ID (or resolved from SSM `/roadtrip-copilot/google-client-id`). |
+| `GOOGLE_CLIENT_SECRET` | *(None)* | Google OAuth 2.0 Web Client Secret (or resolved at runtime from SSM SecureString `/roadtrip-copilot/google-client-secret`). |
+| `JWT_SECRET` | *(None)* | Server HMAC-SHA256 secret for signing session cookies and Bearer JWTs (or resolved at runtime from SSM SecureString `/roadtrip-copilot/jwt-secret`). |
 | `GEMINI_API_KEY` | *(None)* | Optional Google AI Studio developer API key. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Explicit Gemini model ID for Google AI Studio cloud calls. |
 | `AGY_MODEL` | *(Auto-detected)* | Override the model passed to `agy` (by default auto-resolves the newest Flash model from `agy models`). |
@@ -116,11 +121,11 @@ The application works with zero configuration by default in an Antigravity envir
 
 ## Testing & Quality Gates
 
-The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 162 Vitest unit and integration tests:
+The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 224 Vitest unit and integration tests:
 
 ```bash
-npm test              # Run all 162 tests across all suites
-npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache
+npm test              # Run all 224 tests across all suites
+npm run test:backend  # Fastify auth, routing proxies, Nominatim headers, OSRM cache
 npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
 npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
 npm run test:schema   # Itinerary V2 JSON export and ADB device service

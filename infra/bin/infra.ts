@@ -24,8 +24,24 @@ const githubOidcProviderArn =
   (app.node.tryGetContext('githubOidcProviderArn') as string | undefined) ||
   process.env.GITHUB_OIDC_PROVIDER_ARN;
 
+const authEnabled =
+  process.env.AUTH_ENABLED ||
+  (app.node.tryGetContext('authEnabled') as string | undefined);
+
+const allowedEmails =
+  process.env.ALLOWED_EMAILS ||
+  (app.node.tryGetContext('allowedEmails') as string | undefined);
+
+const googleClientId =
+  process.env.GOOGLE_CLIENT_ID ||
+  (app.node.tryGetContext('googleClientId') as string | undefined);
+
 new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   env: { account, region: selectedRegion },
   githubRepo,
   githubOidcProviderArn,
+  authEnabled,
+  allowedEmails,
+  googleClientId,
 });
+

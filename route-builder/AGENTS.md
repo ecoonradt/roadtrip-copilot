@@ -46,6 +46,11 @@
 * **Google Maps Links & Place Decoupling:** Generates multi-stop driving links with route-forcing anchors. Drives exceeding 9 intermediate stops are automatically partitioned into consecutive legs ($\le 9$ intermediate stops each) with dedicated QR codes. Decouples human-friendly display titles (`name`) from clean Google Maps queries (`place_name`), supports positional intermediate `waypoint_place_ids` (`|ChIJ...||`), and auto-extracts base64url Place IDs directly from pasted Maps URLs in the edit drawer.
 * **Device Handoff & Discovery:** Supports instant 1-scan QR code phone handoff via Google Code Scanner, local/cloud download staging (`GET /api/device/download/:filename`), and Android SAF file picker import. Discovers workspace itineraries via Fastify `/api/itineraries` and supports multi-day navigation tabs (`DayTabBar.tsx`).
 
+### G. Dual-Mode Google OIDC Authentication & Allowlist Gating
+* **Zero-Trust Cloud Gate (`AUTH_ENABLED === 'true'`):** Protects `/api/*` endpoints via `authGuard.ts` (`preHandler` hook) supporting both browser sessions (`HTTP-Only`, `SameSite=Lax`, `Secure` cookie `copilot_session`) and native Android clients (`Authorization: Bearer <jwt>`), verified against `ALLOWED_EMAILS` (`401 Unauthorized` when unauthenticated, `403 Forbidden` when not allowlisted).
+* **Hybrid Local Dev Bypass (`AUTH_ENABLED !== 'true'`):** Automatically bypasses OIDC enforcement and injects a deterministic local developer user (`local-dev@localhost`) during `npm run dev` and automated tests.
+* **Runtime SSM Secret Resolution:** Resolves `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, and `ALLOWED_EMAILS` from direct environment variables first, falling back to cached AWS SSM Parameter Store `SecureString` lookups (`/roadtrip-copilot/*`) on Lambda cold start.
+
 ---
 
 ## 3. Directory Layout
@@ -67,13 +72,17 @@ route-builder/
 ├── server/
 │   ├── app.ts                  # Fastify application factory
 │   ├── index.ts                # Server entrypoint (:3001)
+│   ├── hooks/
+│   │   └── authGuard.ts        # Dual-mode OIDC cookie/Bearer JWT & allowlist preHandler hook
 │   ├── routes/
+│   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
 │   │   ├── ai.ts               # /api/copilot/generate & /api/ai/status
 │   │   ├── device.ts           # /api/device (network-info, staging, download)
 │   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
 │   │   └── scout.ts            # /api/ai/scout (conversational assistant & quick prompts)
 │   ├── services/
+│   │   ├── authService.ts      # Google OIDC token verification, PKCE, HS256 JWT signing & SSM secret loader
 │   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
 │   │   ├── routeService.ts     # OSRM road graph query engine (literal semicolon paths)
 │   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
@@ -83,11 +92,12 @@ route-builder/
 │   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
 │   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
 │   │   └── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
-│   └── types/                  # Strict server TypeScript types (routing, ai, scout)
+│   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
 ├── src/
-│   ├── App.tsx                 # Main layout & interactive map state coordinator
+│   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator
 │   ├── components/
-│   │   ├── AppHeader.tsx       # Top bar with route title, metrics, search, and global actions
+│   │   ├── AppHeader.tsx       # Top bar with route title, metrics, search, user badge, and global actions
+│   │   ├── AuthGateScreen.tsx  # Google OIDC sign-in & 403 private preview restriction screen
 │   │   ├── DayTabBar.tsx       # Multi-day leg switcher tabs
 │   │   ├── MapCanvas.tsx       # Leaflet map with custom waypoint markers & OSRM polyline
 │   │   ├── SearchBar.tsx       # Debounced address search via Nominatim proxy
@@ -106,12 +116,12 @@ route-builder/
 │   ├── services/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
-│   └── types/                  # Frontend data models (routing, ai, scout)
+│   └── types/                  # Frontend data models (auth, routing, ai, scout)
 └── tests/                      # Vitest regression suites
     ├── ai/                     # Harness adapters, alert/schema generation, Scout
-    ├── backend/                # Routing, storage, device handoff, geocoding
+    ├── backend/                # Auth, routing, storage, device handoff, geocoding
     ├── engine/                 # Cascade, schema, timezone and navigation-link math
-    └── ui/                     # Portable React scheduling acceptance tests & harness
+    └── ui/                     # Portable React scheduling & auth gate acceptance tests & harness
 ```
 
 ---

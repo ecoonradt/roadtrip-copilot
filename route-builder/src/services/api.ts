@@ -11,6 +11,7 @@ import type {
   ScoutScope,
   ScoutStreamEvent,
 } from '../types/scout';
+import type { AuthStatusResponse } from '../types/auth';
 
 export interface GenerateAlertRequestOptions {
   apiKey?: string;
@@ -372,4 +373,51 @@ export async function generateDayTitle(
     throw new Error(errorData.error || `Day title generation failed with HTTP ${res.status}`);
   }
   return (await res.json()) as { title: string; engine: AiEngineType };
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
+  try {
+    const res = await fetch('/api/auth/status', {
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) {
+      return {
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
+        user: null,
+      };
+    }
+    if (!res.ok) {
+      try {
+        const errorData = (await res.json()) as AuthStatusResponse;
+        if (typeof errorData?.authEnabled === 'boolean') {
+          return errorData;
+        }
+      } catch {
+        // Fallback below
+      }
+      return {
+        authEnabled: false,
+        authenticated: true,
+        authorized: true,
+        user: null,
+      };
+    }
+    return (await res.json()) as AuthStatusResponse;
+  } catch {
+    return {
+      authEnabled: false,
+      authenticated: true,
+      authorized: true,
+      user: null,
+    };
+  }
+}
+
+export async function logoutAuth(): Promise<void> {
+  await fetch('/api/auth/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
 }

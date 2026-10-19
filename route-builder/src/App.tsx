@@ -6,8 +6,18 @@ import { DayTabBar } from './components/DayTabBar';
 import { RouteSelectorModal } from './components/RouteSelectorModal';
 import { ExportModal } from './components/ExportModal';
 import { RouteScoutDrawer } from './components/RouteScoutDrawer';
-import { fetchRoute, fetchItinerary, saveItinerary, fetchAiStatus, generateDayTitle } from './services/api';
+import { AuthGateScreen } from './components/AuthGateScreen';
+import {
+  fetchRoute,
+  fetchItinerary,
+  saveItinerary,
+  fetchAiStatus,
+  generateDayTitle,
+  fetchAuthStatus,
+  logoutAuth,
+} from './services/api';
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
+import type { AuthStatusResponse } from './types/auth';
 import type { ScoutScope, ScoutSuggestion } from './types/scout';
 import {
   calculateTimelineCascade,
@@ -160,6 +170,45 @@ export function App() {
     return () => {
       isSubscribed = false;
     };
+  }, []);
+
+  // Authentication state (optimistic initial state for zero waterfall in local mode / tests)
+  const [authStatus, setAuthStatus] = useState<AuthStatusResponse>({
+    authEnabled: false,
+    authenticated: true,
+    authorized: true,
+    user: null,
+  });
+
+  useEffect(() => {
+    let isSubscribed = true;
+    if (typeof fetchAuthStatus === 'function') {
+      fetchAuthStatus()
+        .then((status) => {
+          if (isSubscribed && status) {
+            setAuthStatus(status);
+          }
+        })
+        .catch(() => {
+          // Keep default local mode on error
+        });
+    }
+    return () => {
+      isSubscribed = false;
+    };
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await logoutAuth();
+    } finally {
+      setAuthStatus({
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
+        user: null,
+      });
+    }
   }, []);
 
   // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
@@ -1021,6 +1070,10 @@ export function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  if (authStatus.authEnabled && (!authStatus.authenticated || !authStatus.authorized)) {
+    return <AuthGateScreen status={authStatus} onLogout={handleLogout} />;
+  }
+
   return (
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950">
       {/* Top Application Header: Branding, Search, Schedule, Telemetry & Export */}
@@ -1050,6 +1103,9 @@ export function App() {
         onToggleScout={handleToggleScout}
         isScoutOpen={isScoutOpen}
         aiAvailable={aiAvailable}
+        authEnabled={authStatus.authEnabled}
+        authUser={authStatus.user}
+        onLogout={handleLogout}
       />
 
       {/* Multi-Day Leg Switcher Bar (Visible for multi-day itineraries) */}

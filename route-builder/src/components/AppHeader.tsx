@@ -13,9 +13,11 @@ import {
   FolderOpen,
   Save,
   Loader2,
+  LogOut,
 } from 'lucide-react';
 import { InlineEdit } from './InlineEdit';
 import type { RouteResponse } from '../types/routing';
+import type { AuthUser } from '../types/auth';
 import type {
   TimelineCascadeResult,
   BackwardScheduleResult,
@@ -49,6 +51,9 @@ interface AppHeaderProps {
   onToggleScout?: () => void;
   isScoutOpen?: boolean;
   aiAvailable?: boolean;
+  authEnabled?: boolean;
+  authUser?: AuthUser | null;
+  onLogout?: () => void;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -77,6 +82,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onToggleScout,
   isScoutOpen = false,
   aiAvailable = true,
+  authEnabled = false,
+  authUser = null,
+  onLogout,
 }) => {
   const [isSchedulePopoverOpen, setIsSchedulePopoverOpen] = useState(false);
   const [isMapsDropdownOpen, setIsMapsDropdownOpen] = useState(false);
@@ -102,8 +110,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         setIsMapsDropdownOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
   }, []);
 
   const formatDuration = (seconds: number): string => {
@@ -522,6 +532,43 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           )}
           <span>{isLoadingRoute ? 'Calculating...' : 'Export & Sync'}</span>
         </button>
+
+        {/* Authenticated User Pill & Sign Out */}
+        {authEnabled && authUser && (
+          <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-800">
+            <div
+              className="flex items-center gap-1.5 py-1 px-2 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs text-slate-200 max-w-[160px]"
+              title={authUser.email}
+            >
+              {authUser.picture ? (
+                <img
+                  src={authUser.picture}
+                  alt={authUser.name || authUser.email}
+                  className="w-4 h-4 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <div className="w-4 h-4 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 shrink-0">
+                  {authUser.name
+                    ? authUser.name.charAt(0).toUpperCase()
+                    : authUser.email.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="truncate font-medium text-[11px]">
+                {authUser.name || authUser.email}
+              </span>
+            </div>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="flex items-center gap-1 py-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-100 border border-slate-700/80 text-xs font-medium transition-colors cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );
