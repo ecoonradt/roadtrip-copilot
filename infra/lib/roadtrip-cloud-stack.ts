@@ -23,7 +23,9 @@ export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
   jwtSecretSsmParam?: string;
   allowedEmailsSsmParam?: string;
   publicBaseUrlSsmParam?: string;
+  originVerifySecretSsmParam?: string;
   allowedHosts?: string;
+  publicBaseUrl?: string;
   originVerifySecret?: string;
 }
 
@@ -83,8 +85,10 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         JWT_SECRET_SSM_PARAM: props?.jwtSecretSsmParam ?? '/roadtrip-copilot/jwt-secret',
         ALLOWED_EMAILS_SSM_PARAM: props?.allowedEmailsSsmParam ?? '/roadtrip-copilot/allowed-emails',
         PUBLIC_BASE_URL_SSM_PARAM: props?.publicBaseUrlSsmParam ?? '/roadtrip-copilot/public-base-url',
+        ORIGIN_VERIFY_SECRET_SSM_PARAM: props?.originVerifySecretSsmParam ?? '/roadtrip-copilot/origin-verify-secret',
         ALLOWED_HOSTS: props?.allowedHosts ?? '',
-        ORIGIN_VERIFY_SECRET: props?.originVerifySecret ?? 'roadtrip-copilot-edge',
+        PUBLIC_BASE_URL: props?.publicBaseUrl ?? '',
+        ...(props?.originVerifySecret ? { ORIGIN_VERIFY_SECRET: props.originVerifySecret } : {}),
       },
     });
 
@@ -174,7 +178,10 @@ function handler(event) {
           origin: new origins.FunctionUrlOrigin(this.functionUrl, {
             readTimeout: cdk.Duration.seconds(60),
             customHeaders: {
-              'x-copilot-origin-verify': props?.originVerifySecret ?? 'roadtrip-copilot-edge',
+              'x-copilot-origin-verify':
+                props?.originVerifySecret ||
+                process.env.ORIGIN_VERIFY_SECRET ||
+                'synth-mock-origin-verify-secret',
             },
           }),
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,

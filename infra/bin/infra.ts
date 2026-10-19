@@ -36,6 +36,42 @@ const googleClientId =
   process.env.GOOGLE_CLIENT_ID ||
   (app.node.tryGetContext('googleClientId') as string | undefined);
 
+const originVerifySecret =
+  process.env.ORIGIN_VERIFY_SECRET ||
+  (app.node.tryGetContext('originVerifySecret') as string | undefined);
+
+const allowedHosts =
+  process.env.ALLOWED_HOSTS ||
+  (app.node.tryGetContext('allowedHosts') as string | undefined);
+
+const publicBaseUrl =
+  process.env.PUBLIC_BASE_URL ||
+  (app.node.tryGetContext('publicBaseUrl') as string | undefined);
+
+const googleClientIdSsmParam =
+  process.env.GOOGLE_CLIENT_ID_SSM_PARAM ||
+  (app.node.tryGetContext('googleClientIdSsmParam') as string | undefined);
+
+const googleClientSecretSsmParam =
+  process.env.GOOGLE_CLIENT_SECRET_SSM_PARAM ||
+  (app.node.tryGetContext('googleClientSecretSsmParam') as string | undefined);
+
+const jwtSecretSsmParam =
+  process.env.JWT_SECRET_SSM_PARAM ||
+  (app.node.tryGetContext('jwtSecretSsmParam') as string | undefined);
+
+const allowedEmailsSsmParam =
+  process.env.ALLOWED_EMAILS_SSM_PARAM ||
+  (app.node.tryGetContext('allowedEmailsSsmParam') as string | undefined);
+
+const publicBaseUrlSsmParam =
+  process.env.PUBLIC_BASE_URL_SSM_PARAM ||
+  (app.node.tryGetContext('publicBaseUrlSsmParam') as string | undefined);
+
+const originVerifySecretSsmParam =
+  process.env.ORIGIN_VERIFY_SECRET_SSM_PARAM ||
+  (app.node.tryGetContext('originVerifySecretSsmParam') as string | undefined);
+
 new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   env: { account, region: selectedRegion },
   githubRepo,
@@ -43,5 +79,14 @@ new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   authEnabled,
   allowedEmails,
   googleClientId,
+  googleClientIdSsmParam,
+  googleClientSecretSsmParam,
+  jwtSecretSsmParam,
+  allowedEmailsSsmParam,
+  publicBaseUrlSsmParam,
+  originVerifySecretSsmParam,
+  allowedHosts,
+  publicBaseUrl,
+  originVerifySecret,
 });
 

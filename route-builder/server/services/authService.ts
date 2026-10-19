@@ -17,6 +17,7 @@ export interface SsmParamNames {
   jwtSecret?: string;
   allowedEmails?: string;
   publicBaseUrl?: string;
+  originVerifySecret?: string;
 }
 
 export interface AuthServiceOptions {
@@ -187,7 +188,13 @@ export class AuthService {
         }
 
         const needed: {
-          key: 'googleClientId' | 'googleClientSecret' | 'jwtSecret' | 'allowedEmails' | 'publicBaseUrl';
+          key:
+            | 'googleClientId'
+            | 'googleClientSecret'
+            | 'jwtSecret'
+            | 'allowedEmails'
+            | 'publicBaseUrl'
+            | 'originVerifySecret';
           paramName: string;
         }[] = [];
 
@@ -231,6 +238,15 @@ export class AuthService {
           needed.push({ key: 'publicBaseUrl', paramName: publicBaseUrlParam });
         }
 
+        const originVerifySecretParam =
+          this.options.ssmParamNames?.originVerifySecret ||
+          process.env.ORIGIN_VERIFY_SECRET_SSM_PARAM;
+        const staticOriginVerifySecret =
+          this.options.originVerifySecret ?? process.env.ORIGIN_VERIFY_SECRET;
+        if (!staticOriginVerifySecret && originVerifySecretParam) {
+          needed.push({ key: 'originVerifySecret', paramName: originVerifySecretParam });
+        }
+
         if (needed.length > 0) {
           const paramNames = Array.from(new Set(needed.map((n) => n.paramName)));
           let allLoaded = true;
@@ -245,6 +261,7 @@ export class AuthService {
                 else if (item.key === 'jwtSecret') this.jwtSecret = val;
                 else if (item.key === 'allowedEmails') this.allowedEmails = val;
                 else if (item.key === 'publicBaseUrl') this.publicBaseUrl = val;
+                else if (item.key === 'originVerifySecret') this.originVerifySecret = val;
               } else {
                 allLoaded = false;
               }
@@ -518,11 +535,18 @@ export class AuthService {
     const originVerifyHeader = Array.isArray(rawOriginVerify)
       ? rawOriginVerify[0]
       : rawOriginVerify;
-    const isOriginVerified = Boolean(
-      this.originVerifySecret &&
-        originVerifyHeader &&
-        originVerifyHeader === this.originVerifySecret
-    );
+
+    let isOriginVerified = false;
+    if (this.originVerifySecret && typeof originVerifyHeader === 'string') {
+      const headerBuf = Buffer.from(originVerifyHeader);
+      const secretBuf = Buffer.from(this.originVerifySecret);
+      if (
+        headerBuf.length === secretBuf.length &&
+        crypto.timingSafeEqual(headerBuf, secretBuf)
+      ) {
+        isOriginVerified = true;
+      }
+    }
 
     const rawProto = request.headers['x-forwarded-proto'];
     const protoStr = Array.isArray(rawProto) ? rawProto[0] : rawProto;

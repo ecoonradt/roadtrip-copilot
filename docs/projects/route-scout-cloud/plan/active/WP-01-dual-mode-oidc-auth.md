@@ -174,7 +174,7 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
 *(Executes `cd route-builder && npm test && npm run build`, `cd infra && npm test && npx cdk synth`, and `./gradlew testDebugUnitTest`).*
 
 ### Live Deployment & Manual Cloud Verification Checklist (After User Permission)
-1. Store Google OAuth credentials and JWT secret in SSM Parameter Store (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`).
+1. Store Google OAuth credentials and JWT secret in SSM Parameter Store (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`). Note that `/roadtrip-copilot/origin-verify-secret` is auto-generated as a strong 256-bit `SecureString` and saved to SSM by `./scripts/deploy_cloud.sh` if not already set.
 2. Run `./scripts/deploy_cloud.sh` (or GitHub Actions `workflow_dispatch`).
 3. Visit CloudFront URL in an incognito window: verify `/api/itineraries` returns `401` and the Google Sign-In screen is displayed; sign in with a non-allowlisted Google account to verify the `403` private preview screen; sign in with Eric's allowlisted account to verify studio access and Sign Out.
 
@@ -189,9 +189,14 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
   * Addressed review findings on auth boundaries: restricted CORS to local development/allowlisted origins; validated `x-forwarded-host` against `SAFE_HOST_PATTERN` in `AuthService.resolvePublicBaseUrl`; enforced fail-closed frontend auth status on API/network errors with retry UI; added 15-minute SSM cache TTL and 30-second retry cooldown on resolution failure; asserted `alg: 'HS256'` in JWT verification; handled Google OAuth cancellation redirects cleanly back to `/`; and removed unused `@fastify/jwt` and `@fastify/oauth2` dependencies.
 * **2026-10-19 — Edge-to-Origin Verification, Fallback Host Safety & Future Custom Domain Guide ([ADR-0007](../../decisions/0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md)):**
   * Re-validated fallback host (`Host` header) against `SAFE_HOST_PATTERN` and `ALLOWED_HOSTS` to eliminate direct Lambda Function URL host injection attacks.
-  * Added CloudFront edge-to-origin verification (`x-copilot-origin-verify: roadtrip-copilot-edge`) on `/api/*` `FunctionUrlOrigin`, allowing CloudFront-forwarded viewer hosts (including future custom domains) to be trusted securely while direct untrusted invocations fall back to `localhost:3001`.
+  * Added CloudFront edge-to-origin verification on `/api/*` `FunctionUrlOrigin`, allowing CloudFront-forwarded viewer hosts (including future custom domains) to be trusted securely while direct untrusted invocations fall back to `localhost:3001`.
   * Return clean `503 Service Unavailable` on `/api/auth/google`, callback, and mobile auth when OAuth credentials have not been configured.
   * Enforced 30-second retry cooldown when SSM reloads fail after the 15-minute cache TTL, serving cached credentials and logging warnings to prevent SSM request flooding.
+* **2026-10-19 — Edge-Origin Secret Production Hardening & Timing-Safe Validation:**
+  * Stored `originVerifySecret` securely in SSM Parameter Store (`/roadtrip-copilot/origin-verify-secret`) as a `SecureString` rather than plaintext Lambda environment variables.
+  * Automated secret lifecycle in `./scripts/deploy_cloud.sh`: checks environment/SSM, generates a strong 256-bit cryptographically random secret into SSM if missing, and aborts if insecure default tokens are detected.
+  * Wired `ORIGIN_VERIFY_SECRET`, `ALLOWED_HOSTS`, `PUBLIC_BASE_URL`, and all SSM parameter names through `infra/bin/infra.ts` and `.github/workflows/deploy.yml`.
+  * Enforced constant-time secret comparison using `crypto.timingSafeEqual` with length check in `AuthService.resolvePublicBaseUrl`.
 
 ### Future Custom Domain Architecture & Setup Guide
 When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded custom domain (e.g. `copilot.roadtrip.com`):
@@ -207,5 +212,5 @@ When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded
 
 ## 6. Next Session Handoff
 
-* **Current State:** All Milestone 1 code, unit tests (`236/236` in `route-builder`, `15/15` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
-* **Next Immediate Step:** Upon user permission, populate the 4 SSM Parameter Store values (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`), run `./scripts/deploy_cloud.sh` to deploy M1 to AWS, complete manual cloud verification, and archive `WP-01-dual-mode-oidc-auth.md`.
+* **Current State:** All Milestone 1 code, unit tests (`238/238` in `route-builder`, `15/15` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
+* **Next Immediate Step:** Upon user permission, populate the SSM Parameter Store values (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`), run `./scripts/deploy_cloud.sh` to deploy M1 to AWS (which auto-provisions `/roadtrip-copilot/origin-verify-secret`), complete manual cloud verification, and archive `WP-01-dual-mode-oidc-auth.md`.

@@ -37,6 +37,40 @@ export AWS_REGION
 export CDK_DEFAULT_REGION="$AWS_REGION"
 echo "Deploying to AWS Region: $AWS_REGION"
 
+# 2b. Validate or auto-provision ORIGIN_VERIFY_SECRET in SSM Parameter Store
+echo "Validating edge-to-origin verification secret..."
+if [ -z "${ORIGIN_VERIFY_SECRET:-}" ]; then
+  ORIGIN_VERIFY_SECRET=$(aws ssm get-parameter \
+    --name "/roadtrip-copilot/origin-verify-secret" \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --output text \
+    --region "$AWS_REGION" 2>/dev/null || true)
+fi
+
+if [ -z "${ORIGIN_VERIFY_SECRET:-}" ]; then
+  echo "ORIGIN_VERIFY_SECRET not found in environment or SSM. Generating a strong 256-bit random secret..."
+  ORIGIN_VERIFY_SECRET=$(openssl rand -hex 32)
+  echo "Saving ORIGIN_VERIFY_SECRET to SSM Parameter Store (/roadtrip-copilot/origin-verify-secret)..."
+  aws ssm put-parameter \
+    --name "/roadtrip-copilot/origin-verify-secret" \
+    --value "$ORIGIN_VERIFY_SECRET" \
+    --type "SecureString" \
+    --description "Shared edge-to-origin verification secret between CloudFront and Fastify Lambda" \
+    --overwrite \
+    --region "$AWS_REGION"
+fi
+
+if [ "$ORIGIN_VERIFY_SECRET" = "roadtrip-copilot-edge" ] || [ "$ORIGIN_VERIFY_SECRET" = "synth-mock-origin-verify-secret" ]; then
+  echo "Error: Insecure or default value detected for ORIGIN_VERIFY_SECRET ('$ORIGIN_VERIFY_SECRET')." >&2
+  echo "Production deployments must use a strong unique secret stored in /roadtrip-copilot/origin-verify-secret." >&2
+  exit 1
+fi
+
+export ORIGIN_VERIFY_SECRET
+export ALLOWED_HOSTS="${ALLOWED_HOSTS:-}"
+export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
+
 # 3. Build React Web Studio
 echo "Building Route Builder Web Studio..."
 cd "$ROOT_DIR/route-builder"

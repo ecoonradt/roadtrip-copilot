@@ -572,7 +572,7 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
         authEnabled: true,
         jwtSecret,
         googleClientId,
-        originVerifySecret: 'roadtrip-copilot-edge',
+        originVerifySecret: 'test-strong-origin-verify-secret-token',
       });
       const app = createApp({ authService });
 
@@ -581,7 +581,7 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
         url: '/api/auth/google',
         headers: {
           'x-forwarded-host': 'copilot.roadtrip.com',
-          'x-copilot-origin-verify': 'roadtrip-copilot-edge',
+          'x-copilot-origin-verify': 'test-strong-origin-verify-secret-token',
         },
       });
 
@@ -590,6 +590,44 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       expect(location).toContain(
         encodeURIComponent('https://copilot.roadtrip.com/api/auth/callback/google')
       );
+    });
+
+    it('resolvePublicBaseUrl rejects custom domain when edge origin secret does not match or differs in length', async () => {
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret,
+        googleClientId,
+        originVerifySecret: 'correct-secret-12345678',
+      });
+      const app = createApp({ authService });
+
+      // Wrong secret (different length)
+      const res1 = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'attacker-domain.com',
+          host: 'attacker-domain.com',
+          'x-copilot-origin-verify': 'wrong',
+        },
+      });
+      expect(res1.statusCode).toBe(302);
+      expect(res1.headers.location).not.toContain('attacker-domain.com');
+      expect(decodeURIComponent(res1.headers.location as string)).toContain('localhost:3001');
+
+      // Wrong secret (same length)
+      const res2 = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'attacker-domain.com',
+          host: 'attacker-domain.com',
+          'x-copilot-origin-verify': 'incorrect-secret-9999',
+        },
+      });
+      expect(res2.statusCode).toBe(302);
+      expect(res2.headers.location).not.toContain('attacker-domain.com');
+      expect(decodeURIComponent(res2.headers.location as string)).toContain('localhost:3001');
     });
 
     it('resolvePublicBaseUrl trusts custom domain when listed in allowedHosts', async () => {
@@ -975,6 +1013,40 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
         protocol: 'http',
       } as unknown as FastifyRequest;
       expect(authService.resolvePublicBaseUrl(mockReq)).toBe('https://custom-ssm.roadtrip.com');
+    });
+
+    it('loads originVerifySecret from SSM parameter store and validates edge requests', async () => {
+      const mockLoader = vi.fn().mockResolvedValue({
+        '/roadtrip/origin-verify-secret': 'ssm-loaded-edge-secret-xyz',
+        '/roadtrip/jwt-secret': 'some-secret-key',
+        '/roadtrip/google-client-id': 'ssm-google-client-id',
+      });
+
+      const authService = new AuthService({
+        authEnabled: true,
+        ssmParamNames: {
+          originVerifySecret: '/roadtrip/origin-verify-secret',
+          jwtSecret: '/roadtrip/jwt-secret',
+          googleClientId: '/roadtrip/google-client-id',
+        },
+        ssmLoader: mockLoader,
+      });
+
+      const app = createApp({ authService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'ssm-custom-domain.roadtrip.com',
+          'x-copilot-origin-verify': 'ssm-loaded-edge-secret-xyz',
+        },
+      });
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toContain(
+        encodeURIComponent('https://ssm-custom-domain.roadtrip.com/api/auth/callback/google')
+      );
     });
   });
 });
