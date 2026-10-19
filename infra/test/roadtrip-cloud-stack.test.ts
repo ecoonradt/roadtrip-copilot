@@ -115,26 +115,37 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
-  it('configures CloudFront custom error responses for SPA routing fallback to /index.html', () => {
+  it('configures CloudFront Function for SPA routing on static behavior and does not intercept API errors', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
 
-    template.hasResourceProperties('AWS::CloudFront::Distribution', {
-      DistributionConfig: Match.objectLike({
-        CustomErrorResponses: Match.arrayWith([
-          Match.objectLike({
-            ErrorCode: 403,
-            ResponseCode: 200,
-            ResponsePagePath: '/index.html',
-          }),
-          Match.objectLike({
-            ErrorCode: 404,
-            ResponseCode: 200,
-            ResponsePagePath: '/index.html',
-          }),
-        ]),
+    // Verify CloudFront Function is provisioned for SPA URL rewrite
+    template.hasResourceProperties('AWS::CloudFront::Function', {
+      FunctionConfig: Match.objectLike({
+        Runtime: 'cloudfront-js-2.0',
       }),
     });
+
+    // Verify distribution associates the function with defaultBehavior on viewer-request
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        DefaultCacheBehavior: Match.objectLike({
+          FunctionAssociations: Match.arrayWith([
+            Match.objectLike({
+              EventType: 'viewer-request',
+            }),
+          ]),
+        }),
+      }),
+    });
+
+    // Ensure CustomErrorResponses is NOT present on the distribution so /api/* errors are preserved
+    const distributions = template.findResources('AWS::CloudFront::Distribution');
+    const distKeys = Object.keys(distributions);
+    expect(distKeys.length).toBeGreaterThan(0);
+    for (const key of distKeys) {
+      expect(distributions[key].Properties.DistributionConfig.CustomErrorResponses).toBeUndefined();
+    }
   });
 
   it('configures CloudFront S3 Origin Access Control (OAC)', () => {
@@ -165,6 +176,17 @@ describe('RoadtripCopilotCloudStack', () => {
     // Provisions deployer IAM role
     template.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'roadtrip-copilot-github-actions-deploy',
+    });
+
+    // Authorizes sts:AssumeRole and sts:TagSession
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['sts:AssumeRole', 'sts:TagSession'],
+          }),
+        ]),
+      },
     });
   });
 

@@ -88,8 +88,9 @@ SUCCESS=false
 
 for i in $(seq 1 "$MAX_ATTEMPTS"); do
   echo "Attempt $i/$MAX_ATTEMPTS: curling $HEALTH_URL"
-  if curl -fsS "$HEALTH_URL" > /dev/null 2>&1; then
-    echo "Health check succeeded!"
+  BODY=$(curl -fsS "$HEALTH_URL" 2>/dev/null || true)
+  if echo "$BODY" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+    echo "Health check succeeded! Response: $BODY"
     SUCCESS=true
     break
   fi

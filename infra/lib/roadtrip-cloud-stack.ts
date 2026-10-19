@@ -76,13 +76,38 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
     // Grant AppDataBucket read/write access to FastifyApiFunction
     this.appDataBucket.grantReadWrite(this.fastifyApiFunction);
 
-    // 4. CloudFrontDistribution (Distribution)
+    // 4. CloudFront Function for SPA client routing on static site
+    // Restricts client-side route rewrites strictly to defaultBehavior (S3 static site).
+    // Leaves /api/* completely untouched so genuine API status codes (400, 401, 403, 404, 500) and JSON bodies are preserved.
+    const spaRewriteFunction = new cloudfront.Function(this, 'SpaRewriteFunction', {
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+  if (uri.endsWith('/')) {
+    request.uri += 'index.html';
+  } else if (!uri.includes('.')) {
+    request.uri = '/index.html';
+  }
+  return request;
+}
+`),
+    });
+
+    // 5. CloudFrontDistribution (Distribution)
     this.distribution = new cloudfront.Distribution(this, 'CloudFrontDistribution', {
       defaultRootObject: 'index.html',
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(this.staticSiteBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         compress: true,
+        functionAssociations: [
+          {
+            function: spaRewriteFunction,
+            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+          },
+        ],
       },
       additionalBehaviors: {
         '/api/*': {
@@ -95,23 +120,9 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         },
       },
-      errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: '/index.html',
-          ttl: cdk.Duration.seconds(0),
-        },
-      ],
     });
 
-    // 5. GitHubActionsDeployRole & DeployUser (IAM Deployer compliant with AWS Project SCPs)
+    // 6. GitHubActionsDeployRole & DeployUser (IAM Deployer compliant with AWS Project SCPs)
     const githubRepo = props?.githubRepo ?? 'ecoonradt/roadtrip-copilot';
     if (githubRepo) {
       let githubActionsRole: iam.Role;
@@ -149,6 +160,26 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         });
 
         githubActionsRole.grantAssumeRole(githubActionsUser);
+
+        // Authorize session tagging for CI role assumption
+        githubActionsRole.assumeRolePolicy?.addStatements(
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ['sts:TagSession'],
+            principals: [new iam.AccountRootPrincipal()],
+            conditions: {
+              StringEquals: { 'aws:PrincipalArn': githubActionsUser.userArn },
+            },
+          }),
+        );
+
+        githubActionsUser.addToPolicy(
+          new iam.PolicyStatement({
+            actions: ['sts:TagSession'],
+            resources: [githubActionsRole.roleArn],
+          }),
+        );
+
         this.githubActionsUser = githubActionsUser;
       }
 
@@ -156,7 +187,7 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
       const attachDeployPermissions = (target: iam.Role | iam.User) => {
         target.addToPolicy(
           new iam.PolicyStatement({
-            actions: ['sts:AssumeRole'],
+            actions: ['sts:AssumeRole', 'sts:TagSession'],
             resources: [`arn:${cdk.Aws.PARTITION}:iam::${cdk.Aws.ACCOUNT_ID}:role/cdk-*`],
           }),
         );

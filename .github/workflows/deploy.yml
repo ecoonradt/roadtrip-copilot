@@ -65,9 +65,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
 
       - name: Deploy to AWS
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
           GITHUB_REPO: ${{ github.repository }}
+          GITHUB_OIDC_PROVIDER_ARN: ${{ vars.GITHUB_OIDC_PROVIDER_ARN }}
         run: ./scripts/deploy_cloud.sh
