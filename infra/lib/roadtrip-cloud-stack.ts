@@ -85,9 +85,8 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
 function handler(event) {
   var request = event.request;
   var uri = request.uri;
-  if (uri.endsWith('/')) {
-    request.uri += 'index.html';
-  } else if (!uri.includes('.')) {
+  // If the path does not have a file extension (e.g. /, /route, /route/), rewrite to root /index.html
+  if (!uri.includes('.')) {
     request.uri = '/index.html';
   }
   return request;

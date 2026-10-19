@@ -148,6 +148,36 @@ describe('RoadtripCopilotCloudStack', () => {
     }
   });
 
+  it('CloudFront Function correctly rewrites both /route and /route/ to /index.html and preserves assets', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    const functions = template.findResources('AWS::CloudFront::Function');
+    const fnKey = Object.keys(functions)[0];
+    const functionCode = functions[fnKey].Properties.FunctionCode;
+
+    // Evaluate the handler code
+    const handler = new Function(
+      'event',
+      `${functionCode}\nreturn handler(event);`,
+    ) as (event: { request: { uri: string } }) => { uri: string };
+
+    const run = (uri: string) => handler({ request: { uri } }).uri;
+
+    // Non-asset SPA routes (with or without trailing slash) rewrite to root /index.html
+    expect(run('/')).toBe('/index.html');
+    expect(run('/route')).toBe('/index.html');
+    expect(run('/route/')).toBe('/index.html');
+    expect(run('/nested/route/')).toBe('/index.html');
+    expect(run('/itineraries/new')).toBe('/index.html');
+
+    // Static assets with file extensions remain untouched
+    expect(run('/index.html')).toBe('/index.html');
+    expect(run('/assets/index-DiYxdhPO.js')).toBe('/assets/index-DiYxdhPO.js');
+    expect(run('/assets/index-C1bgkAIB.css')).toBe('/assets/index-C1bgkAIB.css');
+    expect(run('/favicon.ico')).toBe('/favicon.ico');
+  });
+
   it('configures CloudFront S3 Origin Access Control (OAC)', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
