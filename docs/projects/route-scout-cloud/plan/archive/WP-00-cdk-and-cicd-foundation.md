@@ -94,8 +94,9 @@ A standalone, strict TypeScript AWS CDK v2 package at the repository root:
 ### 4. GitHub Actions Workflows (`.github/workflows/`)
 * **`.github/workflows/ci.yml`**
   * Triggers on:
-    * `push` (all branches)
-    * `pull_request` (all branches)
+    * `push` to `main`
+    * `pull_request` (targeting any branch, with concurrency cancellation to eliminate duplicate runs)
+    * `workflow_dispatch` (on-demand manual trigger)
   * Runs on `ubuntu-latest` with Node 20 and Java 17 caches, installs `route-builder` and `infra` dependencies, and executes `./scripts/ci_check.sh`.
 * **`.github/workflows/deploy.yml`**
   * Triggers on:

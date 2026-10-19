@@ -43,7 +43,7 @@ This document is the **Tier 2 Phase Roadmap** for the **Route Scout Cloud Archit
      * `scripts/ci_check.sh`: Runs `route-builder` tests + build, Android unit tests (`./gradlew testDebugUnitTest`), and `infra` CDK tests + `cdk synth`.
      * `scripts/deploy_cloud.sh`: Executable on-demand from a local developer terminal or GitHub Actions; builds `route-builder`, runs `cdk deploy`, syncs `route-builder/dist/` to S3, invalidates CloudFront, and runs a post-deploy `/api/health` smoke check.
   4. **GitHub Actions Workflows (`.github/workflows/`):**
-     * `ci.yml`: Runs `scripts/ci_check.sh` on all branch pushes and PRs.
+     * `ci.yml`: Runs `scripts/ci_check.sh` on `push` to `main` and pull requests.
      * `deploy.yml`: Runs `scripts/ci_check.sh` + `scripts/deploy_cloud.sh` via AWS OIDC on merges to `main` and on-demand via `workflow_dispatch` on any branch.
   5. **Live Deployment & Manual Cloud Verification:**
      * Stack deployed to AWS via `./scripts/deploy_cloud.sh` (and verified via GitHub Actions `workflow_dispatch`).
