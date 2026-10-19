@@ -45,6 +45,5 @@ Chosen Option: **Option C (Milestone 0 CDK + GitHub Actions Foundation with Cont
 * **Unified Scripts:**
   * `scripts/ci_check.sh`: Runs `route-builder` tests + build, Android unit tests (`./gradlew testDebugUnitTest`), and `infra` CDK tests + `cdk synth`.
   * `scripts/deploy_cloud.sh`: Builds `route-builder`, runs `cdk deploy`, syncs `route-builder/dist/` to the S3 static bucket, invalidates CloudFront, and runs a live `/api/health` smoke check.
-* **GitHub Actions Workflows:**
-  * `.github/workflows/ci.yml`: Triggers on `push` to `main` and `pull_request` (with branch concurrency cancellation); blocks PRs on failure without duplicate checks.
-  * `.github/workflows/deploy.yml`: Triggers on `push` to `main` and `workflow_dispatch` (allowing on-demand branch deployment from GitHub UI).
+  * `.github/workflows/ci.yml`: Triggers on `pull_request` (and `workflow_dispatch`) with branch concurrency cancellation to gate PRs before merge without duplicate runs on `main`.
+  * `.github/workflows/deploy.yml`: Triggers on `push` to `main` and `workflow_dispatch`, sequentially executing a full verification gate (`verify`) before requesting AWS credentials and deploying (`deploy`).
