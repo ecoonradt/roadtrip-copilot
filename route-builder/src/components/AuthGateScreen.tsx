@@ -5,11 +5,13 @@ import type { AuthStatusResponse } from '../types/auth';
 export interface AuthGateScreenProps {
   status: AuthStatusResponse;
   onLogout: () => Promise<void> | void;
+  onRetry?: () => Promise<void> | void;
 }
 
 export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({
   status,
   onLogout,
+  onRetry,
 }) => {
   const isUnauthorized = status.authenticated && !status.authorized;
 
@@ -82,8 +84,31 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({
             </button>
           </div>
         ) : (
-          /* Case A: Unauthenticated */
+          /* Case A: Unauthenticated / Connection Issue */
           <div className="space-y-5">
+            {status.message && (
+              <div className="bg-amber-950/60 border border-amber-700/70 rounded-xl p-4 text-amber-200 space-y-2">
+                <div className="flex items-center gap-2 font-semibold text-sm text-amber-100">
+                  <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Connection Issue</span>
+                </div>
+                <p className="text-xs leading-relaxed text-amber-200/90">
+                  {status.message}
+                </p>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void onRetry();
+                    }}
+                    className="mt-1 text-xs font-semibold text-amber-300 hover:text-amber-200 underline cursor-pointer"
+                  >
+                    Retry Connection
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="text-center space-y-1.5">
               <h2 className="text-base font-semibold text-slate-100">Sign in to continue</h2>
               <p className="text-xs text-slate-400 leading-relaxed">

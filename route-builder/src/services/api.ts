@@ -398,19 +398,21 @@ export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
         // Fallback below
       }
       return {
-        authEnabled: false,
-        authenticated: true,
-        authorized: true,
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
         user: null,
+        message: `Unable to connect to the authentication service (HTTP ${res.status}). Please check your connection and retry.`,
       };
     }
     return (await res.json()) as AuthStatusResponse;
   } catch {
     return {
-      authEnabled: false,
-      authenticated: true,
-      authorized: true,
+      authEnabled: true,
+      authenticated: false,
+      authorized: false,
       user: null,
+      message: 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
     };
   }
 }

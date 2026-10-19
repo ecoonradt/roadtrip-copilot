@@ -54,7 +54,14 @@ export class AuthService {
   private jwtSecret: string;
   private publicBaseUrl: string;
   private configLoaded = false;
+  private configLoadedAt = 0;
+  private lastLoadAttemptAt = 0;
   private loadPromise: Promise<void> | null = null;
+
+  public static readonly CONFIG_CACHE_TTL_MS = 15 * 60 * 1000; // 15-minute cache TTL for warm Lambda instances
+  public static readonly LOAD_RETRY_COOLDOWN_MS = 30 * 1000; // 30-second cooldown on SSM resolution failure
+  private static readonly SAFE_HOST_PATTERN =
+    /^(localhost|127\.0\.0\.1)(:[0-9]+)?$|^[a-z0-9-]+\.cloudfront\.net$/i;
 
   constructor(options: AuthServiceOptions = {}) {
     this.options = options;
@@ -124,13 +131,20 @@ export class AuthService {
   }
 
   async ensureConfigLoaded(): Promise<void> {
-    if (this.configLoaded) return;
+    const now = Date.now();
+    if (this.configLoaded && now - this.configLoadedAt < AuthService.CONFIG_CACHE_TTL_MS) {
+      return;
+    }
     if (this.loadPromise) return this.loadPromise;
+    if (!this.configLoaded && now - this.lastLoadAttemptAt < AuthService.LOAD_RETRY_COOLDOWN_MS) {
+      return;
+    }
 
     this.loadPromise = (async () => {
       try {
         if (!this.isAuthEnabled()) {
           this.configLoaded = true;
+          this.configLoadedAt = Date.now();
           return;
         }
 
@@ -141,30 +155,34 @@ export class AuthService {
 
         const clientIdParam =
           this.options.ssmParamNames?.googleClientId || process.env.GOOGLE_CLIENT_ID_SSM_PARAM;
-        if (!this.getGoogleClientId() && clientIdParam) {
+        const staticClientId = this.options.googleClientId ?? process.env.GOOGLE_CLIENT_ID;
+        if (!staticClientId && clientIdParam) {
           needed.push({ key: 'googleClientId', paramName: clientIdParam });
         }
 
         const clientSecretParam =
           this.options.ssmParamNames?.googleClientSecret ||
           process.env.GOOGLE_CLIENT_SECRET_SSM_PARAM;
-        if (!this.getGoogleClientSecret() && clientSecretParam) {
+        const staticClientSecret =
+          this.options.googleClientSecret ?? process.env.GOOGLE_CLIENT_SECRET;
+        if (!staticClientSecret && clientSecretParam) {
           needed.push({ key: 'googleClientSecret', paramName: clientSecretParam });
         }
 
         const jwtSecretParam =
           this.options.ssmParamNames?.jwtSecret || process.env.JWT_SECRET_SSM_PARAM;
-        if (!this.jwtSecret && !process.env.JWT_SECRET && jwtSecretParam) {
+        const staticJwtSecret = this.options.jwtSecret ?? process.env.JWT_SECRET;
+        if (!staticJwtSecret && jwtSecretParam) {
           needed.push({ key: 'jwtSecret', paramName: jwtSecretParam });
         }
 
         const allowedEmailsParam =
           this.options.ssmParamNames?.allowedEmails || process.env.ALLOWED_EMAILS_SSM_PARAM;
-        const currentAllowed = this.getAllowedEmails();
-        const hasAllowed = Array.isArray(currentAllowed)
-          ? currentAllowed.length > 0
-          : Boolean(currentAllowed.trim());
-        if (!hasAllowed && allowedEmailsParam) {
+        const staticAllowed = this.options.allowedEmails ?? process.env.ALLOWED_EMAILS;
+        const hasStaticAllowed =
+          staticAllowed !== undefined &&
+          (Array.isArray(staticAllowed) ? staticAllowed.length > 0 : Boolean(staticAllowed.trim()));
+        if (!hasStaticAllowed && allowedEmailsParam) {
           needed.push({ key: 'allowedEmails', paramName: allowedEmailsParam });
         }
 
@@ -187,6 +205,7 @@ export class AuthService {
             }
             if (allLoaded) {
               this.configLoaded = true;
+              this.configLoadedAt = Date.now();
             }
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -194,8 +213,10 @@ export class AuthService {
           }
         } else {
           this.configLoaded = true;
+          this.configLoadedAt = Date.now();
         }
       } finally {
+        this.lastLoadAttemptAt = Date.now();
         this.loadPromise = null;
       }
     })();
@@ -273,6 +294,12 @@ export class AuthService {
     }
 
     try {
+      const headerJson = Buffer.from(headerB64, 'base64url').toString('utf8');
+      const header = JSON.parse(headerJson) as { alg?: unknown; typ?: unknown };
+      if (header.alg !== 'HS256') {
+        return null;
+      }
+
       const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf8');
       const payload = JSON.parse(payloadJson) as {
         sub?: unknown;
@@ -387,6 +414,12 @@ export class AuthService {
     }
 
     try {
+      const headerJson = Buffer.from(headerB64, 'base64url').toString('utf8');
+      const header = JSON.parse(headerJson) as { alg?: unknown; typ?: unknown };
+      if (header.alg !== 'HS256') {
+        return null;
+      }
+
       const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf8');
       const payload = JSON.parse(payloadJson) as OAuthStatePayload;
 
@@ -423,14 +456,19 @@ export class AuthService {
 
     const rawProto = request.headers['x-forwarded-proto'];
     const protoStr = Array.isArray(rawProto) ? rawProto[0] : rawProto;
-    const proto = (protoStr ? protoStr.split(',')[0].trim() : '') || request.protocol || 'http';
+    const protoCandidate = (protoStr ? protoStr.split(',')[0].trim() : '') || request.protocol || 'http';
+    const proto = protoCandidate === 'https' ? 'https' : 'http';
 
     const rawHost = request.headers['x-forwarded-host'];
     const hostStr = Array.isArray(rawHost) ? rawHost[0] : rawHost;
     const fallbackHost = Array.isArray(request.headers.host)
       ? request.headers.host[0]
       : request.headers.host;
-    const host = (hostStr ? hostStr.split(',')[0].trim() : '') || fallbackHost || 'localhost:3001';
+    const candidateHost = (hostStr ? hostStr.split(',')[0].trim() : '') || fallbackHost || 'localhost:3001';
+
+    // Restrict candidate host to safe allowlisted patterns (localhost, 127.0.0.1, or *.cloudfront.net)
+    const isSafe = AuthService.SAFE_HOST_PATTERN.test(candidateHost);
+    const host = isSafe ? candidateHost : fallbackHost || 'localhost:3001';
 
     return `${proto}://${host}`.replace(/\/+$/, '');
   }

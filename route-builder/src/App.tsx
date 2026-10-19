@@ -180,6 +180,21 @@ export function App() {
     user: null,
   });
 
+  const refreshAuthStatus = useCallback(async () => {
+    try {
+      const status = await fetchAuthStatus();
+      setAuthStatus(status);
+    } catch {
+      setAuthStatus({
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
+        user: null,
+        message: 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
+      });
+    }
+  }, []);
+
   useEffect(() => {
     let isSubscribed = true;
     if (typeof fetchAuthStatus === 'function') {
@@ -190,7 +205,15 @@ export function App() {
           }
         })
         .catch(() => {
-          // Keep default local mode on error
+          if (isSubscribed) {
+            setAuthStatus({
+              authEnabled: true,
+              authenticated: false,
+              authorized: false,
+              user: null,
+              message: 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
+            });
+          }
         });
     }
     return () => {
@@ -1071,7 +1094,13 @@ export function App() {
   }, [isDirty]);
 
   if (authStatus.authEnabled && (!authStatus.authenticated || !authStatus.authorized)) {
-    return <AuthGateScreen status={authStatus} onLogout={handleLogout} />;
+    return (
+      <AuthGateScreen
+        status={authStatus}
+        onLogout={handleLogout}
+        onRetry={refreshAuthStatus}
+      />
+    );
   }
 
   return (

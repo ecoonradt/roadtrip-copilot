@@ -118,7 +118,17 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
     const isSecure = baseUrl.startsWith('https://');
 
     const query = request.query as { code?: string; state?: string; error?: string };
-    if (query.error || !query.code || !query.state) {
+    if (query.error) {
+      reply.clearCookie(OAUTH_STATE_COOKIE_NAME, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: isSecure,
+      });
+      return reply.redirect(`${baseUrl}/`, 302);
+    }
+
+    if (!query.code || !query.state) {
       reply.clearCookie(OAUTH_STATE_COOKIE_NAME, {
         path: '/',
         httpOnly: true,

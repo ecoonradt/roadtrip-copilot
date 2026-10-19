@@ -171,6 +171,26 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       expect(res.json().message).toBe('Invalid or expired authentication token');
     });
 
+    it('verifySessionToken rejects tokens with invalid or unexpected alg header', async () => {
+      const authService = new AuthService({ authEnabled: true, jwtSecret });
+
+      // Create token with forged alg: 'none'
+      const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+      const payload = Buffer.from(
+        JSON.stringify({
+          sub: 'hacker',
+          email: 'eric@example.com',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+        })
+      ).toString('base64url');
+      // Sign with secret so HMAC signature matches, but header has alg: 'none'
+      const crypto = await import('node:crypto');
+      const sig = crypto.createHmac('sha256', jwtSecret).update(`${header}.${payload}`).digest('base64url');
+      const forgedToken = `${header}.${payload}.${sig}`;
+
+      expect(authService.verifySessionToken(forgedToken)).toBeNull();
+    });
+
     it('valid token for non-allowlisted email returns 403 Forbidden', async () => {
       const authService = new AuthService({
         authEnabled: true,
@@ -477,6 +497,58 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       const sessionCookie = setCookieArr.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
       expect(sessionCookie).toBeDefined();
     });
+
+    it('GET /api/auth/callback/google clears state cookie and redirects to / when query.error is present', async () => {
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret,
+        googleClientId,
+        googleClientSecret,
+      });
+      const app = createApp({ authService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/callback/google?error=access_denied&error_description=User+cancelled',
+        headers: {
+          'x-forwarded-host': 'd123.cloudfront.net',
+          'x-forwarded-proto': 'https',
+        },
+        cookies: {
+          [OAUTH_STATE_COOKIE_NAME]: 'mock-oauth-state-cookie',
+        },
+      });
+
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toBe('https://d123.cloudfront.net/');
+      const setCookies = res.headers['set-cookie'];
+      const setCookieArr = Array.isArray(setCookies) ? setCookies : [String(setCookies)];
+      const clearedStateCookie = setCookieArr.find((c) => c.startsWith(`${OAUTH_STATE_COOKIE_NAME}=`));
+      expect(clearedStateCookie).toBeDefined();
+      expect(clearedStateCookie).toContain('Max-Age=0');
+    });
+
+    it('resolvePublicBaseUrl rejects untrusted host and falls back to safe host', async () => {
+      const authService = new AuthService({ authEnabled: true, jwtSecret });
+      const app = createApp({ authService });
+
+      // Direct caller attempting host header poisoning
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'evil-attacker.com',
+          'x-forwarded-proto': 'https',
+        },
+      });
+
+      expect(res.statusCode).toBe(302);
+      const location = res.headers.location as string;
+      // Must not redirect to evil-attacker.com redirect_uri
+      expect(location).not.toContain('evil-attacker.com');
+      expect(location).toContain(encodeURIComponent('/api/auth/callback/google'));
+      expect(location).toContain('localhost');
+    });
   });
 
   describe('4. Android Mobile OIDC Flow (POST /api/auth/mobile/google)', () => {
@@ -675,6 +747,58 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       await app.inject({ method: 'GET', url: '/api/auth/status' });
 
       expect(mockLoader).not.toHaveBeenCalled();
+    });
+
+    it('honors retry cooldown on SSM failure and re-queries after 15-minute TTL', async () => {
+      let callCount = 0;
+      const mockLoader = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          // First attempt: missing parameter
+          return {};
+        }
+        return {
+          '/roadtrip/jwt-secret': 'loaded-after-retry',
+        };
+      });
+
+      const authService = new AuthService({
+        authEnabled: true,
+        ssmParamNames: {
+          jwtSecret: '/roadtrip/jwt-secret',
+        },
+        ssmLoader: mockLoader,
+      });
+
+      const app = createApp({ authService });
+
+      // First call attempts load and fails (missing parameter)
+      await app.inject({ method: 'GET', url: '/api/auth/status' });
+      expect(mockLoader).toHaveBeenCalledTimes(1);
+
+      // Immediate second call should be suppressed by 30-second cooldown
+      await app.inject({ method: 'GET', url: '/api/auth/status' });
+      expect(mockLoader).toHaveBeenCalledTimes(1);
+
+      // Advance clock past 30-second cooldown
+      const realNow = Date.now;
+      try {
+        Date.now = () => realNow() + 31 * 1000;
+        await app.inject({ method: 'GET', url: '/api/auth/status' });
+        expect(mockLoader).toHaveBeenCalledTimes(2);
+        expect(authService.getJwtSecret()).toBe('loaded-after-retry');
+
+        // Within 15-minute TTL, further requests are cached
+        await app.inject({ method: 'GET', url: '/api/auth/status' });
+        expect(mockLoader).toHaveBeenCalledTimes(2);
+
+        // Advance clock past 15-minute TTL (31s + 902s = 933s)
+        Date.now = () => realNow() + (31 + 902) * 1000;
+        await app.inject({ method: 'GET', url: '/api/auth/status' });
+        expect(mockLoader).toHaveBeenCalledTimes(3);
+      } finally {
+        Date.now = realNow;
+      }
     });
   });
 });

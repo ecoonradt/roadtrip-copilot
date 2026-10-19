@@ -182,4 +182,37 @@ describe('Frontend Auth UI & Gating', () => {
     });
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
+
+  it('renders Connection Issue alert and Retry Connection button when authStatus has error message', async () => {
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: false,
+      authorized: false,
+      user: null,
+      message: 'Unable to connect to authentication server. Please check your connection and retry.',
+    });
+
+    const app = await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const textContent = allText(app.root);
+    expect(textContent).toContain('Connection Issue');
+    expect(textContent).toContain('Unable to connect to authentication server');
+    expect(textContent).toContain('Retry Connection');
+
+    // Click Retry Connection
+    const retryBtn = app.root
+      .findAllByType('button')
+      .find((b) => allText(b).includes('Retry Connection'));
+    expect(retryBtn).toBeDefined();
+
+    await act(async () => {
+      retryBtn!.props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(api.fetchAuthStatus).toHaveBeenCalled();
+  });
 });

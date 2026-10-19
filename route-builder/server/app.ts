@@ -1,7 +1,6 @@
 import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
-import jwt from '@fastify/jwt';
 import { routingRoutes, RoutingPluginOptions } from './routes/routing.js';
 import { aiRoutes, AiPluginOptions } from './routes/ai.js';
 import { scoutRoutes, ScoutPluginOptions } from './routes/scout.js';
@@ -31,14 +30,23 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   // Register cookie parser
   app.register(cookie);
 
-  // Register JWT plugin with fallback secret for local dev
-  app.register(jwt, {
-    secret: process.env.JWT_SECRET || 'dev-insecure-jwt-secret-roadtrip-copilot',
-  });
+  // Register CORS: restrict to local development origins and configured public origin; disallow arbitrary external origins
+  const allowedOrigins: (string | RegExp)[] = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+  ];
+  if (process.env.PUBLIC_BASE_URL) {
+    try {
+      allowedOrigins.push(new URL(process.env.PUBLIC_BASE_URL).origin);
+    } catch {
+      // Ignore invalid URL
+    }
+  }
 
-  // Enable CORS for local dev and frontends
   app.register(cors, {
-    origin: true,
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   });
