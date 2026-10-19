@@ -383,6 +383,42 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
+  it('grants deployer IAM role and user permissions to manage SSM parameters and KMS encryption/decryption', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:PutParameter'],
+            Effect: 'Allow',
+            Resource: {
+              'Fn::Join': [
+                '',
+                [
+                  'arn:',
+                  { Ref: 'AWS::Partition' },
+                  ':ssm:us-east-2:123456789012:parameter/roadtrip-copilot/*',
+                ],
+              ],
+            },
+          }),
+          Match.objectLike({
+            Action: ['kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey'],
+            Effect: 'Allow',
+            Resource: '*',
+            Condition: {
+              StringEquals: {
+                'kms:ViaService': 'ssm.us-east-2.amazonaws.com',
+              },
+            },
+          }),
+        ]),
+      },
+    });
+  });
+
   it('synthesizes all required CfnOutput keys', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);

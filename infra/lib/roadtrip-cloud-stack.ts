@@ -289,6 +289,28 @@ function handler(event) {
             ],
           }),
         );
+
+        // Grant least-privilege permissions to read/write SSM parameters and KMS encryption/decryption
+        target.addToPolicy(
+          new iam.PolicyStatement({
+            actions: ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:PutParameter'],
+            resources: [
+              `arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/roadtrip-copilot/*`,
+            ],
+          }),
+        );
+
+        target.addToPolicy(
+          new iam.PolicyStatement({
+            actions: ['kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey'],
+            resources: ['*'],
+            conditions: {
+              StringEquals: {
+                'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
+              },
+            },
+          }),
+        );
       };
 
       attachDeployPermissions(githubActionsRole);

@@ -71,6 +71,11 @@ Because the Lambda Function URL has `AuthType: NONE` (invoked via CloudFront's `
    - If origin verification succeeds and `candidateHost` is syntactically valid, `candidateHost` is trusted (enforcing `https://` proto).
    - If origin verification is absent or invalid (direct Function URL calls or local dev), `candidateHost` is strictly validated against `SAFE_HOST_PATTERN` or `ALLOWED_HOSTS`.
    - `fallbackHost` (`Host` header) is always re-validated against `SAFE_HOST_PATTERN` or `ALLOWED_HOSTS`; if untrusted, it defaults strictly to `localhost:3001`.
+   - If `AUTH_ENABLED === 'true'` and `originVerifySecret` is absent or fails to load, `ensureConfigLoaded` logs an explicit console warning so operators are aware that edge origin verification is inactive and requests are relying strictly on static host allowlists.
+
+3. **Deployer Role IAM Permissions & CI Synthesis Fallback:**
+   - `attachDeployPermissions` in `infra/lib/roadtrip-cloud-stack.ts` grants the scoped GitHub Actions deploy role/user least-privilege `ssm:GetParameter`, `ssm:GetParameters`, `ssm:PutParameter` on `arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/roadtrip-copilot/*`, and `kms:Decrypt`, `kms:Encrypt`, `kms:GenerateDataKey` scoped to SSM (`kms:ViaService: ssm.${this.region}.amazonaws.com`), enabling `./scripts/deploy_cloud.sh` to validate and auto-provision the origin verification secret during deployment.
+   - CloudFormation template synthesis defaults `x-copilot-origin-verify` to `synth-mock-origin-verify-secret` when run without AWS credentials or environment secrets (e.g. in offline CI test runs). Real deployments enforce strong secrets via SSM Parameter Store or the deployment script.
 
 ### B. Requirements for Future Custom Domain Support
 When migrating from the default CloudFront domain (`*.cloudfront.net`) to a custom domain (e.g. `copilot.roadtrip.com`):

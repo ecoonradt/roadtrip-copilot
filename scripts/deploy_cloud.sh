@@ -52,13 +52,18 @@ if [ -z "${ORIGIN_VERIFY_SECRET:-}" ]; then
   echo "ORIGIN_VERIFY_SECRET not found in environment or SSM. Generating a strong 256-bit random secret..."
   ORIGIN_VERIFY_SECRET=$(openssl rand -hex 32)
   echo "Saving ORIGIN_VERIFY_SECRET to SSM Parameter Store (/roadtrip-copilot/origin-verify-secret)..."
-  aws ssm put-parameter \
+  if ! aws ssm put-parameter \
     --name "/roadtrip-copilot/origin-verify-secret" \
     --value "$ORIGIN_VERIFY_SECRET" \
     --type "SecureString" \
     --description "Shared edge-to-origin verification secret between CloudFront and Fastify Lambda" \
     --overwrite \
-    --region "$AWS_REGION"
+    --region "$AWS_REGION"; then
+    echo "Error: Failed to store ORIGIN_VERIFY_SECRET in SSM Parameter Store." >&2
+    echo "Ensure your AWS IAM role/user has ssm:PutParameter and kms:Encrypt/kms:GenerateDataKey permissions," >&2
+    echo "or pre-provision '/roadtrip-copilot/origin-verify-secret' in SSM before deploying." >&2
+    exit 1
+  fi
 fi
 
 if [ "$ORIGIN_VERIFY_SECRET" = "roadtrip-copilot-edge" ] || [ "$ORIGIN_VERIFY_SECRET" = "synth-mock-origin-verify-secret" ]; then

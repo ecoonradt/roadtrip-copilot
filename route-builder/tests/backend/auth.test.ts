@@ -1048,5 +1048,21 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
         encodeURIComponent('https://ssm-custom-domain.roadtrip.com/api/auth/callback/google')
       );
     });
+
+    it('logs warning when originVerifySecret is absent in auth-enabled mode', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret: 'some-secret',
+        googleClientId: 'client-id',
+      });
+      await authService.ensureConfigLoaded();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Edge origin verification secret is not configured or failed to load')
+      );
+      warnSpy.mockRestore();
+    });
   });
 });
+

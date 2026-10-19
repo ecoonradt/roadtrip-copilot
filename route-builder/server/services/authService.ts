@@ -62,6 +62,7 @@ export class AuthService {
   private configLoaded = false;
   private configLoadedAt = 0;
   private lastLoadAttemptAt = 0;
+  private originSecretWarned = false;
   private loadPromise: Promise<void> | null = null;
 
   public static readonly CONFIG_CACHE_TTL_MS = 15 * 60 * 1000; // 15-minute cache TTL for warm Lambda instances
@@ -291,6 +292,17 @@ export class AuthService {
         } else {
           this.configLoaded = true;
           this.configLoadedAt = Date.now();
+        }
+
+        if (this.isAuthEnabled() && !this.originVerifySecret) {
+          if (!this.originSecretWarned) {
+            this.originSecretWarned = true;
+            console.warn(
+              '[AuthService] Warning: Edge origin verification secret is not configured or failed to load. Edge origin verification is inactive; forwarded host requests rely strictly on static host allowlists.'
+            );
+          }
+        } else if (this.originVerifySecret) {
+          this.originSecretWarned = false;
         }
       } finally {
         this.lastLoadAttemptAt = Date.now();
