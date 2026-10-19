@@ -25,7 +25,7 @@ flowchart TD
 * **Definition:** Large-scale architectural transformations spanning multiple developer sessions that require structured rolling-wave planning (Tier 1 North Star, Tier 2 Phase Roadmap, Tier 3 Active Work Package) and living Architecture Decision Records (ADRs).
 * **Execution Protocol:** Work in this directory strictly adheres to the **Orchestrator-Worker delegation model** (Frontier models orchestrate; worker models implement per the active harness adapter) as defined in [`AGENTS.md`](../AGENTS.md#6-planning--execution-working-models).
 * **Current Projects:**
-  * **[`projects/route-scout-cloud/`](projects/route-scout-cloud/WORKING_MODEL.md) `[ACTIVE — Phase 1]`:** Transitioning Route Scout from local CLI execution to a production AWS cloud architecture with Amazon Bedrock AI, Fastify on Lambda, S3 persistence, and dual-mode Google OIDC auth.
+  * **[`projects/route-scout-cloud/`](projects/route-scout-cloud/WORKING_MODEL.md) `[ACTIVE — Phase 1]`:** Transitioning Route Scout from local CLI execution to a production AWS cloud architecture with Amazon Bedrock AI, Fastify on Lambda with response streaming, S3 persistence, and dual-mode Google OIDC auth, built on an AWS CDK (`infra/`) and GitHub Actions CI/CD foundation (`scripts/ci_check.sh`, `scripts/deploy_cloud.sh`).
   * **[`projects/android-route-client/`](projects/android-route-client/WORKING_MODEL.md) `[QUEUED — Phase 2]`:** Android on-the-fly offline route editing (Tier 1) and cloud co-pilot client sync (Tier 2). *Strictly blocked until Phase 1 reaches completion.*
 
 ### 2. [`reference/`](reference/) — Living Architecture & Platform Invariants

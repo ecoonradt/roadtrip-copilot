@@ -167,6 +167,21 @@ npm run dev
 
 For complete documentation on route authoring, AI model configuration, test suites, and phone handoff methods, see [route-builder/README.md](route-builder/README.md).
 
+### Cloud Deployment & CI/CD (AWS CDK)
+
+The Route Builder Web Studio can also be deployed to AWS as a serverless application using AWS CDK (`infra/`):
+* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming.
+* **Verification Pipeline:**
+  ```bash
+  ./scripts/ci_check.sh
+  ```
+  Runs the unified test suite: `route-builder` Vitest tests & build, `infra` CDK unit tests & CloudFormation synthesis, and Android unit tests.
+* **On-Demand Cloud Deployment:**
+  ```bash
+  ./scripts/deploy_cloud.sh
+  ```
+  Deploys the CDK stack to the project's assigned AWS Region, syncs static assets to S3, invalidates the CloudFront cache, and verifies deployment via `/api/health` live HTTP smoke check.
+
 ---
 
 ## Android App Features & In-Car Controls

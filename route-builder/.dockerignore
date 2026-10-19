@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-server
+tests
+src
+.vite
+.git
+.gitignore
+.env*
+*.log
+coverage
+README.md
+AGENTS.md

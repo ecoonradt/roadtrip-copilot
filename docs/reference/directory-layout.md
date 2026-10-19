@@ -7,6 +7,10 @@ roadtrip-copilot/
 ├── .agents/                   # Antigravity harness adapter rules & customizations
 │   └── rules/
 │       └── antigravity-harness.md # Antigravity delegation mechanics (invoke_subagent)
+├── .github/                   # GitHub Actions CI/CD workflows
+│   └── workflows/
+│       ├── ci.yml             # Pull request and branch verification workflow
+│       └── deploy.yml         # Main branch and manual workflow_dispatch deployment
 ├── .opencode/                 # OpenCode harness adapter config, agent profiles & commands
 │   ├── opencode.json          # Project configuration declaring harness rules
 │   ├── rules/
@@ -45,11 +49,27 @@ roadtrip-copilot/
 │   │   └── carapp_notification_experiment_implementation_plan.md # Car App Library notification experiment plan
 │   └── archive/               # Completed historical research & superseded specifications
 │       └── route_builder_research_and_architecture.md # Technical specification & domain architecture
-├── scripts/                   # Environment setup & run scripts (run_dhu.sh, setup_env.sh)
+├── scripts/                   # Verification, deployment & environment scripts
+│   ├── ci_check.sh            # Unified CI verification (route-builder, infra CDK, Android)
+│   ├── deploy_cloud.sh        # Unified cloud deployment (CDK deploy, S3 sync, CloudFront invalidation, smoke check)
+│   ├── run_dhu.sh             # Desktop Head Unit runner for Android Auto testing
+│   └── setup_env.sh           # Environment setup & dependency validation
+├── infra/                     # AWS CDK TypeScript infrastructure-as-code
+│   ├── bin/
+│   │   └── infra.ts           # CDK app entrypoint & stack instantiation (selected Region)
+│   ├── lib/
+│   │   └── roadtrip-cloud-stack.ts # CloudFront, S3, Fastify Lambda (LWA streaming) & OIDC stack
+│   ├── test/
+│   │   └── roadtrip-cloud-stack.test.ts # Vitest CDK infrastructure assertions
+│   ├── cdk.json               # AWS CDK execution configuration
+│   ├── package.json           # CDK dependencies & scripts (build, test, synth, deploy)
+│   └── tsconfig.json          # Strict TypeScript configuration
 ├── gradlew, gradlew.bat       # Gradle wrapper executable
 ├── settings.gradle.kts        # Multi-project gradle settings
 ├── build.gradle.kts           # Root build configuration
 ├── route-builder/             # Full-Stack Web Studio
+│   ├── Dockerfile             # Multi-stage Docker build with AWS Lambda Web Adapter streaming
+│   ├── .dockerignore          # Docker build exclusions
 │   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
 │   ├── README.md              # User-facing web studio documentation & setup
 │   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)

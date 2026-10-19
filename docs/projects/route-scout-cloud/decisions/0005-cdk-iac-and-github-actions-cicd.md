@@ -3,7 +3,7 @@
 * **Date:** 2026-10-18
 * **Status:** Accepted
 * **Deciders:** Eric, Antigravity
-* **Related Work Package:** [WP-00-cdk-and-cicd-foundation.md](../plan/active/WP-00-cdk-and-cicd-foundation.md)
+* **Related Work Package:** [WP-00-cdk-and-cicd-foundation.md](../plan/archive/WP-00-cdk-and-cicd-foundation.md)
 
 ---
 

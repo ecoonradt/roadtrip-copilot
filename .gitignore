@@ -11,3 +11,6 @@
 local.properties
 .android_home/
 /tmp/
+infra/node_modules
+infra/cdk.out
+infra/cdk-outputs.json

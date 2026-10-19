@@ -1,8 +1,8 @@
 # Work Package WP-00: AWS CDK Foundation, Unified Deploy Scripts & GitHub Actions CI/CD
 
 * **Milestone:** M0 — AWS CDK Foundation, Unified Deploy Scripts & GitHub Actions CI/CD
-* **Status:** Approved — Ready for Execution
-* **Governing ADRs:** [ADR-0003 (Amazon S3 Atomic JSON Persistence)](../../decisions/0003-s3-atomic-json-persistence.md), [ADR-0005 (AWS CDK IaC, GitHub Actions CI/CD & Continuous Deployment)](../../decisions/0005-cdk-iac-and-github-actions-cicd.md)
+* **Status:** Completed — Deployed & Verified in AWS (`us-east-2`)
+* **Governing ADRs:** [ADR-0003 (Amazon S3 Atomic JSON Persistence)](../../decisions/0003-s3-atomic-json-persistence.md), [ADR-0005 (AWS CDK IaC, GitHub Actions CI/CD & Continuous Deployment)](../../decisions/0005-cdk-iac-and-github-actions-cicd.md), [ADR-0006 (Scoped IAM CI Deployer Under AWS Project SCP)](../../decisions/0006-aws-project-scp-iam-ci-deployer.md)
 
 ---
 
@@ -115,24 +115,24 @@ A standalone, strict TypeScript AWS CDK v2 package at the repository root:
 
 ## 3. Step-by-Step Tactical Steps
 
-- [ ] **Step 1: Author Fastify Lambda Container Packaging (`route-builder/Dockerfile` & `.dockerignore`)**
+- [x] **Step 1: Author Fastify Lambda Container Packaging (`route-builder/Dockerfile` & `.dockerignore`)**
   - Create multi-stage `route-builder/Dockerfile` with AWS Lambda Web Adapter (`0.8.4`), `AWS_LWA_INVOKE_MODE=response_stream`, and `/api/health` readiness check.
   - Create `route-builder/.dockerignore` excluding `node_modules`, `dist`, `dist-server`, and `tests`.
-- [ ] **Step 2: Author AWS CDK Infrastructure Workspace (`infra/`) & CDK Unit Tests**
+- [x] **Step 2: Author AWS CDK Infrastructure Workspace (`infra/`) & CDK Unit Tests**
   - Initialize `infra/` with `package.json`, `tsconfig.json`, `cdk.json`, `bin/infra.ts`, `lib/roadtrip-cloud-stack.ts`, and `test/roadtrip-cloud-stack.test.ts`.
   - Install dependencies in `infra/` and verify `npm test` and `npx cdk synth` succeed cleanly.
-- [ ] **Step 3: Author Unified Verification & Deployment Scripts (`scripts/ci_check.sh` & `scripts/deploy_cloud.sh`)**
+- [x] **Step 3: Author Unified Verification & Deployment Scripts (`scripts/ci_check.sh` & `scripts/deploy_cloud.sh`)**
   - Create executable `scripts/ci_check.sh` and `scripts/deploy_cloud.sh`.
   - Run `./scripts/ci_check.sh` locally to verify `route-builder` tests + build, Android unit tests, and `infra` CDK tests + `cdk synth` all pass.
-- [ ] **Step 4: Author GitHub Actions Workflows & Sync Non-Project Documentation**
+- [x] **Step 4: Author GitHub Actions Workflows & Sync Non-Project Documentation**
   - Create `.github/workflows/ci.yml` (push + PR verification) and `.github/workflows/deploy.yml` (`main` push + `workflow_dispatch` on-demand deployment).
   - Update [`AGENTS.md`](../../../../AGENTS.md), [`README.md`](../../../../README.md), [`route-builder/AGENTS.md`](../../../../route-builder/AGENTS.md), [`route-builder/README.md`](../../../../route-builder/README.md), and [`docs/README.md`](../../../README.md) with the new `infra/`, `.github/workflows/`, and `scripts/` documentation.
-- [ ] **Step 5: GitHub Remote Switch, AWS CDK Bootstrap & First Live Deployment (Interactive with User)**
+- [x] **Step 5: GitHub Remote Switch, AWS CDK Bootstrap & First Live Deployment (Interactive with User)**
   - Point `git remote` to the new GitHub repository and push branch.
   - Once AWS CLI credentials are configured (`aws sts get-caller-identity`), run `npx cdk bootstrap` in `infra/`.
   - Execute `./scripts/deploy_cloud.sh` locally to deploy the stack to AWS.
-  - Configure `AWS_ROLE_ARN` repository variable in GitHub and verify `.github/workflows/ci.yml` and on-demand `.github/workflows/deploy.yml` (`workflow_dispatch`).
-- [ ] **Step 6: Manual Cloud Verification**
+  - Configure `AWS_ROLE_ARN` and `AWS_REGION` repository variables and `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets in GitHub and verify `.github/workflows/ci.yml` and `.github/workflows/deploy.yml`.
+- [x] **Step 6: Manual Cloud Verification**
   - Verify `https://<cloudfront-domain>/api/health` returns `200 OK`.
   - Open `https://<cloudfront-domain>/` in a browser and confirm the Route Builder Web Studio loads over CloudFront, renders the sample itinerary on the map, and calculates OSRM routes via the Lambda backend.
 
@@ -149,7 +149,7 @@ A standalone, strict TypeScript AWS CDK v2 package at the repository root:
 ### Live Deployment & Manual Cloud Verification Checklist
 1. `./scripts/deploy_cloud.sh` completes `cdk deploy`, S3 static sync, CloudFront invalidation, and `/api/health` smoke check with exit code `0`.
 2. Opening the output `CloudFrontUrl` in a browser loads the Route Builder Web Studio over HTTPS and proxies `/api/routing/route` and `/api/itineraries` through the AWS Lambda container.
-3. GitHub Actions `ci.yml` passes on branch push, and `deploy.yml` succeeds via `workflow_dispatch`.
+3. GitHub Actions `ci.yml` passes on branch push/PR, and `deploy.yml` deploys on `main` merge and `workflow_dispatch`.
 
 ---
 
@@ -158,10 +158,15 @@ A standalone, strict TypeScript AWS CDK v2 package at the repository root:
 * **2026-10-18 — Shift-Left Infrastructure & GitHub Migration ([ADR-0005](../../decisions/0005-cdk-iac-and-github-actions-cicd.md)):**
   * During Milestone 1 planning review, we identified that deferring AWS CDK, deployment scripting, and live manual verification to a final milestone left Milestones 1–4 unverified in the cloud.
   * **Adjustment:** Introduced **Milestone 0 (`WP-00-cdk-and-cicd-foundation.md`)** as the foundational first work package, decided to migrate from self-hosted Gitea to GitHub upfront for unified CI and keyless AWS OIDC federation, and updated `ROADMAP.md` so every milestone (M0–M4) requires CDK updates, live deployment (`./scripts/deploy_cloud.sh`), and manual cloud verification.
+* **2026-10-18 — Bundled Sample Itinerary Inside `route-builder/` Docker Context:**
+  * Because `lambda.DockerImageCode.fromImageAsset('../route-builder')` scopes the Docker build context to `route-builder/`, `route-builder/itineraries/sample_itinerary.json` was placed inside `route-builder/` and copied in `Dockerfile` to `/app/itineraries/sample_itinerary.json` (`WORKDIR /app/route-builder`), matching `ItineraryStorageService`'s `path.resolve(process.cwd(), '..', 'itineraries')` lookup without modifying application code.
+* **2026-10-18 — AWS Project SCP Blocks `iam:CreateOpenIDConnectProvider` ([ADR-0006](../../decisions/0006-aws-project-scp-iam-ci-deployer.md)):**
+  * During the first `./scripts/deploy_cloud.sh` run, CloudFormation failed on `GitHubOidcProvider` (`Custom::AWSCDKOpenIdConnectProvider`) because the mandatory AWS Project Service Control Policy (`p-xfrfnt7k`, statement `DenyIAMRestrictedActions`) denies `"iam:*Provider*"` unless the user irreversibly activates Advanced AWS Features at `settings.aws.com`.
+  * **Adjustment:** Recorded [ADR-0006](../../decisions/0006-aws-project-scp-iam-ci-deployer.md) and updated `RoadtripCopilotCloudStack` to provision a dedicated, least-privilege IAM deployment user (`roadtrip-copilot-github-actions-deployer`) and deployment role (`roadtrip-copilot-github-actions-deploy`) by default (while still supporting an external `githubOidcProviderArn` if supplied), and updated `.github/workflows/deploy.yml` to authenticate via `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` secrets and `AWS_ROLE_ARN` + `AWS_REGION` variables.
 
 ---
 
 ## 6. Next Session Handoff
 
-* **Current State:** `ADR-0005`, `DECISIONS.md`, `ROADMAP.md`, `WORKING_MODEL.md`, and `WP-00-cdk-and-cicd-foundation.md` are approved and committed. Repository is being scrubbed for PII and migrated to GitHub prior to starting M0 execution.
-* **Next Immediate Step:** Begin executing `WP-00-cdk-and-cicd-foundation.md`: delegate Steps 1–4 (`route-builder/Dockerfile` & `.dockerignore`, `infra/` CDK stack + unit tests, `scripts/ci_check.sh` + `scripts/deploy_cloud.sh`, `.github/workflows/ci.yml` + `deploy.yml`, and non-project living doc updates) to worker subagents per the active harness adapter, then proceed to Step 5 (`cdk bootstrap` + `./scripts/deploy_cloud.sh`) and Step 6 (manual CloudFront verification).
+* **Current State:** Milestone 0 (`WP-00-cdk-and-cicd-foundation.md`) is completed, deployed live to AWS (`https://d1xgc9hp77qmo9.cloudfront.net` in `us-east-2`), verified in the browser, and archived to `plan/archive/WP-00-cdk-and-cicd-foundation.md`.
+* **Next Immediate Step:** Kick off **Milestone 1 (`WP-01-dual-mode-oidc-auth.md`)** on a new milestone branch after `M0` merges to `main`: draft `plan/active/WP-01-dual-mode-oidc-auth.md` for user alignment per `WORKING_MODEL.md` Section 5 Phase A.

@@ -52,8 +52,12 @@
 
 ```
 route-builder/
+├── Dockerfile                  # Multi-stage Docker build with AWS Lambda Web Adapter streaming
+├── .dockerignore               # Docker build exclusions
 ├── AGENTS.md                   # This handbook & subproject directory layout
 ├── README.md                   # User-facing web studio documentation & setup
+├── itineraries/                # Bundled itineraries (included in container image)
+│   └── sample_itinerary.json   # Default sample itinerary route
 ├── index.html                  # HTML entrypoint
 ├── package.json                # Project dependencies and test scripts
 ├── tsconfig.json               # Frontend TypeScript configuration
@@ -129,6 +133,12 @@ npm run test:schema   # Itinerary V2 JSON export and ADB device service
 
 # Production compile (client Vite bundle + backend tsc)
 npm run build
+
+# Full verification pipeline across route-builder, infra CDK, and Android (invoked from repo root)
+./scripts/ci_check.sh
+
+# On-demand AWS CDK serverless deployment (invoked from repo root)
+./scripts/deploy_cloud.sh
 ```
 
 ---

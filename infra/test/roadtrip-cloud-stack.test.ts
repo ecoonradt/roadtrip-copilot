@@ -1,0 +1,182 @@
+import * as cdk from 'aws-cdk-lib';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+import { describe, expect, it } from 'vitest';
+import { RoadtripCopilotCloudStack } from '../lib/roadtrip-cloud-stack.js';
+
+describe('RoadtripCopilotCloudStack', () => {
+  const createStack = (props?: { githubRepo?: string; githubOidcProviderArn?: string }) => {
+    const app = new cdk.App();
+    return new RoadtripCopilotCloudStack(app, 'TestStack', {
+      env: { account: '123456789012', region: 'us-east-2' },
+      ...props,
+    });
+  };
+
+  it('provisions both S3 buckets with full public access block and SSE enabled', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    // Verify both StaticSiteBucket and AppDataBucket have BLOCK_ALL and AES256 SSE enabled
+    template.resourcePropertiesCountIs(
+      'AWS::S3::Bucket',
+      {
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: true,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: true,
+        },
+        BucketEncryption: {
+          ServerSideEncryptionConfiguration: [
+            {
+              ServerSideEncryptionByDefault: {
+                SSEAlgorithm: 'AES256',
+              },
+            },
+          ],
+        },
+      },
+      2,
+    );
+  });
+
+  it('provisions AppDataBucket with DeletionPolicy Retain', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResource('AWS::S3::Bucket', {
+      DeletionPolicy: 'Retain',
+      UpdateReplacePolicy: 'Retain',
+      Properties: {
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: true,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: true,
+        },
+      },
+    });
+  });
+
+  it('provisions FastifyApiFunction with correct memory, timeout, architecture and LWA environment', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      MemorySize: 512,
+      Timeout: 300,
+      Architectures: ['x86_64'],
+      Environment: {
+        Variables: Match.objectLike({
+          NODE_ENV: 'production',
+          PORT: '3001',
+          AWS_LWA_INVOKE_MODE: 'response_stream',
+          AWS_LWA_READINESS_CHECK_PATH: '/api/health',
+          S3_STORAGE_BUCKET: Match.anyValue(),
+        }),
+      },
+    });
+  });
+
+  it('configures Lambda Function URL with auth NONE and RESPONSE_STREAM invoke mode', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::Lambda::Url', {
+      AuthType: 'NONE',
+      InvokeMode: 'RESPONSE_STREAM',
+    });
+  });
+
+  it('configures CloudFront distribution with /api/* route, cache/origin request policies and 60s timeout', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        DefaultRootObject: 'index.html',
+        CacheBehaviors: Match.arrayWith([
+          Match.objectLike({
+            PathPattern: '/api/*',
+            CachePolicyId: '4135ea2d-6df8-44a3-9df3-4b5a84be39ad',
+            OriginRequestPolicyId: 'b689b0a8-53d0-40ab-baf2-68738e2966ac',
+            ViewerProtocolPolicy: 'redirect-to-https',
+          }),
+        ]),
+        Origins: Match.arrayWith([
+          Match.objectLike({
+            CustomOriginConfig: Match.objectLike({
+              OriginReadTimeout: 60,
+              OriginProtocolPolicy: 'https-only',
+            }),
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it('provisions scoped IAM user and role for GitHub Actions deployment without OIDC provider', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    // Never triggers iam:CreateOpenIDConnectProvider
+    template.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 0);
+
+    // Provisions dedicated IAM machine user
+    template.hasResourceProperties('AWS::IAM::User', {
+      UserName: 'roadtrip-copilot-github-actions-deployer',
+    });
+
+    // Provisions deployer IAM role
+    template.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'roadtrip-copilot-github-actions-deploy',
+    });
+  });
+
+  it('synthesizes all required CfnOutput keys', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    const outputs = template.findOutputs('*');
+    const outputKeys = Object.keys(outputs);
+
+    expect(outputKeys).toContain('CloudFrontUrl');
+    expect(outputKeys).toContain('DistributionId');
+    expect(outputKeys).toContain('StaticSiteBucketName');
+    expect(outputKeys).toContain('AppDataBucketName');
+    expect(outputKeys).toContain('LambdaFunctionUrl');
+    expect(outputKeys).toContain('GitHubActionsRoleArn');
+    expect(outputKeys).toContain('GitHubActionsUserName');
+  });
+
+  it('uses existing OIDC provider when githubOidcProviderArn is specified', () => {
+    const stack = createStack({
+      githubRepo: 'test/repo',
+      githubOidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
+    });
+    const template = Template.fromStack(stack);
+
+    // When ARN is passed, Custom::AWSCDKOpenIdConnectProvider is not created
+    template.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 0);
+
+    template.hasResourceProperties('AWS::IAM::Role', {
+      RoleName: 'roadtrip-copilot-github-actions-deploy',
+      AssumeRolePolicyDocument: {
+        Statement: [
+          Match.objectLike({
+            Action: 'sts:AssumeRoleWithWebIdentity',
+            Effect: 'Allow',
+            Condition: {
+              StringEquals: {
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+              },
+              StringLike: {
+                'token.actions.githubusercontent.com:sub': 'repo:test/repo:*',
+              },
+            },
+          }),
+        ],
+      },
+    });
+  });
+});

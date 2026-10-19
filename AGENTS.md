@@ -80,6 +80,23 @@ Subproject directory details are maintained locally in their respective handbook
   cd route-builder && npm run test:schema   # V2 export & device sync
   ```
 
+### Cloud Infrastructure & CI/CD Commands (`infra/` & `scripts/`)
+* **Unified Local & CI Verification Pipeline:**
+  ```bash
+  ./scripts/ci_check.sh
+  ```
+  Runs the full verification pipeline across all subprojects: `route-builder` tests & production build, `infra` CDK unit tests & CloudFormation synthesis, and Android unit tests (`./gradlew testDebugUnitTest`).
+* **CDK Infrastructure Testing & CloudFormation Synthesis:**
+  ```bash
+  cd infra && npm test && npx cdk synth
+  ```
+  Executes CDK unit assertions (validating S3 public access blocks, Lambda Web Adapter response streaming, CloudFront API routes) and synthesizes the CloudFormation template.
+* **On-Demand Cloud Deployment:**
+  ```bash
+  ./scripts/deploy_cloud.sh
+  ```
+  Deploys the full serverless stack to the project's assigned AWS Region: builds the web studio, runs `cdk deploy`, syncs the S3 static hosting bucket, invalidates CloudFront cache, and verifies deployment via `/api/health` live HTTP smoke check.
+
 ---
 
 ## 5. Rules for Contributing Developers & Agents
