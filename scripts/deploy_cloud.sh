@@ -82,25 +82,25 @@ aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --path
 # 8. Live HTTP smoke check against CloudFront /api/health
 echo "Executing live smoke check against ${CLOUDFRONT_URL}/api/health..."
 HEALTH_URL="${CLOUDFRONT_URL%/}/api/health"
-MAX_RETRIES=6
+MAX_ATTEMPTS=6 # 1 initial attempt + up to 5 retries (per WP-00 spec)
 RETRY_DELAY=5
 SUCCESS=false
 
-for i in $(seq 1 "$MAX_RETRIES"); do
-  echo "Attempt $i/$MAX_RETRIES: curling $HEALTH_URL"
+for i in $(seq 1 "$MAX_ATTEMPTS"); do
+  echo "Attempt $i/$MAX_ATTEMPTS: curling $HEALTH_URL"
   if curl -fsS "$HEALTH_URL" > /dev/null 2>&1; then
     echo "Health check succeeded!"
     SUCCESS=true
     break
   fi
-  if [ "$i" -lt "$MAX_RETRIES" ]; then
-    echo "Waiting ${RETRY_DELAY}s before retrying..."
+  if [ "$i" -lt "$MAX_ATTEMPTS" ]; then
+    echo "Waiting ${RETRY_DELAY}s before retrying (retry $i of $((MAX_ATTEMPTS - 1)))..."
     sleep "$RETRY_DELAY"
   fi
 done
 
 if [ "$SUCCESS" != true ]; then
-  echo "Error: Health check failed against $HEALTH_URL after $MAX_RETRIES attempts." >&2
+  echo "Error: Health check failed against $HEALTH_URL after $MAX_ATTEMPTS attempts (initial + 5 retries)." >&2
   echo "Last attempt details:" >&2
   curl -fsS -v "$HEALTH_URL" >&2 || true
   exit 1

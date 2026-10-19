@@ -28,7 +28,7 @@ npm run build
 echo "=== [2/3] AWS CDK Infrastructure Tests & Synth ==="
 cd "$ROOT_DIR/infra"
 npm test
-npx cdk synth --quiet
+AWS_REGION="${AWS_REGION:-${CDK_DEFAULT_REGION:-us-east-2}}" npx cdk synth --quiet
 
 echo "=== [3/3] Android Unit Tests ==="
 if [ "$SKIP_ANDROID" = true ]; then

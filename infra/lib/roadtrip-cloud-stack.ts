@@ -30,6 +30,9 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
     super(scope, id, props);
 
     // 1. StaticSiteBucket (S3 Bucket)
+    // Ephemeral build artifacts (dist/) are synced from git repository builds and contain no user data.
+    // DESTROY + autoDeleteObjects enables clean `cdk destroy` without leaving orphaned S3 buckets in the project.
+    // In contrast, AppDataBucket (below) holds user itineraries and trip data, so it strictly uses RETAIN.
     this.staticSiteBucket = new s3.Bucket(this, 'StaticSiteBucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,

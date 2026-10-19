@@ -68,3 +68,20 @@ The server architecture is built around the `AiHarnessAdapter` interface (`route
   * Read vehicle speed, fuel level, and compass heading directly from an OBD-II dongle to refine ahead/behind pace calculations and dead-reckoning in tunnels or canyons.
 * **Full Map Surface (MapTemplate):**
   * If Google expands Android Auto permissions for general navigation in the Car App Library, render an interactive turn map alongside co-pilot alerts.
+
+---
+
+## 5. Engineering Infrastructure & Monorepo CI/CD
+
+* **Monorepo Path-Filtered CI/CD Pipelines (Android vs. Web Studio & Cloud):**
+  * **Context & Problem:** The repository functions as a full-system monorepo containing both the native Android Auto background service (`app/`) and the full-stack Web Studio + AWS cloud infrastructure (`route-builder/`, `infra/`). Currently, CI runs all checks together, and Android unit tests on headless GitHub runners require an Android SDK that is not pre-installed on basic runner images.
+  * **Objective:** Decouple CI verification so each subsystem runs its test suite only when PRs or commits touch relevant paths:
+    * **Web Studio & Cloud Infrastructure Job:**
+      * Trigger paths: `route-builder/**`, `infra/**`, `scripts/ci_check.sh`, `scripts/deploy_cloud.sh`.
+      * Steps: Node 20 setup, `npm test` across Fastify and React, `npm run build`, CDK unit assertions (`vitest run`), and `cdk synth`.
+    * **Android Native Co-Pilot Job:**
+      * Trigger paths: `app/**`, `gradle/**`, `build.gradle.kts`, `settings.gradle.kts`.
+      * Steps: JDK 17 setup, Android SDK setup (e.g. `android-actions/setup-android@v3` with command-line tools and platform API 34), Gradle dependency caching, and `./gradlew testDebugUnitTest`.
+    * **Unified Local Verification (`scripts/ci_check.sh`):**
+      * Retain the existing local script with `--skip-android` and `--skip-web` flags so developers working exclusively on one subsystem can run end-to-end verification without needing the other toolchain installed locally.
+  * **Roadmap Alignment:** Implement as part of Phase 2 preparation or when kicking off [`projects/android-route-client`](projects/android-route-client/WORKING_MODEL.md).

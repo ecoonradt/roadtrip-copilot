@@ -115,6 +115,41 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
+  it('configures CloudFront custom error responses for SPA routing fallback to /index.html', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        CustomErrorResponses: Match.arrayWith([
+          Match.objectLike({
+            ErrorCode: 403,
+            ResponseCode: 200,
+            ResponsePagePath: '/index.html',
+          }),
+          Match.objectLike({
+            ErrorCode: 404,
+            ResponseCode: 200,
+            ResponsePagePath: '/index.html',
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it('configures CloudFront S3 Origin Access Control (OAC)', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::CloudFront::OriginAccessControl', {
+      OriginAccessControlConfig: Match.objectLike({
+        OriginAccessControlOriginType: 's3',
+        SigningBehavior: 'always',
+        SigningProtocol: 'sigv4',
+      }),
+    });
+  });
+
   it('provisions scoped IAM user and role for GitHub Actions deployment without OIDC provider', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);

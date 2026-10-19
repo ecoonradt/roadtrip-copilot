@@ -47,6 +47,17 @@ jobs:
       - name: Run verification pipeline
         run: ./scripts/ci_check.sh
 
+      - name: Validate AWS configuration
+        run: |
+          if [ -z "${{ vars.AWS_REGION }}" ]; then
+            echo "::error::GitHub Actions variable 'AWS_REGION' is not set. In the new AWS experience, this must be set to your project's assigned Region (Settings > View all projects > Overview > Additional Info > Region)." >&2
+            exit 1
+          fi
+          if [ -z "${{ vars.AWS_ROLE_ARN }}" ] && [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "::error::Neither 'vars.AWS_ROLE_ARN' nor 'secrets.AWS_ACCESS_KEY_ID' is set. At least one authentication mechanism is required for deployment." >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
