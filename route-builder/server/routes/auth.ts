@@ -88,6 +88,16 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   fastify.get('/api/auth/google', async (request, reply) => {
     await authService.ensureConfigLoaded();
 
+    if (
+      authService.isAuthEnabled() &&
+      (!authService.getGoogleClientId() || !authService.getJwtSecret())
+    ) {
+      return reply.status(503).send({
+        error: 'Service Unavailable',
+        message: 'Authentication service is not fully configured (missing OAuth credentials).',
+      });
+    }
+
     const { state, codeChallenge, stateCookieToken } =
       authService.createOAuthStateAndChallenge();
     const baseUrl = authService.resolvePublicBaseUrl(request);
@@ -114,6 +124,19 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   // GET /api/auth/callback/google - Handle Google OAuth2 callback
   fastify.get('/api/auth/callback/google', async (request, reply) => {
     await authService.ensureConfigLoaded();
+
+    if (
+      authService.isAuthEnabled() &&
+      (!authService.getGoogleClientId() ||
+        !authService.getGoogleClientSecret() ||
+        !authService.getJwtSecret())
+    ) {
+      return reply.status(503).send({
+        error: 'Service Unavailable',
+        message: 'Authentication service is not fully configured (missing OAuth credentials).',
+      });
+    }
+
     const baseUrl = authService.resolvePublicBaseUrl(request);
     const isSecure = baseUrl.startsWith('https://');
 
@@ -195,6 +218,16 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   // POST /api/auth/mobile/google - Exchange Google ID token for Android native clients
   fastify.post('/api/auth/mobile/google', async (request, reply) => {
     await authService.ensureConfigLoaded();
+
+    if (
+      authService.isAuthEnabled() &&
+      (!authService.getGoogleClientId() || !authService.getJwtSecret())
+    ) {
+      return reply.status(503).send({
+        error: 'Service Unavailable',
+        message: 'Authentication service is not fully configured (missing OAuth credentials).',
+      });
+    }
 
     const body = (request.body || {}) as MobileGoogleAuthRequest;
     const idToken = body.idToken || body.id_token;

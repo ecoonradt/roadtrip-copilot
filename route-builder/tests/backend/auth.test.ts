@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { FastifyRequest } from 'fastify';
 import { createApp } from '../../server/app.js';
 import { AuthService, SESSION_COOKIE_NAME, OAUTH_STATE_COOKIE_NAME } from '../../server/services/authService.js';
 import type { AuthStatusResponse, MobileGoogleAuthResponse } from '../../server/types/auth.js';
@@ -528,26 +529,116 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       expect(clearedStateCookie).toContain('Max-Age=0');
     });
 
-    it('resolvePublicBaseUrl rejects untrusted host and falls back to safe host', async () => {
-      const authService = new AuthService({ authEnabled: true, jwtSecret });
+    it('GET /api/auth/google returns 503 Service Unavailable when OAuth credentials are not configured', async () => {
+      const authService = new AuthService({ authEnabled: true }); // missing googleClientId and jwtSecret
       const app = createApp({ authService });
 
-      // Direct caller attempting host header poisoning
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error).toBe('Service Unavailable');
+      expect(res.json().message).toContain('missing OAuth credentials');
+    });
+
+    it('resolvePublicBaseUrl rejects untrusted host and re-validates fallback host', async () => {
+      const authService = new AuthService({ authEnabled: true, jwtSecret, googleClientId });
+      const app = createApp({ authService });
+
+      // Direct caller attempting host header poisoning on both forwarded host and host header
       const res = await app.inject({
         method: 'GET',
         url: '/api/auth/google',
         headers: {
           'x-forwarded-host': 'evil-attacker.com',
+          host: 'evil-host.com',
           'x-forwarded-proto': 'https',
         },
       });
 
       expect(res.statusCode).toBe(302);
       const location = res.headers.location as string;
-      // Must not redirect to evil-attacker.com redirect_uri
+      // Must not redirect to evil-attacker.com or evil-host.com
       expect(location).not.toContain('evil-attacker.com');
+      expect(location).not.toContain('evil-host.com');
       expect(location).toContain(encodeURIComponent('/api/auth/callback/google'));
-      expect(location).toContain('localhost');
+      expect(decodeURIComponent(location)).toContain('localhost:3001');
+    });
+
+    it('resolvePublicBaseUrl trusts custom domain when verified by edge origin header', async () => {
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret,
+        googleClientId,
+        originVerifySecret: 'roadtrip-copilot-edge',
+      });
+      const app = createApp({ authService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'copilot.roadtrip.com',
+          'x-copilot-origin-verify': 'roadtrip-copilot-edge',
+        },
+      });
+
+      expect(res.statusCode).toBe(302);
+      const location = res.headers.location as string;
+      expect(location).toContain(
+        encodeURIComponent('https://copilot.roadtrip.com/api/auth/callback/google')
+      );
+    });
+
+    it('resolvePublicBaseUrl trusts custom domain when listed in allowedHosts', async () => {
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret,
+        googleClientId,
+        allowedHosts: 'custom.roadtrip.com',
+      });
+      const app = createApp({ authService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'custom.roadtrip.com',
+          'x-forwarded-proto': 'https',
+        },
+      });
+
+      expect(res.statusCode).toBe(302);
+      const location = res.headers.location as string;
+      expect(location).toContain(
+        encodeURIComponent('https://custom.roadtrip.com/api/auth/callback/google')
+      );
+    });
+
+    it('resolvePublicBaseUrl uses publicBaseUrl unconditionally when configured', async () => {
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret,
+        googleClientId,
+        publicBaseUrl: 'https://authoritative.roadtrip.com',
+      });
+      const app = createApp({ authService });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/auth/google',
+        headers: {
+          'x-forwarded-host': 'd123.cloudfront.net',
+        },
+      });
+
+      expect(res.statusCode).toBe(302);
+      const location = res.headers.location as string;
+      expect(location).toContain(
+        encodeURIComponent('https://authoritative.roadtrip.com/api/auth/callback/google')
+      );
     });
   });
 
@@ -555,6 +646,20 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
     const jwtSecret = 'android-mobile-oidc-jwt-secret-testing-12345';
     const googleClientId = 'android-client-id.apps.googleusercontent.com';
     const allowedEmails = 'mobile-pilot@example.com';
+
+    it('returns 503 Service Unavailable when OAuth credentials are not configured', async () => {
+      const authService = new AuthService({ authEnabled: true });
+      const app = createApp({ authService });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/mobile/google',
+        payload: { idToken: 'some-token' },
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error).toBe('Service Unavailable');
+    });
 
     it('returns 400 Bad Request when idToken is missing in request body', async () => {
       const authService = new AuthService({
@@ -799,6 +904,77 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       } finally {
         Date.now = realNow;
       }
+    });
+
+    it('honors retry cooldown if SSM refresh fails after 15-minute TTL expires', async () => {
+      let callCount = 0;
+      const mockLoader = vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return { '/roadtrip/jwt-secret': 'initial-cached-secret' };
+        }
+        // Refresh after TTL fails
+        throw new Error('SSM service unreachable or KMS error');
+      });
+
+      const authService = new AuthService({
+        authEnabled: true,
+        ssmParamNames: {
+          jwtSecret: '/roadtrip/jwt-secret',
+        },
+        ssmLoader: mockLoader,
+      });
+
+      const app = createApp({ authService });
+
+      // Initial successful load
+      await app.inject({ method: 'GET', url: '/api/auth/status' });
+      expect(mockLoader).toHaveBeenCalledTimes(1);
+      expect(authService.getJwtSecret()).toBe('initial-cached-secret');
+
+      const realNow = Date.now;
+      try {
+        // Advance clock past 15-minute TTL (16 minutes)
+        Date.now = () => realNow() + 16 * 60 * 1000;
+
+        // First call after TTL expiry attempts refresh and encounters error; serves cached secret
+        await app.inject({ method: 'GET', url: '/api/auth/status' });
+        expect(mockLoader).toHaveBeenCalledTimes(2);
+        expect(authService.getJwtSecret()).toBe('initial-cached-secret');
+
+        // Immediate subsequent request within 30-second cooldown: suppressed!
+        await app.inject({ method: 'GET', url: '/api/auth/status' });
+        expect(mockLoader).toHaveBeenCalledTimes(2);
+        expect(authService.getJwtSecret()).toBe('initial-cached-secret');
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    it('loads publicBaseUrl from SSM parameter store when configured', async () => {
+      const mockLoader = vi.fn().mockResolvedValue({
+        '/roadtrip/public-base-url': 'https://custom-ssm.roadtrip.com',
+        '/roadtrip/jwt-secret': 'some-secret',
+      });
+
+      const authService = new AuthService({
+        authEnabled: true,
+        ssmParamNames: {
+          publicBaseUrl: '/roadtrip/public-base-url',
+          jwtSecret: '/roadtrip/jwt-secret',
+        },
+        ssmLoader: mockLoader,
+      });
+
+      const app = createApp({ authService });
+      await app.inject({ method: 'GET', url: '/api/auth/status' });
+
+      // FastifyRequest mock for resolvePublicBaseUrl
+      const mockReq = {
+        headers: {},
+        protocol: 'http',
+      } as unknown as FastifyRequest;
+      expect(authService.resolvePublicBaseUrl(mockReq)).toBe('https://custom-ssm.roadtrip.com');
     });
   });
 });

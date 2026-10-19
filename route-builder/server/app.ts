@@ -44,6 +44,16 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       // Ignore invalid URL
     }
   }
+  if (process.env.ALLOWED_HOSTS) {
+    const hosts = process.env.ALLOWED_HOSTS.split(/[,;\s]+/);
+    for (const h of hosts) {
+      const trimmed = h.trim();
+      if (trimmed) {
+        allowedOrigins.push(`https://${trimmed}`);
+        allowedOrigins.push(`http://${trimmed}`);
+      }
+    }
+  }
 
   app.register(cors, {
     origin: allowedOrigins,

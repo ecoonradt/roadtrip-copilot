@@ -54,3 +54,26 @@ Chosen Option: **Option B (Runtime SSM `SecureString` Resolution + CloudFront `/
   * Attaches `ApiForwardedHostFunction` (`cloudfront.Function` on `VIEWER_REQUEST`) to `/api/*` cache behavior to populate `x-forwarded-host` and `x-forwarded-proto`.
 * **Server Auth Config (`route-builder/server/services/authService.ts`):**
   * Resolves auth config from direct env vars first, falling back to cached `@aws-sdk/client-ssm` `GetParametersCommand({ WithDecryption: true })` when `AUTH_ENABLED === 'true'` in AWS Lambda.
+  * Enforces a 15-minute in-memory configuration cache TTL (`CONFIG_CACHE_TTL_MS`) and a 30-second retry cooldown (`LOAD_RETRY_COOLDOWN_MS`) on resolution failures to prevent SSM throttling.
+
+---
+
+## 6. Trust Boundary Hardening & Future Custom Domain Architecture
+
+### A. Edge-to-Origin Verification (`x-copilot-origin-verify`)
+Because the Lambda Function URL has `AuthType: NONE` (invoked via CloudFront's `FunctionUrlOrigin`), a direct caller could attempt host header poisoning by supplying spoofed `x-forwarded-host` and `Host` headers.
+1. CloudFront attaches a custom origin header (`x-copilot-origin-verify: roadtrip-copilot-edge`) on the `/api/*` `FunctionUrlOrigin`. Viewer requests cannot spoof custom origin headers because CloudFront automatically overrides them before forwarding.
+2. In `AuthService.resolvePublicBaseUrl`:
+   - If `x-copilot-origin-verify` matches `ORIGIN_VERIFY_SECRET` and `candidateHost` is syntactically valid, `candidateHost` is trusted (enforcing `https://` proto).
+   - If origin verification is absent (direct calls or local dev), `candidateHost` is strictly validated against `SAFE_HOST_PATTERN` or `ALLOWED_HOSTS`.
+   - `fallbackHost` (`Host` header) is always re-validated against `SAFE_HOST_PATTERN` or `ALLOWED_HOSTS`; if untrusted, it defaults to `localhost:3001`.
+
+### B. Requirements for Future Custom Domain Support
+When migrating from the default CloudFront domain (`*.cloudfront.net`) to a custom domain (e.g. `copilot.roadtrip.com`):
+1. **AWS Certificate Manager (ACM):** Request/validate an ACM TLS certificate in `us-east-1` covering the custom domain (CloudFront strictly requires viewer certificates in `us-east-1`).
+2. **CloudFront CNAME & Viewer Certificate:** In `infra/lib/roadtrip-cloud-stack.ts`, configure `domainNames: ['copilot.roadtrip.com']` and `certificate: acmCertificate` on `CloudFrontDistribution`.
+3. **DNS Alias:** Create Route 53 `A` / `AAAA` Alias record (or third-party CNAME) pointing the custom domain to the CloudFront distribution domain.
+4. **Auth / Host Resolution Zero-Code Guarantee:**
+   - Because CloudFront passes `x-copilot-origin-verify: roadtrip-copilot-edge`, `AuthService.resolvePublicBaseUrl` automatically trusts the custom domain forwarded by CloudFront without requiring code modifications.
+   - Operators can also configure `PUBLIC_BASE_URL` (or SSM `/roadtrip-copilot/public-base-url`) to fix the authoritative public base URL, and/or supply `ALLOWED_HOSTS: 'copilot.roadtrip.com'` for explicit host allowlisting.
+5. **Google Cloud OAuth Console:** Register `https://copilot.roadtrip.com/api/auth/callback/google` in Authorized Redirect URIs and `https://copilot.roadtrip.com` in Authorized JavaScript Origins.

@@ -80,6 +80,9 @@ describe('RoadtripCopilotCloudStack', () => {
           GOOGLE_CLIENT_SECRET_SSM_PARAM: '/roadtrip-copilot/google-client-secret',
           JWT_SECRET_SSM_PARAM: '/roadtrip-copilot/jwt-secret',
           ALLOWED_EMAILS_SSM_PARAM: '/roadtrip-copilot/allowed-emails',
+          PUBLIC_BASE_URL_SSM_PARAM: '/roadtrip-copilot/public-base-url',
+          ALLOWED_HOSTS: '',
+          ORIGIN_VERIFY_SECRET: 'roadtrip-copilot-edge',
         }),
       },
     });
@@ -94,6 +97,9 @@ describe('RoadtripCopilotCloudStack', () => {
       googleClientSecretSsmParam: '/custom/client-secret',
       jwtSecretSsmParam: '/custom/jwt-secret',
       allowedEmailsSsmParam: '/custom/allowed-emails',
+      publicBaseUrlSsmParam: '/custom/public-base-url',
+      allowedHosts: 'custom.roadtrip.com',
+      originVerifySecret: 'custom-secret-key',
     });
     const template = Template.fromStack(stack);
 
@@ -107,6 +113,9 @@ describe('RoadtripCopilotCloudStack', () => {
           GOOGLE_CLIENT_SECRET_SSM_PARAM: '/custom/client-secret',
           JWT_SECRET_SSM_PARAM: '/custom/jwt-secret',
           ALLOWED_EMAILS_SSM_PARAM: '/custom/allowed-emails',
+          PUBLIC_BASE_URL_SSM_PARAM: '/custom/public-base-url',
+          ALLOWED_HOSTS: 'custom.roadtrip.com',
+          ORIGIN_VERIFY_SECRET: 'custom-secret-key',
         }),
       },
     });
@@ -179,6 +188,12 @@ describe('RoadtripCopilotCloudStack', () => {
               OriginReadTimeout: 60,
               OriginProtocolPolicy: 'https-only',
             }),
+            OriginCustomHeaders: Match.arrayWith([
+              Match.objectLike({
+                HeaderName: 'x-copilot-origin-verify',
+                HeaderValue: 'roadtrip-copilot-edge',
+              }),
+            ]),
           }),
         ]),
       }),

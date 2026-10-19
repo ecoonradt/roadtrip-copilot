@@ -22,6 +22,9 @@ export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
   googleClientSecretSsmParam?: string;
   jwtSecretSsmParam?: string;
   allowedEmailsSsmParam?: string;
+  publicBaseUrlSsmParam?: string;
+  allowedHosts?: string;
+  originVerifySecret?: string;
 }
 
 export class RoadtripCopilotCloudStack extends cdk.Stack {
@@ -79,6 +82,9 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         GOOGLE_CLIENT_SECRET_SSM_PARAM: props?.googleClientSecretSsmParam ?? '/roadtrip-copilot/google-client-secret',
         JWT_SECRET_SSM_PARAM: props?.jwtSecretSsmParam ?? '/roadtrip-copilot/jwt-secret',
         ALLOWED_EMAILS_SSM_PARAM: props?.allowedEmailsSsmParam ?? '/roadtrip-copilot/allowed-emails',
+        PUBLIC_BASE_URL_SSM_PARAM: props?.publicBaseUrlSsmParam ?? '/roadtrip-copilot/public-base-url',
+        ALLOWED_HOSTS: props?.allowedHosts ?? '',
+        ORIGIN_VERIFY_SECRET: props?.originVerifySecret ?? 'roadtrip-copilot-edge',
       },
     });
 
@@ -167,6 +173,9 @@ function handler(event) {
         '/api/*': {
           origin: new origins.FunctionUrlOrigin(this.functionUrl, {
             readTimeout: cdk.Duration.seconds(60),
+            customHeaders: {
+              'x-copilot-origin-verify': props?.originVerifySecret ?? 'roadtrip-copilot-edge',
+            },
           }),
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,

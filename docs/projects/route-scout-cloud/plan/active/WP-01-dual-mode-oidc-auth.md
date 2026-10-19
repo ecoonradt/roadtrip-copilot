@@ -187,10 +187,25 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
   * **Adjustment:** Recorded [ADR-0007](../../decisions/0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md). `AuthService` resolves `/roadtrip-copilot/*` SSM `SecureString` parameters at runtime via `@aws-sdk/client-ssm` (`GetParametersCommand` with `WithDecryption: true`) when direct env vars are not set, and `RoadtripCopilotCloudStack` attaches `ApiForwardedHostFunction` (`VIEWER_REQUEST`) to `/api/*` so `x-forwarded-host` carries the CloudFront domain to Fastify.
 * **2026-10-19 — Independent Review Findings Hardening & Package Hygiene:**
   * Addressed review findings on auth boundaries: restricted CORS to local development/allowlisted origins; validated `x-forwarded-host` against `SAFE_HOST_PATTERN` in `AuthService.resolvePublicBaseUrl`; enforced fail-closed frontend auth status on API/network errors with retry UI; added 15-minute SSM cache TTL and 30-second retry cooldown on resolution failure; asserted `alg: 'HS256'` in JWT verification; handled Google OAuth cancellation redirects cleanly back to `/`; and removed unused `@fastify/jwt` and `@fastify/oauth2` dependencies.
+* **2026-10-19 — Edge-to-Origin Verification, Fallback Host Safety & Future Custom Domain Guide ([ADR-0007](../../decisions/0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md)):**
+  * Re-validated fallback host (`Host` header) against `SAFE_HOST_PATTERN` and `ALLOWED_HOSTS` to eliminate direct Lambda Function URL host injection attacks.
+  * Added CloudFront edge-to-origin verification (`x-copilot-origin-verify: roadtrip-copilot-edge`) on `/api/*` `FunctionUrlOrigin`, allowing CloudFront-forwarded viewer hosts (including future custom domains) to be trusted securely while direct untrusted invocations fall back to `localhost:3001`.
+  * Return clean `503 Service Unavailable` on `/api/auth/google`, callback, and mobile auth when OAuth credentials have not been configured.
+  * Enforced 30-second retry cooldown when SSM reloads fail after the 15-minute cache TTL, serving cached credentials and logging warnings to prevent SSM request flooding.
+
+### Future Custom Domain Architecture & Setup Guide
+When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded custom domain (e.g. `copilot.roadtrip.com`):
+1. **ACM Certificate in `us-east-1`:** CloudFront distributions require viewer SSL/TLS certificates to be provisioned in `us-east-1` via AWS Certificate Manager.
+2. **CloudFront CNAME & TLS Association:** In `infra/lib/roadtrip-cloud-stack.ts`, configure `domainNames: ['copilot.roadtrip.com']` and `certificate: acmCertificate` on `CloudFrontDistribution`.
+3. **DNS Alias:** Add an `A` / `AAAA` Alias record in Route 53 (or CNAME in your external DNS provider) targeting the CloudFront distribution domain name.
+4. **Auth & Public URL Resolution (Zero Code Changes Required):**
+   * CloudFront edge origin verification automatically validates the viewer domain in `x-forwarded-host` over the verified edge connection.
+   * Optionally set `PUBLIC_BASE_URL` (or SSM Parameter `/roadtrip-copilot/public-base-url`) to explicitly fix the public base URL, and/or populate `ALLOWED_HOSTS: 'copilot.roadtrip.com'`.
+5. **Google Cloud OAuth Console:** Register `https://copilot.roadtrip.com/api/auth/callback/google` under Authorized Redirect URIs and `https://copilot.roadtrip.com` under Authorized JavaScript Origins.
 
 ---
 
 ## 6. Next Session Handoff
 
-* **Current State:** All Milestone 1 code, unit tests (`229/229` in `route-builder`, `15/15` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
+* **Current State:** All Milestone 1 code, unit tests (`236/236` in `route-builder`, `15/15` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
 * **Next Immediate Step:** Upon user permission, populate the 4 SSM Parameter Store values (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`), run `./scripts/deploy_cloud.sh` to deploy M1 to AWS, complete manual cloud verification, and archive `WP-01-dual-mode-oidc-auth.md`.

@@ -16,6 +16,7 @@ export interface SsmParamNames {
   googleClientSecret?: string;
   jwtSecret?: string;
   allowedEmails?: string;
+  publicBaseUrl?: string;
 }
 
 export interface AuthServiceOptions {
@@ -25,6 +26,8 @@ export interface AuthServiceOptions {
   googleClientSecret?: string;
   jwtSecret?: string;
   publicBaseUrl?: string;
+  originVerifySecret?: string;
+  allowedHosts?: string | string[];
   ssmParamNames?: SsmParamNames;
   ssmLoader?: (paramNames: string[]) => Promise<Record<string, string>>;
   verifyGoogleIdTokenFn?: (idToken: string, clientId: string) => Promise<AuthUser>;
@@ -53,6 +56,8 @@ export class AuthService {
   private googleClientSecret: string;
   private jwtSecret: string;
   private publicBaseUrl: string;
+  private originVerifySecret: string;
+  private allowedHosts: string | string[];
   private configLoaded = false;
   private configLoadedAt = 0;
   private lastLoadAttemptAt = 0;
@@ -71,6 +76,9 @@ export class AuthService {
     this.googleClientSecret = options.googleClientSecret ?? process.env.GOOGLE_CLIENT_SECRET ?? '';
     this.jwtSecret = options.jwtSecret ?? process.env.JWT_SECRET ?? '';
     this.publicBaseUrl = options.publicBaseUrl ?? process.env.PUBLIC_BASE_URL ?? '';
+    this.originVerifySecret =
+      options.originVerifySecret ?? process.env.ORIGIN_VERIFY_SECRET ?? '';
+    this.allowedHosts = options.allowedHosts ?? process.env.ALLOWED_HOSTS ?? '';
   }
 
   isAuthEnabled(): boolean {
@@ -130,13 +138,43 @@ export class AuthService {
     return set.has(email.trim().toLowerCase());
   }
 
+  isConfigLoaded(): boolean {
+    return this.configLoaded;
+  }
+
+  private parseAllowedHosts(): Set<string> {
+    const set = new Set<string>();
+    const raw = this.allowedHosts;
+    if (Array.isArray(raw)) {
+      for (const h of raw) {
+        const trimmed = h.trim().toLowerCase();
+        if (trimmed) set.add(trimmed);
+      }
+    } else if (typeof raw === 'string') {
+      const parts = raw.split(/[,;\s]+/);
+      for (const part of parts) {
+        const trimmed = part.trim().toLowerCase();
+        if (trimmed) set.add(trimmed);
+      }
+    }
+    return set;
+  }
+
+  isHostAllowed(host: string): boolean {
+    if (!host || typeof host !== 'string') return false;
+    const trimmed = host.trim();
+    if (AuthService.SAFE_HOST_PATTERN.test(trimmed)) return true;
+    return this.parseAllowedHosts().has(trimmed.toLowerCase());
+  }
+
   async ensureConfigLoaded(): Promise<void> {
     const now = Date.now();
     if (this.configLoaded && now - this.configLoadedAt < AuthService.CONFIG_CACHE_TTL_MS) {
       return;
     }
     if (this.loadPromise) return this.loadPromise;
-    if (!this.configLoaded && now - this.lastLoadAttemptAt < AuthService.LOAD_RETRY_COOLDOWN_MS) {
+    // Enforce cooldown between retry attempts whether initial load or refresh after TTL
+    if (now - this.lastLoadAttemptAt < AuthService.LOAD_RETRY_COOLDOWN_MS) {
       return;
     }
 
@@ -149,7 +187,7 @@ export class AuthService {
         }
 
         const needed: {
-          key: 'googleClientId' | 'googleClientSecret' | 'jwtSecret' | 'allowedEmails';
+          key: 'googleClientId' | 'googleClientSecret' | 'jwtSecret' | 'allowedEmails' | 'publicBaseUrl';
           paramName: string;
         }[] = [];
 
@@ -186,6 +224,13 @@ export class AuthService {
           needed.push({ key: 'allowedEmails', paramName: allowedEmailsParam });
         }
 
+        const publicBaseUrlParam =
+          this.options.ssmParamNames?.publicBaseUrl || process.env.PUBLIC_BASE_URL_SSM_PARAM;
+        const staticPublicBaseUrl = this.options.publicBaseUrl ?? process.env.PUBLIC_BASE_URL;
+        if (!staticPublicBaseUrl && publicBaseUrlParam) {
+          needed.push({ key: 'publicBaseUrl', paramName: publicBaseUrlParam });
+        }
+
         if (needed.length > 0) {
           const paramNames = Array.from(new Set(needed.map((n) => n.paramName)));
           let allLoaded = true;
@@ -199,6 +244,7 @@ export class AuthService {
                 else if (item.key === 'googleClientSecret') this.googleClientSecret = val;
                 else if (item.key === 'jwtSecret') this.jwtSecret = val;
                 else if (item.key === 'allowedEmails') this.allowedEmails = val;
+                else if (item.key === 'publicBaseUrl') this.publicBaseUrl = val;
               } else {
                 allLoaded = false;
               }
@@ -206,10 +252,24 @@ export class AuthService {
             if (allLoaded) {
               this.configLoaded = true;
               this.configLoadedAt = Date.now();
+            } else {
+              console.warn(
+                `[AuthService] Partial SSM parameter load; some required parameters were missing.${
+                  this.configLoaded
+                    ? ' Serving with existing cached credentials for next cooldown period.'
+                    : ''
+                }`
+              );
             }
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`[AuthService] Failed to load parameters from SSM: ${msg}`);
+            console.warn(
+              `[AuthService] Failed to load parameters from SSM: ${msg}.${
+                this.configLoaded
+                  ? ' Serving with existing cached credentials for next cooldown period.'
+                  : ''
+              }`
+            );
           }
         } else {
           this.configLoaded = true;
@@ -454,21 +514,45 @@ export class AuthService {
       return process.env.PUBLIC_BASE_URL.replace(/\/+$/, '');
     }
 
+    const rawOriginVerify = request.headers['x-copilot-origin-verify'];
+    const originVerifyHeader = Array.isArray(rawOriginVerify)
+      ? rawOriginVerify[0]
+      : rawOriginVerify;
+    const isOriginVerified = Boolean(
+      this.originVerifySecret &&
+        originVerifyHeader &&
+        originVerifyHeader === this.originVerifySecret
+    );
+
     const rawProto = request.headers['x-forwarded-proto'];
     const protoStr = Array.isArray(rawProto) ? rawProto[0] : rawProto;
-    const protoCandidate = (protoStr ? protoStr.split(',')[0].trim() : '') || request.protocol || 'http';
-    const proto = protoCandidate === 'https' ? 'https' : 'http';
+    const protoCandidate =
+      (protoStr ? protoStr.split(',')[0].trim() : '') || request.protocol || 'http';
+    const proto = isOriginVerified
+      ? 'https'
+      : protoCandidate === 'https'
+        ? 'https'
+        : 'http';
 
     const rawHost = request.headers['x-forwarded-host'];
     const hostStr = Array.isArray(rawHost) ? rawHost[0] : rawHost;
     const fallbackHost = Array.isArray(request.headers.host)
       ? request.headers.host[0]
       : request.headers.host;
-    const candidateHost = (hostStr ? hostStr.split(',')[0].trim() : '') || fallbackHost || 'localhost:3001';
+    const candidateHost =
+      (hostStr ? hostStr.split(',')[0].trim() : '') || fallbackHost || 'localhost:3001';
 
-    // Restrict candidate host to safe allowlisted patterns (localhost, 127.0.0.1, or *.cloudfront.net)
-    const isSafe = AuthService.SAFE_HOST_PATTERN.test(candidateHost);
-    const host = isSafe ? candidateHost : fallbackHost || 'localhost:3001';
+    // If request is authenticated via CloudFront edge origin verification, trust candidateHost
+    // provided it conforms to valid hostname syntax (alphanumeric, dots, dashes, optional port).
+    const isSyntacticallyValidHost = /^[a-z0-9.-]+(:[0-9]+)?$/i.test(candidateHost);
+    const isCandidateSafe =
+      (isOriginVerified && isSyntacticallyValidHost) || this.isHostAllowed(candidateHost);
+
+    // Re-validate fallback host to prevent attacker-controlled Host header injection
+    const isFallbackSafe = Boolean(fallbackHost && this.isHostAllowed(fallbackHost));
+    const safeFallback = isFallbackSafe ? fallbackHost! : 'localhost:3001';
+
+    const host = isCandidateSafe ? candidateHost : safeFallback;
 
     return `${proto}://${host}`.replace(/\/+$/, '');
   }
