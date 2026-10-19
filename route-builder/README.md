@@ -127,6 +127,11 @@ npm run test:schema   # Itinerary V2 JSON export and ADB device service
 npm run build         # Production compile (client Vite bundle + backend tsc)
 ```
 
+### Full-Stack CI Verification & Cloud Deployment
+From the repository root, run the unified verification pipeline and cloud deployment scripts:
+* **Full Verification Pipeline (`../scripts/ci_check.sh`):** Runs Route Builder tests and build, `infra/` AWS CDK unit assertions and CloudFormation synthesis, and Android unit tests.
+* **AWS Serverless Deployment (`../scripts/deploy_cloud.sh`):** Deploys the application to AWS using AWS CDK (`infra/`), packaging the Fastify backend via `Dockerfile` with AWS Lambda Web Adapter (LWA) response streaming, hosting the static React frontend on S3 behind CloudFront, and executing a live `/api/health` smoke check.
+
 ---
 
 ## How It Works (Architecture Summary)

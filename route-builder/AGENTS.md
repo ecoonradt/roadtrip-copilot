@@ -41,14 +41,23 @@
 * **Interactive Suggestion Cards & Human-in-the-Loop Verification:** Emits actionable candidate blocks (`json:suggestions`) allowing 1-click **Add Waypoint** or **Update Waypoint** with dynamic map preview pins before driver approval. Operates under the principle that AI assistants are valuable discovery advisors but require human verification for real-world geometry. The UI supports an in-app "Test on Google Maps" query link, `place_name` vs `name` decoupling, and automatic Place ID extraction from pasted Maps URLs to lock in verified locations.
 * **SSE Streaming:** Streams tokens over `/api/ai/scout/chat-stream` with collapsible reasoning/tool thought capture.
 
+### F. Timeline Cascade, Navigation Links & Device Handoff
+* **Timeline Schedule Cascade:** Recalculates arrival/departure times across waypoints; modifying dwell time on stop $k$ ripples through stops $k+1 \dots n$. Supports backward scheduling from destination deadlines ("Catch-up" mode) and timezone border offset jumps.
+* **Google Maps Links & Place Decoupling:** Generates multi-stop driving links with route-forcing anchors. Drives exceeding 9 intermediate stops are automatically partitioned into consecutive legs ($\le 9$ intermediate stops each) with dedicated QR codes. Decouples human-friendly display titles (`name`) from clean Google Maps queries (`place_name`), supports positional intermediate `waypoint_place_ids` (`|ChIJ...||`), and auto-extracts base64url Place IDs directly from pasted Maps URLs in the edit drawer.
+* **Device Handoff & Discovery:** Supports instant 1-scan QR code phone handoff via Google Code Scanner, local/cloud download staging (`GET /api/device/download/:filename`), and Android SAF file picker import. Discovers workspace itineraries via Fastify `/api/itineraries` and supports multi-day navigation tabs (`DayTabBar.tsx`).
+
 ---
 
 ## 3. Directory Layout
 
 ```
 route-builder/
+├── Dockerfile                  # Multi-stage Docker build with AWS Lambda Web Adapter streaming
+├── .dockerignore               # Docker build exclusions
 ├── AGENTS.md                   # This handbook & subproject directory layout
 ├── README.md                   # User-facing web studio documentation & setup
+├── itineraries/                # Bundled itineraries (included in container image)
+│   └── sample_itinerary.json   # Default sample itinerary route
 ├── index.html                  # HTML entrypoint
 ├── package.json                # Project dependencies and test scripts
 ├── tsconfig.json               # Frontend TypeScript configuration
@@ -124,6 +133,12 @@ npm run test:schema   # Itinerary V2 JSON export and ADB device service
 
 # Production compile (client Vite bundle + backend tsc)
 npm run build
+
+# Full verification pipeline across route-builder, infra CDK, and Android (invoked from repo root)
+./scripts/ci_check.sh
+
+# On-demand AWS CDK serverless deployment (invoked from repo root)
+./scripts/deploy_cloud.sh
 ```
 
 ---

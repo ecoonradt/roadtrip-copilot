@@ -1,0 +1,75 @@
+name: Deploy Cloud Infrastructure & Web Studio
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: aws-cloud-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            route-builder/package-lock.json
+            infra/package-lock.json
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Install dependencies
+        run: |
+          cd route-builder && npm ci
+          cd ../infra && npm ci
+
+      - name: Run verification pipeline
+        run: ./scripts/ci_check.sh
+
+      - name: Validate AWS configuration
+        run: |
+          if [ -z "${{ vars.AWS_REGION }}" ]; then
+            echo "::error::GitHub Actions variable 'AWS_REGION' is not set. In the new AWS experience, this must be set to your project's assigned Region (Settings > View all projects > Overview > Additional Info > Region)." >&2
+            exit 1
+          fi
+          if [ -z "${{ vars.AWS_ROLE_ARN }}" ] && [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "::error::Neither 'vars.AWS_ROLE_ARN' nor 'secrets.AWS_ACCESS_KEY_ID' is set. At least one authentication mechanism is required for deployment." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Deploy to AWS
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_OIDC_PROVIDER_ARN: ${{ vars.GITHUB_OIDC_PROVIDER_ARN }}
+        run: ./scripts/deploy_cloud.sh

@@ -66,8 +66,9 @@ When technical realities force a divergence from the original design (e.g. SDK c
 2. **Individual ADR Files ([`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/)):**
    * Standalone files created from [`0000-template.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/0000-template.md) (e.g. `0001-amazon-bedrock-single-bill-ai.md`).
    * Documents Context, Decision Drivers, Considered Options, Outcome, Consequences, and Code Touchpoints.
-3. **End-of-Project Hoisting & Compression:**
-   * At the completion of the Route Scout Cloud project, decisions of permanent cross-project significance will be compressed and hoisted to [`docs/reference/`](file:///home/eric/code/roadtrip-copilot/docs/reference/) and [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), while project-local ephemeral decisions remain archived here.
+3. **Continuous Living Documentation (Zero Stale Non-Project Docs):**
+   * Top-level and subproject documentation—specifically [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), [`README.md`](file:///home/eric/code/roadtrip-copilot/README.md), [`route-builder/AGENTS.md`](file:///home/eric/code/roadtrip-copilot/route-builder/AGENTS.md), [`route-builder/README.md`](file:///home/eric/code/roadtrip-copilot/route-builder/README.md), and [`docs/README.md`](file:///home/eric/code/roadtrip-copilot/docs/README.md)—**must never be left stale until the end of the project**.
+   * Every Work Package must update these living documents **in the same milestone** whenever directory layouts, CLI scripts, environment variables, architectural pillars, or test suites change.
 
 ---
 
@@ -80,12 +81,12 @@ sequenceDiagram
     autonumber
     actor Developer as Developer (Eric)
     participant Orchestrator as Frontier Orchestrator (Primary Agent)
-    participant Worker as Subagent Worker (Gemini 3.8 Flash High)
+    participant Worker as Subagent Worker (Delegated Implementer)
     participant Workspace as Workspace Code & Tests
 
     Developer->>Orchestrator: Kick off session / milestone
     Note over Orchestrator: Reads DECISIONS.md & Active WP<br/>Defines task bounds & file scopes
-    Orchestrator->>Worker: invoke_subagent(TypeName: 'self', Model: 'flash', Role: 'Fastify Auth Implementer')
+    Orchestrator->>Worker: Dispatches bounded task per harness adapter
     Note over Worker: Writes targeted boilerplate,<br/>implements functions & unit tests
     Worker-->>Orchestrator: Reports completed code diff & initial test results
     Note over Orchestrator: Audits code diff against domain rules,<br/>runs verification suites, logs ADR if needed
@@ -104,7 +105,7 @@ sequenceDiagram
   * Running final verification test suites and writing handoff notes.
 
 ### Subagent Workers (Delegated Implementers)
-* **Model & Type:** Invoke with `TypeName: 'self'` and `Model: 'flash'` (**Gemini 3.8 Flash High**) via `invoke_subagent` (`TypeName: 'self'` is required so the worker has file-edit and command execution tools; use `TypeName: 'research'` with `Model: 'flash'` only for read-only lookups).
+* **Model & Harness Delegation:** Delegated per the active harness adapter (Antigravity: [`.agents/rules/antigravity-harness.md`](file:///home/eric/code/roadtrip-copilot/.agents/rules/antigravity-harness.md); OpenCode: [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)). Bound to cost-effective worker models / configured worker profiles to optimize developer quota.
 * **Responsibilities:**
   * Implementing concrete functions, endpoints, or utility classes specified by the orchestrator.
   * Writing unit tests against mock fixtures.
@@ -125,18 +126,19 @@ Every agent working on the Route Scout Cloud project must adhere to this three-p
 3. Explicitly state the active task scope and planned actions to the user before editing code.
 
 ### Phase B: Execution & In-Flight Discoveries
-1. Orchestrator defines interfaces, tests, and boundaries; delegates routine implementation to subagent workers (`TypeName: 'self'`, `Model: 'flash'`).
+1. Orchestrator defines interfaces, tests, and boundaries; delegates routine implementation to subagent workers per the active harness adapter.
 2. **If an unexpected technical constraint is discovered:**
    * Stop immediately before writing speculative workarounds.
    * Record the decision in a new ADR file in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and link it in [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md).
    * Update the "Discoveries & Deviations" section in the active Work Package.
-3. Preserve all non-negotiable architectural rules from [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (e.g., zero cloud dependencies in `app/` drive loop, isolated local disk storage in `npm run dev` alongside Bedrock AI per ADR-0004, literal semicolons in OSRM paths, strict TypeScript with zero `any` types).
+3. Preserve all non-negotiable architectural rules from [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (e.g., zero cloud dependencies in `app/` drive loop, isolated local disk storage in `npm run dev` alongside Bedrock AI per ADR-0004, single assigned AWS project Region compliance, literal semicolons in OSRM paths, strict TypeScript with zero `any` types).
 
-### Phase C: Session Wrap-Up & Verification
-1. Run all relevant test suites (e.g. `npm test`, `npm run test:backend`).
-2. Update the active Work Package:
+### Phase C: Session Wrap-Up, Living Docs Sync & Verification
+1. Run all relevant test and synthesis suites (`./scripts/ci_check.sh`, `npm test`, `npm run test:backend`).
+2. **Sync Non-Project Living Documentation:** Verify and update [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), [`README.md`](file:///home/eric/code/roadtrip-copilot/README.md), [`route-builder/AGENTS.md`](file:///home/eric/code/roadtrip-copilot/route-builder/AGENTS.md), [`route-builder/README.md`](file:///home/eric/code/roadtrip-copilot/route-builder/README.md), and [`docs/README.md`](file:///home/eric/code/roadtrip-copilot/docs/README.md) so directory trees, setup instructions, architecture sections, and command references accurately reflect the current codebase state.
+3. Update the active Work Package:
    * Check off completed tactical steps.
    * Write explicit "Where We Stopped" and "Next Step" notes in the Next Session Handoff section.
-3. If the entire Work Package Definition of Done is satisfied:
+4. If the entire Work Package Definition of Done (including live AWS deployment, manual verification, and living documentation sync) is satisfied:
    * Move the work package from `docs/projects/route-scout-cloud/plan/active/` to `docs/projects/route-scout-cloud/plan/archive/`.
    * Update the milestone status in `docs/projects/route-scout-cloud/plan/ROADMAP.md`.

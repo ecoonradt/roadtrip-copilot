@@ -23,21 +23,22 @@ flowchart TD
 
 ### 1. [`projects/`](projects/) — Major Multi-Session Initiatives
 * **Definition:** Large-scale architectural transformations spanning multiple developer sessions that require structured rolling-wave planning (Tier 1 North Star, Tier 2 Phase Roadmap, Tier 3 Active Work Package) and living Architecture Decision Records (ADRs).
-* **Execution Protocol:** Work in this directory strictly adheres to the **Orchestrator-Worker delegation model** (Frontier models orchestrate; `flash` / Gemini 3.8 Flash High implements) as defined in [`AGENTS.md`](../AGENTS.md#6-planning--execution-working-models-large-projects-vs-smaller-tasks).
+* **Execution Protocol:** Work in this directory strictly adheres to the **Orchestrator-Worker delegation model** (Frontier models orchestrate; worker models implement per the active harness adapter) as defined in [`AGENTS.md`](../AGENTS.md#6-planning--execution-working-models).
 * **Current Projects:**
-  * **[`projects/route-scout-cloud/`](projects/route-scout-cloud/WORKING_MODEL.md) `[ACTIVE — Phase 1]`:** Transitioning Route Scout from local CLI execution to a production AWS cloud architecture with Amazon Bedrock AI, Fastify on Lambda, S3 persistence, and dual-mode Google OIDC auth.
+  * **[`projects/route-scout-cloud/`](projects/route-scout-cloud/WORKING_MODEL.md) `[ACTIVE — Phase 1]`:** Transitioning Route Scout from local CLI execution to a production AWS cloud architecture with Amazon Bedrock AI, Fastify on Lambda with response streaming, S3 persistence, and dual-mode Google OIDC auth, built on an AWS CDK (`infra/`) and GitHub Actions CI/CD foundation (`scripts/ci_check.sh`, `scripts/deploy_cloud.sh`).
   * **[`projects/android-route-client/`](projects/android-route-client/WORKING_MODEL.md) `[QUEUED — Phase 2]`:** Android on-the-fly offline route editing (Tier 1) and cloud co-pilot client sync (Tier 2). *Strictly blocked until Phase 1 reaches completion.*
 
 ### 2. [`reference/`](reference/) — Living Architecture & Platform Invariants
 * **Definition:** **Historical but permanently authoritative.** Documents underlying operating system rules, windowing pipeline constraints, audio routing physics, and core design rationales that dictate why the app is built the way it is.
 * **Key Files:**
   * **[`reference/android_auto_multitasking_architecture.md`](reference/android_auto_multitasking_architecture.md):** Deep technical breakdown of Android Auto's "Coolwalk" split-screen windowing pipeline, the dual-slot Navigation vs. Media model, and why Roadtrip Co-Pilot must run strictly as a background service with heads-up notifications.
+  * **[`reference/directory-layout.md`](reference/directory-layout.md):** Authoritative repository directory layout and component map.
 
 ### 3. [`tasks/`](tasks/) — Focused Tactical Spikes & Experiments
 * **Definition:** Standalone implementation plans, spike specifications, and proof-of-concept experiments that are self-contained and small enough (typically 1–2 sessions) not to require full 3-tier roadmaps or dedicated ADR indices, but are valuable engineering assets committed to git.
 * **Execution Protocol (Lightweight Single-File Model):**
   * **Single-File Truth:** The task markdown file itself acts as both the specification and the active checklist/handoff record (no separate `ROADMAP.md` or `DECISIONS.md` directory overhead).
-  * **Quota-Optimized Delegation:** Still adheres to the **Orchestrator-Worker model**—the Frontier Orchestrator manages boundaries, reviews diffs, and runs verification suites, while delegating concrete code/test implementation to `flash` subagents (`invoke_subagent` with `TypeName: 'self'`, `Model: 'flash'`).
+  * **Quota-Optimized Delegation:** Still adheres to the **Orchestrator-Worker model**—the Frontier Orchestrator manages boundaries, reviews diffs, and runs verification suites, while delegating concrete code/test implementation to worker subagents per the active harness adapter.
   * **Completion & Retirement:** When a tactical task is completed or retired, move its plan file to [`archive/`](archive/) and hoist any newly proven platform invariants into [`reference/`](reference/) or [`AGENTS.md`](../AGENTS.md).
 * **Key Files:**
   * **[`tasks/carapp_notification_experiment_implementation_plan.md`](tasks/carapp_notification_experiment_implementation_plan.md):** Detailed implementation plan for testing `androidx.car.app.notification.CarAppExtender` to resolve vehicle launcher conversation-routing issues.

@@ -69,7 +69,7 @@ As with the cloud project, execution in Phase 2 adheres to the orchestrator-work
   * Formulates precise interface contracts and Kotlin math algorithms.
   * Ensures Android Auto distraction compliance (Rule 6) and background service battery discipline.
   * Audits code changes and executes Android unit & Robolectric tests (`./gradlew testDebugUnitTest`).
-* **Subagent Workers (Gemini 3.8 Flash High via `invoke_subagent` with `TypeName: 'self'`, `Model: 'flash'`):**
+* **Subagent Workers (Delegated per active harness adapter):**
   * Porting mathematical engines (`cascade.ts` $\to$ `OfflineCascadeEngine.kt`, `googleMapsUrl.ts` $\to$ `GoogleMapsUrlGenerator.kt`).
   * Scaffolding XML layouts and ViewBindings (`item_waypoint_row.xml`, `bottom_sheet_scout.xml`).
   * Writing unit test fixtures and mock responses.
