@@ -33,7 +33,7 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   const authService = options.authService || defaultAuthService;
 
   // GET /api/auth/status - Check current authentication and authorization status
-  fastify.get('/api/auth/status', async (request, reply) => {
+  fastify.get('/api/auth/status', { config: { isPublic: true } }, async (request, reply) => {
     if (!authService.isAuthEnabled()) {
       const response: AuthStatusResponse = {
         authEnabled: false,
@@ -85,7 +85,7 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   });
 
   // GET /api/auth/google - Initiate Google OAuth2 PKCE login flow
-  fastify.get('/api/auth/google', async (request, reply) => {
+  fastify.get('/api/auth/google', { config: { isPublic: true } }, async (request, reply) => {
     await authService.ensureConfigLoaded();
 
     if (
@@ -122,7 +122,7 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   });
 
   // GET /api/auth/callback/google - Handle Google OAuth2 callback
-  fastify.get('/api/auth/callback/google', async (request, reply) => {
+  fastify.get('/api/auth/callback/google', { config: { isPublic: true } }, async (request, reply) => {
     await authService.ensureConfigLoaded();
 
     if (
@@ -216,7 +216,7 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   });
 
   // POST /api/auth/mobile/google - Exchange Google ID token for Android native clients
-  fastify.post('/api/auth/mobile/google', async (request, reply) => {
+  fastify.post('/api/auth/mobile/google', { config: { isPublic: true } }, async (request, reply) => {
     await authService.ensureConfigLoaded();
 
     if (
@@ -266,7 +266,7 @@ export const authRoutes: FastifyPluginAsync<AuthPluginOptions> = async (fastify,
   });
 
   // POST /api/auth/logout - Clear session cookie
-  fastify.post('/api/auth/logout', async (request, reply) => {
+  fastify.post('/api/auth/logout', { config: { isPublic: true } }, async (request, reply) => {
     const baseUrl = authService.resolvePublicBaseUrl(request);
     const isSecure = baseUrl.startsWith('https://');
     reply.clearCookie(SESSION_COOKIE_NAME, {

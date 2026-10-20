@@ -197,13 +197,14 @@ export class AuthService {
             | 'publicBaseUrl'
             | 'originVerifySecret';
           paramName: string;
+          required: boolean;
         }[] = [];
 
         const clientIdParam =
           this.options.ssmParamNames?.googleClientId || process.env.GOOGLE_CLIENT_ID_SSM_PARAM;
         const staticClientId = this.options.googleClientId ?? process.env.GOOGLE_CLIENT_ID;
         if (!staticClientId && clientIdParam) {
-          needed.push({ key: 'googleClientId', paramName: clientIdParam });
+          needed.push({ key: 'googleClientId', paramName: clientIdParam, required: true });
         }
 
         const clientSecretParam =
@@ -212,14 +213,14 @@ export class AuthService {
         const staticClientSecret =
           this.options.googleClientSecret ?? process.env.GOOGLE_CLIENT_SECRET;
         if (!staticClientSecret && clientSecretParam) {
-          needed.push({ key: 'googleClientSecret', paramName: clientSecretParam });
+          needed.push({ key: 'googleClientSecret', paramName: clientSecretParam, required: true });
         }
 
         const jwtSecretParam =
           this.options.ssmParamNames?.jwtSecret || process.env.JWT_SECRET_SSM_PARAM;
         const staticJwtSecret = this.options.jwtSecret ?? process.env.JWT_SECRET;
         if (!staticJwtSecret && jwtSecretParam) {
-          needed.push({ key: 'jwtSecret', paramName: jwtSecretParam });
+          needed.push({ key: 'jwtSecret', paramName: jwtSecretParam, required: true });
         }
 
         const allowedEmailsParam =
@@ -229,14 +230,14 @@ export class AuthService {
           staticAllowed !== undefined &&
           (Array.isArray(staticAllowed) ? staticAllowed.length > 0 : Boolean(staticAllowed.trim()));
         if (!hasStaticAllowed && allowedEmailsParam) {
-          needed.push({ key: 'allowedEmails', paramName: allowedEmailsParam });
+          needed.push({ key: 'allowedEmails', paramName: allowedEmailsParam, required: true });
         }
 
         const publicBaseUrlParam =
           this.options.ssmParamNames?.publicBaseUrl || process.env.PUBLIC_BASE_URL_SSM_PARAM;
         const staticPublicBaseUrl = this.options.publicBaseUrl ?? process.env.PUBLIC_BASE_URL;
         if (!staticPublicBaseUrl && publicBaseUrlParam) {
-          needed.push({ key: 'publicBaseUrl', paramName: publicBaseUrlParam });
+          needed.push({ key: 'publicBaseUrl', paramName: publicBaseUrlParam, required: false });
         }
 
         const originVerifySecretParam =
@@ -245,12 +246,12 @@ export class AuthService {
         const staticOriginVerifySecret =
           this.options.originVerifySecret ?? process.env.ORIGIN_VERIFY_SECRET;
         if (!staticOriginVerifySecret && originVerifySecretParam) {
-          needed.push({ key: 'originVerifySecret', paramName: originVerifySecretParam });
+          needed.push({ key: 'originVerifySecret', paramName: originVerifySecretParam, required: false });
         }
 
         if (needed.length > 0) {
           const paramNames = Array.from(new Set(needed.map((n) => n.paramName)));
-          let allLoaded = true;
+          let allRequiredLoaded = true;
           try {
             const loader = this.options.ssmLoader || this.defaultSsmLoader.bind(this);
             const loaded = await loader(paramNames);
@@ -263,11 +264,11 @@ export class AuthService {
                 else if (item.key === 'allowedEmails') this.allowedEmails = val;
                 else if (item.key === 'publicBaseUrl') this.publicBaseUrl = val;
                 else if (item.key === 'originVerifySecret') this.originVerifySecret = val;
-              } else {
-                allLoaded = false;
+              } else if (item.required) {
+                allRequiredLoaded = false;
               }
             }
-            if (allLoaded) {
+            if (allRequiredLoaded) {
               this.configLoaded = true;
               this.configLoadedAt = Date.now();
             } else {

@@ -80,7 +80,6 @@ describe('RoadtripCopilotCloudStack', () => {
           GOOGLE_CLIENT_SECRET_SSM_PARAM: '/roadtrip-copilot/google-client-secret',
           JWT_SECRET_SSM_PARAM: '/roadtrip-copilot/jwt-secret',
           ALLOWED_EMAILS_SSM_PARAM: '/roadtrip-copilot/allowed-emails',
-          PUBLIC_BASE_URL_SSM_PARAM: '/roadtrip-copilot/public-base-url',
           ORIGIN_VERIFY_SECRET_SSM_PARAM: '/roadtrip-copilot/origin-verify-secret',
           ALLOWED_HOSTS: '',
         }),
@@ -193,7 +192,7 @@ describe('RoadtripCopilotCloudStack', () => {
             OriginCustomHeaders: Match.arrayWith([
               Match.objectLike({
                 HeaderName: 'x-copilot-origin-verify',
-                HeaderValue: 'synth-mock-origin-verify-secret',
+                HeaderValue: '{{resolve:ssm:/roadtrip-copilot/origin-verify-secret}}',
               }),
             ]),
           }),
@@ -296,7 +295,7 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
-  it('ApiForwardedHostFunction copies host to x-forwarded-host and sets x-forwarded-proto to https', () => {
+  it('ApiForwardedHostFunction copies host to x-forwarded-host and does not set x-forwarded-proto', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
 
@@ -316,7 +315,7 @@ describe('RoadtripCopilotCloudStack', () => {
       headers: Record<string, { value: string }>;
     };
 
-    // When request has host header, x-forwarded-host and x-forwarded-proto are populated
+    // When request has host header, x-forwarded-host is populated and x-forwarded-proto is NOT set
     const reqWithHost = {
       request: {
         headers: {
@@ -327,10 +326,10 @@ describe('RoadtripCopilotCloudStack', () => {
     };
     const resultWithHost = handler(reqWithHost);
     expect(resultWithHost.headers['x-forwarded-host']).toEqual({ value: 'roadtrip.example.com' });
-    expect(resultWithHost.headers['x-forwarded-proto']).toEqual({ value: 'https' });
+    expect(resultWithHost.headers['x-forwarded-proto']).toBeUndefined();
     expect(resultWithHost.headers.host).toEqual({ value: 'roadtrip.example.com' });
 
-    // When request has no host header, x-forwarded-proto is set and x-forwarded-host is not set
+    // When request has no host header, neither is set
     const reqWithoutHost = {
       request: {
         headers: {},
@@ -338,7 +337,7 @@ describe('RoadtripCopilotCloudStack', () => {
     };
     const resultWithoutHost = handler(reqWithoutHost);
     expect(resultWithoutHost.headers['x-forwarded-host']).toBeUndefined();
-    expect(resultWithoutHost.headers['x-forwarded-proto']).toEqual({ value: 'https' });
+    expect(resultWithoutHost.headers['x-forwarded-proto']).toBeUndefined();
   });
 
   it('configures CloudFront S3 Origin Access Control (OAC)', () => {

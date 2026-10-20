@@ -201,7 +201,13 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
   * Extended `attachDeployPermissions` in `infra/lib/roadtrip-cloud-stack.ts` to grant the scoped GitHub Actions deploy role and user least-privilege `ssm:GetParameter`, `ssm:GetParameters`, `ssm:PutParameter` on `arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/roadtrip-copilot/*`, and `kms:Decrypt`, `kms:Encrypt`, `kms:GenerateDataKey` scoped to SSM in the project region (`kms:ViaService: ssm.${this.region}.amazonaws.com`).
   * Added fail-fast, informative error reporting to `scripts/deploy_cloud.sh` if `aws ssm put-parameter` fails due to IAM policy constraints.
   * Added console warning in `AuthService.ensureConfigLoaded` when `originVerifySecret` is absent or fails to load in auth-enabled mode, signaling that edge origin verification is inactive and requests are relying strictly on static host allowlists (`ALLOWED_HOSTS`).
-  * Documented that `ALLOWED_HOSTS` serves strictly as a fallback allowlist and that `synth-mock-origin-verify-secret` is strictly an offline CI synthesis fallback.
+* **2026-10-19 — Independent PR #3 Review Hardening & Deployment Simplification:**
+  * **Encoded Path Bypass (P1):** Tagged public routes (`/api/health`, `/api/auth/*`) with Fastify route config `{ config: { isPublic: true } }` and updated `authGuard` to fail closed on all non-public routes, preventing percent-encoded path bypasses (e.g. `/%61pi/itineraries`).
+  * **CloudFront Function Header Fix (P1):** Removed disallowed `x-forwarded-proto` mutation from `ApiForwardedHostFunction` in `roadtrip-cloud-stack.ts`, resolving CloudFront 502 Bad Gateway responses.
+  * **Simplified Operator Secret Management (P2):** Eliminated over-engineered bash CLI auto-provisioning from `scripts/deploy_cloud.sh`. `ORIGIN_VERIFY_SECRET` is pre-created in SSM Parameter Store (`/roadtrip-copilot/origin-verify-secret`, type `String`) alongside other secrets and resolved by CDK via `ssm.StringParameter.valueFromLookup`, resolving deployer role chicken-and-egg permissions.
+  * **Logout Fail-Closed Behavior (P2):** Updated `logoutAuth()` to verify `res.ok` and `App.tsx` to set unauthenticated state strictly on success, keeping the user signed in with clear error messaging if logout fails.
+  * **Connection Retry Application Recovery (P2):** Extracted `loadInitialTrip` and `checkAiAvailability` into a unified `retryInitialization` callback in `App.tsx`, restoring itinerary data and AI availability when retrying from connection errors.
+  * **Optional Public URL Cache Safety (P3):** Differentiated required vs. optional SSM parameters in `AuthService`, ensuring missing optional `publicBaseUrl` does not degrade the 15-minute credential cache TTL to 30-second reload loops.
 
 ### Future Custom Domain Architecture & Setup Guide
 When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded custom domain (e.g. `copilot.roadtrip.com`):
@@ -217,5 +223,5 @@ When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded
 
 ## 6. Next Session Handoff
 
-* **Current State:** All Milestone 1 code, unit tests (`239/239` in `route-builder`, `16/16` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
-* **Next Immediate Step:** Upon user permission, populate the SSM Parameter Store values (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`), run `./scripts/deploy_cloud.sh` to deploy M1 to AWS (which auto-provisions `/roadtrip-copilot/origin-verify-secret`), complete manual cloud verification, and archive `WP-01-dual-mode-oidc-auth.md`.
+* **Current State:** All Milestone 1 code, review defect fixes, unit tests (`243/243` in `route-builder`, `16/16` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
+* **Next Immediate Step:** With `/roadtrip-copilot/origin-verify-secret` created in SSM Parameter Store, populate the remaining OAuth secrets (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`), run `./scripts/deploy_cloud.sh` to deploy M1 to AWS, complete manual cloud verification, and archive `WP-01-dual-mode-oidc-auth.md`.

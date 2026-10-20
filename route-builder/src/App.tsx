@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ShieldAlert } from 'lucide-react';
 import { MapCanvas, type ScoutPreviewPin } from './components/MapCanvas';
 import { TimelineSidebar } from './components/TimelineSidebar';
 import { AppHeader } from './components/AppHeader';
@@ -153,24 +154,25 @@ export function App() {
 
   // AI availability readiness state
   const [aiAvailable, setAiAvailable] = useState<boolean>(true);
+  const aiSeqRef = useRef<number>(0);
+
+  const checkAiAvailability = useCallback(async () => {
+    const seq = ++aiSeqRef.current;
+    try {
+      const status = await fetchAiStatus();
+      if (seq === aiSeqRef.current) {
+        setAiAvailable(status.available);
+      }
+    } catch {
+      if (seq === aiSeqRef.current) {
+        setAiAvailable(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    let isSubscribed = true;
-    fetchAiStatus()
-      .then((status) => {
-        if (isSubscribed) {
-          setAiAvailable(status.available);
-        }
-      })
-      .catch(() => {
-        if (isSubscribed) {
-          setAiAvailable(false);
-        }
-      });
-    return () => {
-      isSubscribed = false;
-    };
-  }, []);
+    checkAiAvailability();
+  }, [checkAiAvailability]);
 
   // Authentication state (optimistic initial state for zero waterfall in local mode / tests)
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse>({
@@ -224,81 +226,105 @@ export function App() {
   const handleLogout = useCallback(async () => {
     try {
       await logoutAuth();
-    } finally {
       setAuthStatus({
         authEnabled: true,
         authenticated: false,
         authorized: false,
         user: null,
       });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Logout failed';
+      setAuthStatus((prev) => ({
+        ...prev,
+        message: `Failed to sign out (${msg}). Please try again.`,
+      }));
     }
   }, []);
 
+  // Generation counter to guard against superseded loadInitialTrip requests overwriting newer state/edits
+  const loadTripSeqRef = useRef<number>(0);
+
   // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
-  useEffect(() => {
-    let isSubscribed = true;
-    const loadInitialTrip = async () => {
-      const { file, day } = getInitialRouteInfo();
-      try {
-        const raw = await fetchItinerary(file);
-        if (isSubscribed && raw) {
-          const parsed = parseItineraryJson(raw, file);
-          setTrip(parsed);
-          setLastSavedTripJson(JSON.stringify(parsed));
-          const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
-          setActiveDayIndex(validDay);
-          setRoute(null);
-          setSchedulingMode(getDaySchedulingMode(parsed.days[validDay], parsed.isAdHoc));
-          setTargetArrivalTime(parsed.days[validDay].targetArrivalTime || '18:00:00');
-          localStorage.setItem('copilot_active_file', file);
-          localStorage.setItem('copilot_active_day', String(validDay));
-          const url = new URL(window.location.href);
-          url.searchParams.set('route', file);
-          url.searchParams.set('day', String(validDay));
-          window.history.replaceState({}, '', url.toString());
-          setIsInitializing(false);
-          return;
-        }
-      } catch {
-        // If specified file fails to load (e.g. was deleted), try fallback sample_itinerary.json
-        if (file !== 'sample_itinerary.json') {
-          try {
-            const fallbackRaw = await fetchItinerary('sample_itinerary.json');
-            if (isSubscribed && fallbackRaw) {
-              const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
-              setTrip(parsed);
-              setLastSavedTripJson(JSON.stringify(parsed));
-              setActiveDayIndex(0);
-              setRoute(null);
-              setSchedulingMode(getDaySchedulingMode(parsed.days[0], parsed.isAdHoc));
-              setTargetArrivalTime(parsed.days[0].targetArrivalTime || '18:00:00');
-              localStorage.setItem('copilot_active_file', 'sample_itinerary.json');
-              localStorage.setItem('copilot_active_day', '0');
-              const url = new URL(window.location.href);
-              url.searchParams.set('route', 'sample_itinerary.json');
-              url.searchParams.set('day', '0');
-              window.history.replaceState({}, '', url.toString());
-              setIsInitializing(false);
-              return;
-            }
-          } catch {
-            // Fall back to INITIAL_FALLBACK_TRIP
-          }
-        }
-      }
-      if (isSubscribed) {
-        setLastSavedTripJson(JSON.stringify(INITIAL_FALLBACK_TRIP));
+  const loadInitialTrip = useCallback(async () => {
+    const seq = ++loadTripSeqRef.current;
+    const { file, day } = getInitialRouteInfo();
+    try {
+      const raw = await fetchItinerary(file);
+      if (seq !== loadTripSeqRef.current) return;
+      if (raw) {
+        const parsed = parseItineraryJson(raw, file);
+        setTrip(parsed);
+        setLastSavedTripJson(JSON.stringify(parsed));
+        const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
+        setActiveDayIndex(validDay);
         setRoute(null);
+        setSchedulingMode(getDaySchedulingMode(parsed.days[validDay], parsed.isAdHoc));
+        setTargetArrivalTime(parsed.days[validDay].targetArrivalTime || '18:00:00');
+        localStorage.setItem('copilot_active_file', file);
+        localStorage.setItem('copilot_active_day', String(validDay));
+        const url = new URL(window.location.href);
+        url.searchParams.set('route', file);
+        url.searchParams.set('day', String(validDay));
+        window.history.replaceState({}, '', url.toString());
         setIsInitializing(false);
+        return;
       }
-    };
-
-    loadInitialTrip();
-
-    return () => {
-      isSubscribed = false;
-    };
+    } catch {
+      if (seq !== loadTripSeqRef.current) return;
+      // If specified file fails to load (e.g. was deleted), try fallback sample_itinerary.json
+      if (file !== 'sample_itinerary.json') {
+        try {
+          const fallbackRaw = await fetchItinerary('sample_itinerary.json');
+          if (seq !== loadTripSeqRef.current) return;
+          if (fallbackRaw) {
+            const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
+            setTrip(parsed);
+            setLastSavedTripJson(JSON.stringify(parsed));
+            setActiveDayIndex(0);
+            setRoute(null);
+            setSchedulingMode(getDaySchedulingMode(parsed.days[0], parsed.isAdHoc));
+            setTargetArrivalTime(parsed.days[0].targetArrivalTime || '18:00:00');
+            localStorage.setItem('copilot_active_file', 'sample_itinerary.json');
+            localStorage.setItem('copilot_active_day', '0');
+            const url = new URL(window.location.href);
+            url.searchParams.set('route', 'sample_itinerary.json');
+            url.searchParams.set('day', '0');
+            window.history.replaceState({}, '', url.toString());
+            setIsInitializing(false);
+            return;
+          }
+        } catch {
+          if (seq !== loadTripSeqRef.current) return;
+          // Fall back to INITIAL_FALLBACK_TRIP
+        }
+      }
+    }
+    if (seq !== loadTripSeqRef.current) return;
+    setLastSavedTripJson(JSON.stringify(INITIAL_FALLBACK_TRIP));
+    setRoute(null);
+    setIsInitializing(false);
   }, []);
+
+  useEffect(() => {
+    loadInitialTrip();
+  }, [loadInitialTrip]);
+
+  const prevAuthErrorRef = useRef<boolean>(false);
+  const retryInitialization = useCallback(async () => {
+    prevAuthErrorRef.current = false;
+    await refreshAuthStatus();
+    loadInitialTrip();
+    checkAiAvailability();
+  }, [refreshAuthStatus, loadInitialTrip, checkAiAvailability]);
+
+  useEffect(() => {
+    const hasConnectionError = Boolean(authStatus.message && !authStatus.authenticated);
+    if (prevAuthErrorRef.current && !hasConnectionError && authStatus.authenticated) {
+      loadInitialTrip();
+      checkAiAvailability();
+    }
+    prevAuthErrorRef.current = hasConnectionError;
+  }, [authStatus.message, authStatus.authenticated, loadInitialTrip, checkAiAvailability]);
 
   // Current active day data
   const currentDay = useMemo(() => {
@@ -1098,13 +1124,31 @@ export function App() {
       <AuthGateScreen
         status={authStatus}
         onLogout={handleLogout}
-        onRetry={refreshAuthStatus}
+        onRetry={retryInitialization}
       />
     );
   }
 
   return (
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950">
+      {authStatus.message && (
+        <div
+          role="alert"
+          className="bg-red-950/90 border-b border-red-700/80 px-4 py-2 text-xs text-red-200 flex items-center justify-between shrink-0"
+        >
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{authStatus.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAuthStatus((prev) => ({ ...prev, message: undefined }))}
+            className="text-red-400 hover:text-red-200 text-xs font-semibold ml-4 cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Top Application Header: Branding, Search, Schedule, Telemetry & Export */}
       <AppHeader
         route={route}

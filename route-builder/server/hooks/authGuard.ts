@@ -3,6 +3,12 @@ import '@fastify/cookie';
 import { AuthService, LOCAL_DEV_USER, SESSION_COOKIE_NAME } from '../services/authService.js';
 import '../types/auth.js';
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    isPublic?: boolean;
+  }
+}
+
 export function createAuthGuard(authService: AuthService) {
   return async function authGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     if (!authService.isAuthEnabled()) {
@@ -10,13 +16,7 @@ export function createAuthGuard(authService: AuthService) {
       return;
     }
 
-    const path = request.url.split('?')[0];
-    if (
-      request.method === 'OPTIONS' ||
-      path === '/api/health' ||
-      path.startsWith('/api/auth/') ||
-      !path.startsWith('/api/')
-    ) {
+    if (request.method === 'OPTIONS' || request.routeOptions?.config?.isPublic === true) {
       return;
     }
 

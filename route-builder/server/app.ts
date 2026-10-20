@@ -65,7 +65,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.addHook('preHandler', createAuthGuard(authService));
 
   // Health check endpoint
-  app.get('/api/health', async () => {
+  app.get('/api/health', { config: { isPublic: true } }, async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
 

@@ -7,6 +7,7 @@ import {
   aws_iam as iam,
   aws_lambda as lambda,
   aws_s3 as s3,
+  aws_ssm as ssm,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
@@ -84,7 +85,7 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         GOOGLE_CLIENT_SECRET_SSM_PARAM: props?.googleClientSecretSsmParam ?? '/roadtrip-copilot/google-client-secret',
         JWT_SECRET_SSM_PARAM: props?.jwtSecretSsmParam ?? '/roadtrip-copilot/jwt-secret',
         ALLOWED_EMAILS_SSM_PARAM: props?.allowedEmailsSsmParam ?? '/roadtrip-copilot/allowed-emails',
-        PUBLIC_BASE_URL_SSM_PARAM: props?.publicBaseUrlSsmParam ?? '/roadtrip-copilot/public-base-url',
+        ...(props?.publicBaseUrlSsmParam ? { PUBLIC_BASE_URL_SSM_PARAM: props.publicBaseUrlSsmParam } : {}),
         ORIGIN_VERIFY_SECRET_SSM_PARAM: props?.originVerifySecretSsmParam ?? '/roadtrip-copilot/origin-verify-secret',
         ALLOWED_HOSTS: props?.allowedHosts ?? '',
         PUBLIC_BASE_URL: props?.publicBaseUrl ?? '',
@@ -143,7 +144,8 @@ function handler(event) {
     });
 
     // Forwarded host header function for /api/* requests:
-    // Preserves CloudFront viewer host and proto without introducing CloudFormation circular dependencies.
+    // Preserves CloudFront viewer host without introducing CloudFormation circular dependencies.
+    // Note: CloudFront Functions forbid mutating 'x-forwarded-proto' (read-only/reserved header in viewer request).
     const apiForwardedHostFunction = new cloudfront.Function(this, 'ApiForwardedHostFunction', {
       runtime: cloudfront.FunctionRuntime.JS_2_0,
       code: cloudfront.FunctionCode.fromInline(`
@@ -152,7 +154,6 @@ function handler(event) {
   if (request.headers && request.headers.host && request.headers.host.value) {
     request.headers['x-forwarded-host'] = { value: request.headers.host.value };
   }
-  request.headers['x-forwarded-proto'] = { value: 'https' };
   return request;
 }
 `),
@@ -181,7 +182,7 @@ function handler(event) {
               'x-copilot-origin-verify':
                 props?.originVerifySecret ||
                 process.env.ORIGIN_VERIFY_SECRET ||
-                'synth-mock-origin-verify-secret',
+                `{{resolve:ssm:${props?.originVerifySecretSsmParam ?? '/roadtrip-copilot/origin-verify-secret'}}}`,
             },
           }),
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,

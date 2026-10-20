@@ -418,8 +418,11 @@ export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
 }
 
 export async function logoutAuth(): Promise<void> {
-  await fetch('/api/auth/logout', {
+  const res = await fetch('/api/auth/logout', {
     method: 'POST',
     credentials: 'same-origin',
   });
+  if (!res.ok) {
+    throw new Error(`Logout failed with status ${res.status}`);
+  }
 }

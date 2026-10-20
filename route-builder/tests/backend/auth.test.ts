@@ -295,6 +295,57 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
       expect(statusData.user?.email).toBe('Eric@Example.COM');
       expect(statusData.message).toBeUndefined();
     });
+
+    it('enforces authentication on encoded paths and preserves public access on encoded public routes', async () => {
+      const authService = new AuthService({
+        authEnabled: true,
+        jwtSecret,
+        allowedEmails,
+      });
+      const app = createApp({ authService });
+
+      // GET /%61pi/itineraries without credentials returns 401 Unauthorized
+      const unauthGetRes = await app.inject({
+        method: 'GET',
+        url: '/%61pi/itineraries',
+      });
+      expect(unauthGetRes.statusCode).toBe(401);
+      expect(unauthGetRes.json().error).toBe('Unauthorized');
+      expect(unauthGetRes.json().message).toBe('Authentication required');
+
+      // POST /%61pi/itineraries/sample.json without credentials returns 401 Unauthorized
+      const unauthPostRes = await app.inject({
+        method: 'POST',
+        url: '/%61pi/itineraries/sample.json',
+        payload: { tripName: 'Exploit Attempt' },
+      });
+      expect(unauthPostRes.statusCode).toBe(401);
+      expect(unauthPostRes.json().error).toBe('Unauthorized');
+
+      // GET /api/%68ealth returns 200 OK (health check remains public)
+      const healthRes = await app.inject({
+        method: 'GET',
+        url: '/api/%68ealth',
+      });
+      expect(healthRes.statusCode).toBe(200);
+      expect(healthRes.json().status).toBe('ok');
+
+      // Valid credentials with GET /%61pi/itineraries succeed
+      const validToken = authService.signSessionToken({
+        sub: 'usr-eric',
+        email: 'eric@example.com',
+        name: 'Eric Developer',
+      });
+      const authGetRes = await app.inject({
+        method: 'GET',
+        url: '/%61pi/itineraries',
+        cookies: {
+          [SESSION_COOKIE_NAME]: validToken,
+        },
+      });
+      expect(authGetRes.statusCode).toBe(200);
+      expect(authGetRes.json().itineraries).toBeDefined();
+    });
   });
 
   describe('3. Web OAuth2 PKCE + State Flow', () => {
@@ -1013,6 +1064,45 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
         protocol: 'http',
       } as unknown as FastifyRequest;
       expect(authService.resolvePublicBaseUrl(mockReq)).toBe('https://custom-ssm.roadtrip.com');
+    });
+
+    it('caches configuration and does not trigger repeated SSM reloads when optional publicBaseUrl is absent from SSM', async () => {
+      const mockLoader = vi.fn().mockResolvedValue({
+        '/roadtrip/jwt-secret': 'jwt-secret-val',
+        '/roadtrip/google-client-id': 'client-id-val',
+        '/roadtrip/google-client-secret': 'client-secret-val',
+        '/roadtrip/allowed-emails': 'allowed@example.com',
+        // Note: '/roadtrip/public-base-url' is deliberately omitted from SSM results
+      });
+
+      const authService = new AuthService({
+        authEnabled: true,
+        ssmParamNames: {
+          jwtSecret: '/roadtrip/jwt-secret',
+          googleClientId: '/roadtrip/google-client-id',
+          googleClientSecret: '/roadtrip/google-client-secret',
+          allowedEmails: '/roadtrip/allowed-emails',
+          publicBaseUrl: '/roadtrip/public-base-url',
+        },
+        ssmLoader: mockLoader,
+      });
+
+      const app = createApp({ authService });
+
+      // First request triggers initial SSM load
+      const res1 = await app.inject({ method: 'GET', url: '/api/auth/status' });
+      expect(res1.statusCode).toBe(200);
+      expect(mockLoader).toHaveBeenCalledTimes(1);
+      expect(authService.isConfigLoaded()).toBe(true);
+
+      // Subsequent requests within cache TTL must use cached configuration without calling SSM
+      const res2 = await app.inject({ method: 'GET', url: '/api/auth/status' });
+      expect(res2.statusCode).toBe(200);
+      expect(mockLoader).toHaveBeenCalledTimes(1);
+
+      const res3 = await app.inject({ method: 'GET', url: '/api/health' });
+      expect(res3.statusCode).toBe(200);
+      expect(mockLoader).toHaveBeenCalledTimes(1);
     });
 
     it('loads originVerifySecret from SSM parameter store and validates edge requests', async () => {

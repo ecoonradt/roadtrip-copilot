@@ -2,7 +2,7 @@ import React from 'react';
 import * as renderer from 'react-test-renderer';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, vi } from 'vitest';
-import { act, api, mountApp } from './harness';
+import { act, api, mountApp, fixture } from './harness';
 import { AuthGateScreen } from '../../src/components/AuthGateScreen';
 
 function allText(node: ReactTestInstance): string {
@@ -215,4 +215,158 @@ describe('Frontend Auth UI & Gating', () => {
 
     expect(api.fetchAuthStatus).toHaveBeenCalled();
   });
+
+  it('does not transition to signed-out screen when logout fails and displays error feedback', async () => {
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: true,
+      authorized: false,
+      user: {
+        sub: '123',
+        email: 'guest@example.com',
+        name: 'Guest User',
+      },
+      message: 'Roadtrip Co-Pilot is in private preview.',
+    });
+    api.logoutAuth.mockRejectedValue(new Error('Logout failed with status 500'));
+
+    const app = await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const signOutBtn = app.root
+      .findAllByType('button')
+      .find((b) => allText(b).includes('Sign Out & Use Another Account'));
+    expect(signOutBtn).toBeDefined();
+
+    await act(async () => {
+      signOutBtn!.props.onClick();
+      await Promise.resolve();
+    });
+
+    // Verifies api.logoutAuth was called
+    expect(api.logoutAuth).toHaveBeenCalledTimes(1);
+
+    // Does NOT transition to unauthenticated "Continue with Google" screen
+    const textContent = allText(app.root);
+    expect(textContent).not.toContain('Sign in to continue');
+    expect(textContent).toContain('guest@example.com');
+    // Displays error feedback
+    expect(textContent).toContain('Failed to sign out');
+  });
+
+  it('re-queries itinerary and AI status when clicking Retry Connection, restoring trip data and readiness', async () => {
+    api.fetchAuthStatus.mockRejectedValueOnce(new Error('Network offline'));
+    api.fetchAiStatus.mockRejectedValueOnce(new Error('Network offline'));
+    api.fetchItinerary
+      .mockRejectedValueOnce(new Error('Network offline'))
+      .mockRejectedValueOnce(new Error('Network offline'));
+
+    const app = await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Verify initial connection issue screen
+    const initialText = allText(app.root);
+    expect(initialText).toContain('Connection Issue');
+    expect(initialText).toContain('Retry Connection');
+
+    // Setup recovered network responses
+    const validTripFixture = fixture();
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: true,
+      authorized: true,
+      user: { sub: 'driver-1', email: 'pilot@example.com', name: 'Pilot' },
+    });
+    api.fetchAiStatus.mockResolvedValue({ available: true });
+    api.fetchItinerary.mockResolvedValue(validTripFixture);
+
+    const retryBtn = app.root
+      .findAllByType('button')
+      .find((b) => allText(b).includes('Retry Connection'));
+    expect(retryBtn).toBeDefined();
+
+    await act(async () => {
+      retryBtn!.props.onClick();
+      await Promise.resolve();
+    });
+
+    // Verifies all three services were re-queried
+    expect(api.fetchAuthStatus).toHaveBeenCalledTimes(2);
+    expect(api.fetchAiStatus).toHaveBeenCalledTimes(2);
+    expect(api.fetchItinerary).toHaveBeenCalledTimes(3);
+
+    // Transitions to the studio with loaded trip and AI readiness restored
+    const headerEl = app.root.findByType('test-header');
+    expect(headerEl).toBeDefined();
+    expect(headerEl.props.authEnabled).toBe(true);
+    expect(headerEl.props.aiAvailable).toBe(true);
+    expect(headerEl.props.currentTripName).toBe('Scheduling tests');
+  });
+
+  it('ignores superseded itinerary load when an earlier pending request fails late', async () => {
+    // Initial mount: auth fails, and itinerary request hangs
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: false,
+      authorized: false,
+      message: 'Initial network error',
+    });
+    api.fetchAiStatus.mockRejectedValue(new Error('offline'));
+
+    let rejectFirstItinerary!: (reason?: unknown) => void;
+    const firstItineraryPromise = new Promise((_resolve, reject) => {
+      rejectFirstItinerary = reject;
+    });
+
+    // First call hangs; second call (retry) resolves immediately
+    const recoveredTrip = fixture();
+    recoveredTrip.trip_name = 'Recovered Trip Name';
+
+    api.fetchItinerary
+      .mockReturnValueOnce(firstItineraryPromise as Promise<never>)
+      .mockResolvedValue(recoveredTrip);
+
+    const app = await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(allText(app.root)).toContain('Connection Issue');
+
+    // User clicks Retry Connection
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: true,
+      authorized: true,
+      user: { sub: 'driver-1', email: 'driver@example.com', name: 'Driver' },
+    });
+    api.fetchAiStatus.mockResolvedValue({ available: true });
+
+    const retryBtn = app.root
+      .findAllByType('button')
+      .find((b) => allText(b).includes('Retry Connection'));
+
+    await act(async () => {
+      retryBtn!.props.onClick();
+      await Promise.resolve();
+    });
+
+    // Recovered trip is rendered
+    const headerEl = app.root.findByType('test-header');
+    expect(headerEl.props.currentTripName).toBe('Recovered Trip Name');
+
+    // Now the original pending itinerary request fails late
+    await act(async () => {
+      rejectFirstItinerary(new Error('Late network timeout'));
+      await Promise.resolve();
+    });
+
+    // The recovered trip was NOT overwritten by late failure fallback
+    expect(headerEl.props.currentTripName).toBe('Recovered Trip Name');
+  });
 });
+
