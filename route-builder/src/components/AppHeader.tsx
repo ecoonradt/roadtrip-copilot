@@ -142,11 +142,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   const totalTripSecs = cascadeResult.totalTripSeconds || 0;
 
   return (
-    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between gap-3 text-slate-100 shrink-0 z-[1100] shadow-md">
+    <header className="h-14 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-2 text-slate-100 shrink-0 z-[1100] shadow-md min-w-0">
       {/* Left: Brand Logo & Status */}
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0 min-w-0">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-md shadow-sky-500/20">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-md shadow-sky-500/20 shrink-0">
             <Compass className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -155,7 +155,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             </h1>
             <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-400">
               <span
-                className={`inline-block w-2 h-2 rounded-full ${
+                className={`inline-block w-2 h-2 rounded-full shrink-0 ${
                   isLoadingRoute
                     ? 'bg-amber-400 animate-pulse'
                     : routeError
@@ -163,7 +163,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     : 'bg-emerald-400'
                 }`}
               />
-              <span className="text-[11px]">
+              <span className="text-[11px] truncate">
                 {isLoadingRoute
                   ? 'Calculating...'
                   : routeError
@@ -178,17 +178,17 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Route / Trip Selector Trigger */}
         {onOpenRouteSelector && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 border border-slate-700/80 rounded-xl text-xs font-medium shadow-sm ml-1 min-w-0">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 border border-slate-700/80 rounded-xl text-xs font-medium shadow-sm ml-0.5 sm:ml-1 min-w-0">
             <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             {onRenameTrip ? (
               <InlineEdit
                 value={currentTripName}
                 onCommit={onRenameTrip}
                 tooltip="Rename this trip"
-                className="text-sm font-semibold text-white max-w-[200px] sm:max-w-[300px]"
+                className="text-sm font-semibold text-white max-w-[140px] sm:max-w-[180px] lg:max-w-[220px] 2xl:max-w-[300px]"
               />
             ) : (
-              <span className="text-sm font-semibold text-white truncate max-w-[200px] sm:max-w-[300px]">{currentTripName}</span>
+              <span className="text-sm font-semibold text-white truncate max-w-[140px] sm:max-w-[180px] lg:max-w-[220px] 2xl:max-w-[300px]">{currentTripName}</span>
             )}
             <button
               onClick={onOpenRouteSelector}
@@ -202,7 +202,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </div>
 
       {/* Right Controls: Schedule, Telemetry, Maps & Export */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         {/* Schedule Popover Trigger */}
         <div className="relative" ref={scheduleDropdownRef}>
           <button
@@ -338,7 +338,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Route Telemetry KPIs */}
         {totalDistance > 0 && (
-          <div className="hidden md:flex items-center gap-2 bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-700/70 text-xs font-mono">
+          <div className="hidden lg:flex items-center gap-1.5 sm:gap-2 bg-slate-800/80 px-2 sm:px-2.5 py-1 rounded-xl border border-slate-700/70 text-xs font-mono">
             <div className="flex items-center gap-1 text-slate-200" title="Total Drive Distance">
               <Navigation className="w-3 h-3 text-sky-400" />
               <span>{totalDistance} mi</span>
@@ -346,12 +346,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             <span className="text-slate-600">&bull;</span>
             <div className="flex items-center gap-1 text-slate-300" title="Total Driving Time">
               <Clock className="w-3 h-3 text-sky-400" />
-              <span>{formatDuration(totalDriveSecs)} drive</span>
+              <span>{formatDuration(totalDriveSecs)}<span className="hidden 2xl:inline"> drive</span></span>
             </div>
             {totalTripSecs > totalDriveSecs && (
               <>
-                <span className="text-slate-600 hidden xl:inline">&bull;</span>
-                <div className="hidden xl:flex items-center gap-1 text-slate-400" title="Total Elapsed Time (Drive + Stops)">
+                <span className="text-slate-600 hidden 2xl:inline">&bull;</span>
+                <div className="hidden 2xl:flex items-center gap-1 text-slate-400" title="Total Elapsed Time (Drive + Stops)">
                   <Timer className="w-3 h-3 text-indigo-400" />
                   <span>{formatDuration(totalTripSecs)} total</span>
                 </div>
@@ -535,9 +535,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Authenticated User Pill & Sign Out */}
         {authEnabled && authUser && (
-          <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-800">
+          <div className="flex items-center gap-1 sm:gap-1.5 pl-1.5 border-l border-slate-800 shrink-0">
             <div
-              className="flex items-center gap-1.5 py-1 px-2 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs text-slate-200 max-w-[160px]"
+              className="flex items-center gap-1.5 py-1 px-2 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs text-slate-200 max-w-[100px] xl:max-w-[130px] 2xl:max-w-[160px]"
               title={authUser.email}
             >
               {authUser.picture ? (
@@ -560,11 +560,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             {onLogout && (
               <button
                 onClick={onLogout}
-                className="flex items-center gap-1 py-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-100 border border-slate-700/80 text-xs font-medium transition-colors cursor-pointer"
+                className="flex items-center gap-1 py-1.5 px-2 sm:px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-100 border border-slate-700/80 text-xs font-medium transition-colors cursor-pointer shrink-0"
                 title="Sign out"
+                aria-label="Sign out"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
+                <span className="hidden 2xl:inline">Sign Out</span>
               </button>
             )}
           </div>
