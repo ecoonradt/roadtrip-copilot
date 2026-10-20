@@ -174,13 +174,8 @@ export function App() {
     checkAiAvailability();
   }, [checkAiAvailability]);
 
-  // Authentication state (optimistic initial state for zero waterfall in local mode / tests)
-  const [authStatus, setAuthStatus] = useState<AuthStatusResponse>({
-    authEnabled: false,
-    authenticated: true,
-    authorized: true,
-    user: null,
-  });
+  // Authentication state (null while determining initial session status to prevent flashing UI)
+  const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
 
   const refreshAuthStatus = useCallback(async () => {
     try {
@@ -234,10 +229,14 @@ export function App() {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Logout failed';
-      setAuthStatus((prev) => ({
-        ...prev,
-        message: `Failed to sign out (${msg}). Please try again.`,
-      }));
+      setAuthStatus((prev) =>
+        prev
+          ? {
+              ...prev,
+              message: `Failed to sign out (${msg}). Please try again.`,
+            }
+          : null
+      );
     }
   }, []);
 
@@ -324,13 +323,14 @@ export function App() {
   }, [refreshAuthStatus, loadInitialTrip, checkAiAvailability]);
 
   useEffect(() => {
+    if (!authStatus) return;
     const hasConnectionError = Boolean(authStatus.message && !authStatus.authenticated);
     if (prevAuthErrorRef.current && !hasConnectionError && authStatus.authenticated) {
       loadInitialTrip();
       checkAiAvailability();
     }
     prevAuthErrorRef.current = hasConnectionError;
-  }, [authStatus.message, authStatus.authenticated, loadInitialTrip, checkAiAvailability]);
+  }, [authStatus, loadInitialTrip, checkAiAvailability]);
 
   // Current active day data
   const currentDay = useMemo(() => {
@@ -1135,6 +1135,11 @@ export function App() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  // Render solid dark automotive blue background while session status is determining to prevent UI flash
+  if (!authStatus) {
+    return <div className="min-h-screen w-screen bg-slate-950" />;
+  }
+
   if (authStatus.authEnabled && (!authStatus.authenticated || !authStatus.authorized)) {
     return (
       <AuthGateScreen
@@ -1158,7 +1163,9 @@ export function App() {
           </div>
           <button
             type="button"
-            onClick={() => setAuthStatus((prev) => ({ ...prev, message: undefined }))}
+            onClick={() =>
+              setAuthStatus((prev) => (prev ? { ...prev, message: undefined } : null))
+            }
             className="text-red-400 hover:text-red-200 text-xs font-semibold ml-4 cursor-pointer"
           >
             Dismiss

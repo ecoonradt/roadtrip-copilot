@@ -3,6 +3,7 @@ import * as renderer from 'react-test-renderer';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, vi } from 'vitest';
 import { act, api, mountApp, fixture, points } from './harness';
+import { App } from '../../src/App';
 import { AuthGateScreen } from '../../src/components/AuthGateScreen';
 
 function allText(node: ReactTestInstance): string {
@@ -18,6 +19,44 @@ function allText(node: ReactTestInstance): string {
 }
 
 describe('Frontend Auth UI & Gating', () => {
+  it('renders a solid blue background and does not flash studio UI or login screen while auth status is determining', async () => {
+    let resolveAuthStatus!: (val: unknown) => void;
+    const authStatusPromise = new Promise((resolve) => {
+      resolveAuthStatus = resolve;
+    });
+    api.fetchAuthStatus.mockReturnValue(authStatusPromise);
+
+    let app!: renderer.ReactTestRenderer;
+    await act(async () => {
+      app = renderer.create(<App />);
+    });
+
+    // While auth status is in flight, studio header, sidebar, map, and AuthGateScreen are NOT rendered
+    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-sidebar')).toHaveLength(0);
+    expect(app.root.findAllByType('test-map')).toHaveLength(0);
+    expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
+
+    // Instead, a clean solid blue background container (bg-slate-950) is rendered
+    const rootDiv = app.root.findByType('div');
+    expect(rootDiv.props.className).toContain('bg-slate-950');
+
+    // Settle the auth check with unauthenticated status
+    await act(async () => {
+      resolveAuthStatus({
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
+        user: null,
+      });
+      await Promise.resolve();
+    });
+
+    // Now AuthGateScreen is displayed and studio header is still absent
+    expect(app.root.findByType(AuthGateScreen)).toBeDefined();
+    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+  });
+
   it('renders AuthGateScreen with "Continue with Google" link to /api/auth/google when unauthenticated and does not render test-header', async () => {
     api.fetchAuthStatus.mockResolvedValue({
       authEnabled: true,
