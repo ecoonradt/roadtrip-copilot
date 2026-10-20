@@ -2,7 +2,7 @@ import React from 'react';
 import * as renderer from 'react-test-renderer';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, vi } from 'vitest';
-import { act, api, mountApp, fixture } from './harness';
+import { act, api, mountApp, fixture, points } from './harness';
 import { AuthGateScreen } from '../../src/components/AuthGateScreen';
 
 function allText(node: ReactTestInstance): string {
@@ -368,5 +368,101 @@ describe('Frontend Auth UI & Gating', () => {
     // The recovered trip was NOT overwritten by late failure fallback
     expect(headerEl.props.currentTripName).toBe('Recovered Trip Name');
   });
+
+  it('does not overwrite newly selected or imported trip when pending retry itinerary request resolves late', async () => {
+    // Initial mount: auth fails, and itinerary request hangs
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: false,
+      authorized: false,
+      message: 'Connection failure',
+    });
+    api.fetchAiStatus.mockRejectedValue(new Error('offline'));
+
+    let resolvePendingItinerary!: (value: unknown) => void;
+    const pendingItineraryPromise = new Promise((resolve) => {
+      resolvePendingItinerary = resolve;
+    });
+
+    api.fetchItinerary.mockReturnValue(pendingItineraryPromise as Promise<never>);
+
+    const app = await mountApp();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(allText(app.root)).toContain('Connection Issue');
+
+    // User clicks Retry Connection which restores auth
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: true,
+      authorized: true,
+      user: { sub: 'driver-1', email: 'driver@example.com', name: 'Driver' },
+    });
+    api.fetchAiStatus.mockResolvedValue({ available: true });
+
+    const retryBtn = app.root
+      .findAllByType('button')
+      .find((b) => allText(b).includes('Retry Connection'));
+
+    await act(async () => {
+      retryBtn!.props.onClick();
+      await Promise.resolve();
+    });
+
+    // Studio is rendered while the initial itinerary request is still pending
+    expect(app.root.findAllByType('test-header')).toHaveLength(1);
+
+    // User deliberately imports / selects another trip
+    const importedTrip = {
+      tripName: 'Imported User Route',
+      isMultiDay: false,
+      isAdHoc: false,
+      fileName: 'imported_route.json',
+      days: [
+        {
+          dayNumber: 1,
+          title: 'Day 1',
+          date: '2026-10-20',
+          departureTime: '08:00:00',
+          timezone: 'America/Phoenix',
+          schedulingMode: 'forward' as const,
+          isAdHoc: false,
+          waypoints: points(1),
+        },
+      ],
+    };
+
+    const { selectTrip } = await import('./harness');
+    await act(async () => {
+      selectTrip(app, importedTrip);
+      await Promise.resolve();
+    });
+
+    const headerEl = app.root.findByType('test-header');
+    expect(headerEl.props.currentTripName).toBe('Imported User Route');
+
+    // User edits the trip (e.g. changes departure time)
+    await act(async () => {
+      headerEl.props.setDepartureTime('10:00:00');
+      await Promise.resolve();
+    });
+    expect(headerEl.props.departureTime).toBe('10:00:00');
+
+    // Now the pending retry itinerary request resolves late with old trip data
+    const lateServerTrip = fixture();
+    lateServerTrip.trip_name = 'Stale Overwriting Route';
+
+    await act(async () => {
+      resolvePendingItinerary(lateServerTrip);
+      await Promise.resolve();
+    });
+
+    // The imported trip and edits must NOT be overwritten by the late server response
+    expect(headerEl.props.currentTripName).toBe('Imported User Route');
+    expect(headerEl.props.departureTime).toBe('10:00:00');
+  });
 });
+
 

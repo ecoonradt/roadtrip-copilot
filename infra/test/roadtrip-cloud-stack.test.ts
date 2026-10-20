@@ -92,12 +92,12 @@ describe('RoadtripCopilotCloudStack', () => {
       authEnabled: 'false',
       allowedEmails: 'driver1@example.com,driver2@example.com',
       googleClientId: 'custom-google-client-id',
-      googleClientIdSsmParam: '/custom/client-id',
-      googleClientSecretSsmParam: '/custom/client-secret',
-      jwtSecretSsmParam: '/custom/jwt-secret',
-      allowedEmailsSsmParam: '/custom/allowed-emails',
-      publicBaseUrlSsmParam: '/custom/public-base-url',
-      originVerifySecretSsmParam: '/custom/origin-verify-secret',
+      googleClientIdSsmParam: '/roadtrip-copilot/custom-client-id',
+      googleClientSecretSsmParam: '/roadtrip-copilot/custom-client-secret',
+      jwtSecretSsmParam: '/roadtrip-copilot/custom-jwt-secret',
+      allowedEmailsSsmParam: '/roadtrip-copilot/custom-allowed-emails',
+      publicBaseUrlSsmParam: '/roadtrip-copilot/custom-public-base-url',
+      originVerifySecretSsmParam: '/roadtrip-copilot/custom-origin-verify-secret',
       allowedHosts: 'custom.roadtrip.com',
       originVerifySecret: 'custom-secret-key',
     });
@@ -109,17 +109,25 @@ describe('RoadtripCopilotCloudStack', () => {
           AUTH_ENABLED: 'false',
           ALLOWED_EMAILS: 'driver1@example.com,driver2@example.com',
           GOOGLE_CLIENT_ID: 'custom-google-client-id',
-          GOOGLE_CLIENT_ID_SSM_PARAM: '/custom/client-id',
-          GOOGLE_CLIENT_SECRET_SSM_PARAM: '/custom/client-secret',
-          JWT_SECRET_SSM_PARAM: '/custom/jwt-secret',
-          ALLOWED_EMAILS_SSM_PARAM: '/custom/allowed-emails',
-          PUBLIC_BASE_URL_SSM_PARAM: '/custom/public-base-url',
-          ORIGIN_VERIFY_SECRET_SSM_PARAM: '/custom/origin-verify-secret',
+          GOOGLE_CLIENT_ID_SSM_PARAM: '/roadtrip-copilot/custom-client-id',
+          GOOGLE_CLIENT_SECRET_SSM_PARAM: '/roadtrip-copilot/custom-client-secret',
+          JWT_SECRET_SSM_PARAM: '/roadtrip-copilot/custom-jwt-secret',
+          ALLOWED_EMAILS_SSM_PARAM: '/roadtrip-copilot/custom-allowed-emails',
+          PUBLIC_BASE_URL_SSM_PARAM: '/roadtrip-copilot/custom-public-base-url',
+          ORIGIN_VERIFY_SECRET_SSM_PARAM: '/roadtrip-copilot/custom-origin-verify-secret',
           ALLOWED_HOSTS: 'custom.roadtrip.com',
           ORIGIN_VERIFY_SECRET: 'custom-secret-key',
         }),
       },
     });
+  });
+
+  it('rejects SSM parameter paths that do not start with /roadtrip-copilot/', () => {
+    expect(() =>
+      createStack({
+        jwtSecretSsmParam: '/custom/jwt-secret',
+      }),
+    ).toThrow('Invalid SSM parameter path "/custom/jwt-secret" for jwtSecretSsmParam. All SSM parameter paths must start with "/roadtrip-copilot/".');
   });
 
   it('grants FastifyApiFunction IAM execution role permissions for SSM parameters and KMS decryption', () => {

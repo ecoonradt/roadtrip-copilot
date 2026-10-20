@@ -7,7 +7,6 @@ import {
   aws_iam as iam,
   aws_lambda as lambda,
   aws_s3 as s3,
-  aws_ssm as ssm,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
@@ -42,6 +41,24 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props?: RoadtripCopilotCloudStackProps) {
     super(scope, id, props);
+
+    // Validate SSM parameter path prefixes to match IAM execution role boundaries
+    const ssmProps: Record<string, string | undefined> = {
+      googleClientIdSsmParam: props?.googleClientIdSsmParam,
+      googleClientSecretSsmParam: props?.googleClientSecretSsmParam,
+      jwtSecretSsmParam: props?.jwtSecretSsmParam,
+      allowedEmailsSsmParam: props?.allowedEmailsSsmParam,
+      publicBaseUrlSsmParam: props?.publicBaseUrlSsmParam,
+      originVerifySecretSsmParam: props?.originVerifySecretSsmParam,
+    };
+
+    for (const [propName, paramPath] of Object.entries(ssmProps)) {
+      if (paramPath && !paramPath.startsWith('/roadtrip-copilot/')) {
+        throw new Error(
+          `Invalid SSM parameter path "${paramPath}" for ${propName}. All SSM parameter paths must start with "/roadtrip-copilot/".`,
+        );
+      }
+    }
 
     // 1. StaticSiteBucket (S3 Bucket)
     // Ephemeral build artifacts (dist/) are synced from git repository builds and contain no user data.

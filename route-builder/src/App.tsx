@@ -244,9 +244,15 @@ export function App() {
   // Generation counter to guard against superseded loadInitialTrip requests overwriting newer state/edits
   const loadTripSeqRef = useRef<number>(0);
 
+  const invalidatePendingInitialLoad = useCallback(() => {
+    loadTripSeqRef.current += 1;
+    setIsInitializing(false);
+  }, []);
+
   // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
   const loadInitialTrip = useCallback(async () => {
     const seq = ++loadTripSeqRef.current;
+    setIsInitializing(true);
     const { file, day } = getInitialRouteInfo();
     try {
       const raw = await fetchItinerary(file);
@@ -568,6 +574,7 @@ export function App() {
 
   // Helper to mutate the active day's waypoints
   const updateCurrentDayWaypoints = useCallback((newWaypoints: Waypoint[] | ((prev: Waypoint[]) => Waypoint[])) => {
+    invalidatePendingInitialLoad();
     setTrip((prev) => {
       const nextDays = [...prev.days];
       const current = nextDays[activeDayIndex];
@@ -797,12 +804,14 @@ export function App() {
   );
 
   const handleRenameTrip = useCallback((name: string) => {
+    invalidatePendingInitialLoad();
     const trimmed = name.trim();
     if (!trimmed) return;
     setTrip((prev) => (prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed }));
-  }, []);
+  }, [invalidatePendingInitialLoad]);
 
   const handleRenameDay = useCallback((index: number, title: string) => {
+    invalidatePendingInitialLoad();
     const trimmed = title.trim();
     setTrip((prev) => {
       const current = prev.days[index];
@@ -811,7 +820,7 @@ export function App() {
       nextDays[index] = { ...current, title: trimmed || `Day ${current.dayNumber}` };
       return { ...prev, days: nextDays };
     });
-  }, []);
+  }, [invalidatePendingInitialLoad]);
 
   const handleSuggestDayTitle = useCallback(async (index: number) => {
     const day = trip.days[index];
@@ -824,6 +833,7 @@ export function App() {
   }, [trip.days, handleRenameDay]);
 
   const handleSetBaseDate = useCallback((newDate: string) => {
+    invalidatePendingInitialLoad();
     setTrip((prev) => {
       const nextDays = [...prev.days];
       const current = nextDays[activeDayIndex];
@@ -831,9 +841,10 @@ export function App() {
       nextDays[activeDayIndex] = { ...current, date: newDate, waypoints: current.waypoints.map((w) => ({ ...w, target_time: undefined, offset_minutes_from_start: undefined })) };
       return { ...prev, days: nextDays };
     });
-  }, [activeDayIndex]);
+  }, [activeDayIndex, invalidatePendingInitialLoad]);
 
   const handleSetDepartureTime = useCallback((newTime: string) => {
+    invalidatePendingInitialLoad();
     setTrip((prev) => {
       const nextDays = [...prev.days];
       const current = nextDays[activeDayIndex];
@@ -841,9 +852,10 @@ export function App() {
       nextDays[activeDayIndex] = { ...current, departureTime: newTime, waypoints: current.waypoints.map((w) => ({ ...w, target_time: undefined, offset_minutes_from_start: undefined })) };
       return { ...prev, days: nextDays };
     });
-  }, [activeDayIndex]);
+  }, [activeDayIndex, invalidatePendingInitialLoad]);
 
   const handleSetSchedulingMode = useCallback((mode: SchedulingMode) => {
+    invalidatePendingInitialLoad();
     setSchedulingMode(mode);
     setTrip((prev) => {
       const nextDays = prev.days.map((d, idx) =>
@@ -861,9 +873,10 @@ export function App() {
         days: nextDays,
       };
     });
-  }, [activeDayIndex]);
+  }, [activeDayIndex, invalidatePendingInitialLoad]);
 
   const handleSetTargetArrivalTime = useCallback((newTime: string) => {
+    invalidatePendingInitialLoad();
     setTargetArrivalTime(newTime);
     setTrip((prev) => {
       const nextDays = [...prev.days];
@@ -950,6 +963,7 @@ export function App() {
   }, [activeDayIndex, getSynchronizedTrip]);
 
   const handleAddDay = useCallback(() => {
+    invalidatePendingInitialLoad();
     // Snapshot the active day's live cascade and schedule before adding a new day
     const synchronized = getSynchronizedTrip();
 
@@ -1011,10 +1025,11 @@ export function App() {
       url.searchParams.set('route', fileName);
     }
     window.history.replaceState({}, '', url.toString());
-  }, [getSynchronizedTrip]);
+  }, [getSynchronizedTrip, invalidatePendingInitialLoad]);
 
   const handleDeleteDay = useCallback((index: number) => {
     if (trip.days.length <= 1) return;
+    invalidatePendingInitialLoad();
     const synchronized = getSynchronizedTrip();
     const days = synchronized.days.filter((_, i) => i !== index).map((d, i) => ({ ...d, dayNumber: i + 1 }));
     const nextIdx = index < activeDayIndex
@@ -1032,9 +1047,10 @@ export function App() {
       url.searchParams.set('route', fileName);
     }
     window.history.replaceState({}, '', url.toString());
-  }, [activeDayIndex, trip.days.length, trip.fileName, getSynchronizedTrip]);
+  }, [activeDayIndex, trip.days.length, trip.fileName, getSynchronizedTrip, invalidatePendingInitialLoad]);
 
   const handleSelectTrip = useCallback((newTrip: ParsedTrip) => {
+    invalidatePendingInitialLoad();
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     setTrip(newTrip);
@@ -1050,7 +1066,7 @@ export function App() {
     url.searchParams.set('route', fileName);
     url.searchParams.set('day', '0');
     window.history.replaceState({}, '', url.toString());
-  }, []);
+  }, [invalidatePendingInitialLoad]);
 
   const handleDeleteTrip = useCallback(
     async (deletedFile: string) => {
