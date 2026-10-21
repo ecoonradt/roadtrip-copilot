@@ -16,6 +16,7 @@ import {
   generateDayTitle,
   fetchAuthStatus,
   logoutAuth,
+  ApiError,
 } from './services/api';
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
 import type { AuthStatusResponse } from './types/auth';
@@ -1139,8 +1140,11 @@ export function App() {
       window.history.replaceState({}, '', url.toString());
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: unknown) {
+      const isConflict =
+        (err instanceof ApiError && err.status === 412) ||
+        (Boolean(err) && typeof err === 'object' && (err as { status?: number }).status === 412);
       const msg = err instanceof Error ? err.message : 'Save failed';
-      if (msg.includes('412') || msg.toLowerCase().includes('precondition')) {
+      if (isConflict || msg.includes('412') || msg.toLowerCase().includes('precondition')) {
         alert('Conflict detected: This itinerary has been modified elsewhere. Please reload the itinerary or save under a new name to avoid overwriting changes.');
       } else {
         alert(`Save error: ${msg}`);

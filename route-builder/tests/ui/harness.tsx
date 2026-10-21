@@ -8,7 +8,24 @@ import type { Waypoint, RouteResponse, GeocodeResult } from '../../src/types/rou
 import type { TimelineCascadeResult } from '../../src/engine/types';
 import type { ParsedTrip } from '../../src/engine/itineraryParser';
 
+class ApiErrorMock extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 const mockedApi = vi.hoisted(() => ({
+  ApiError: class ApiError extends Error {
+    readonly status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+    }
+  },
   fetchItinerary: vi.fn(),
   fetchRoute: vi.fn(),
   fetchAiStatus: vi.fn(),

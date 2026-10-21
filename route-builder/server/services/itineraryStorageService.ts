@@ -9,6 +9,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
   type PutObjectCommandInput,
+  type DeleteObjectCommandInput,
   type HeadObjectOutput,
 } from '@aws-sdk/client-s3';
 
@@ -391,7 +392,9 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     if (options?.ifNoneMatch) {
       if (options.ifNoneMatch === '*' && existingContent !== null) {
-        throw new PreconditionFailedError(`Resource already exists (If-None-Match: *)`);
+        throw new PreconditionFailedError(
+          `Precondition failed: Resource already exists (If-None-Match: *)`
+        );
       }
       if (
         options.ifNoneMatch !== '*' &&
@@ -399,7 +402,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
         normalizeEtag(existingEtag) === normalizeEtag(options.ifNoneMatch)
       ) {
         throw new PreconditionFailedError(
-          `Resource matches If-None-Match: ${options.ifNoneMatch}`
+          `Precondition failed: Resource matches If-None-Match: ${options.ifNoneMatch}`
         );
       }
     }
@@ -407,7 +410,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
     if (options?.ifMatch) {
       if (existingContent === null) {
         throw new PreconditionFailedError(
-          `Resource does not exist for If-Match: ${options.ifMatch}`
+          `Precondition failed: Resource does not exist for If-Match: ${options.ifMatch}`
         );
       }
       if (
@@ -416,7 +419,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
         normalizeEtag(existingEtag) !== normalizeEtag(options.ifMatch)
       ) {
         throw new PreconditionFailedError(
-          `ETag mismatch for If-Match: existing ${existingEtag} does not match ${options.ifMatch}`
+          `Precondition failed: ETag mismatch for If-Match (existing ${existingEtag} does not match ${options.ifMatch})`
         );
       }
     }
@@ -462,7 +465,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
         normalizeEtag(existingEtag) !== normalizeEtag(options.ifMatch)
       ) {
         throw new PreconditionFailedError(
-          `ETag mismatch for If-Match: existing ${existingEtag} does not match ${options.ifMatch}`
+          `Precondition failed: ETag mismatch for If-Match (existing ${existingEtag} does not match ${options.ifMatch})`
         );
       }
     }
@@ -558,11 +561,12 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
           const fileName = path.basename(item.Key);
           const lastModified = (item.LastModified || getRes.LastModified)?.toISOString();
           const etag = item.ETag || getRes.ETag;
+          const isProtected = fileName === 'sample_itinerary.json';
           const summary = extractMetadataSummary(
             fileName,
             data,
             lastModified,
-            false,
+            isProtected,
             etag
           );
           results.push(summary);
@@ -626,7 +630,7 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
       const data = JSON.parse(bodyStr) as ItineraryRecord;
       data._etag = res.ETag;
       data._lastModified = res.LastModified?.toISOString();
-      data._isProtected = false;
+      data._isProtected = safeName === 'sample_itinerary.json';
       return data;
     } catch (err: unknown) {
       if (isNotFoundError(err)) {
@@ -735,17 +739,29 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
         normalizeEtag(headRes.ETag) !== normalizeEtag(options.ifMatch)
       ) {
         throw new PreconditionFailedError(
-          `ETag mismatch for delete: existing ${headRes.ETag} does not match ${options.ifMatch}`
+          `Precondition failed: ETag mismatch for delete (existing ${headRes.ETag} does not match ${options.ifMatch})`
         );
       }
     }
 
-    await this.client.send(
-      new DeleteObjectCommand({
-        Bucket: this.bucketName,
-        Key: key,
-      })
-    );
+    const deleteInput: DeleteObjectCommandInput = {
+      Bucket: this.bucketName,
+      Key: key,
+    };
+    if (options?.ifMatch) {
+      deleteInput.IfMatch = options.ifMatch;
+    }
+
+    try {
+      await this.client.send(new DeleteObjectCommand(deleteInput));
+    } catch (err: unknown) {
+      if (isPreconditionFailedError(err)) {
+        throw new PreconditionFailedError(
+          `Precondition failed for delete "${safeName}": ETag mismatch (If-Match)`
+        );
+      }
+      throw err;
+    }
 
     return {
       success: true,

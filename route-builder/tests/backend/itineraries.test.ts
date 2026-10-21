@@ -535,6 +535,7 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
 
       expect(response.statusCode).toBe(412);
       const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/precondition failed/i);
       expect(body.error).toMatch(/ETag mismatch/i);
     });
   });

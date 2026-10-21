@@ -207,6 +207,15 @@ export interface SaveItineraryApiOptions {
   ifNoneMatch?: string;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 export async function saveItinerary(
   fileName: string,
   content: unknown,
@@ -230,7 +239,10 @@ export async function saveItinerary(
     const errorData = (await res.json().catch(() => ({ error: 'Failed to save itinerary' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to save itinerary with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to save itinerary with HTTP ${res.status}`,
+      res.status
+    );
   }
 
   const data = (await res.json()) as { success: boolean; fileName: string; filePath: string; etag?: string };
@@ -259,7 +271,10 @@ export async function deleteItinerary(
     const errorData = (await res.json().catch(() => ({ error: 'Failed to delete itinerary' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to delete itinerary with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to delete itinerary with HTTP ${res.status}`,
+      res.status
+    );
   }
 
   return (await res.json()) as { success: boolean; fileName: string };

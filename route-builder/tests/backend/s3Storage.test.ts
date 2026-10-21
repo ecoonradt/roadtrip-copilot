@@ -125,6 +125,15 @@ class MockS3Client {
 
     if (name === 'DeleteObjectCommand') {
       const key = input.Key || '';
+      const existing = this.store.get(key);
+      if (input.IfMatch) {
+        if (!existing || existing.etag !== input.IfMatch) {
+          const err = new Error('PreconditionFailed: If-Match condition failed on delete');
+          err.name = 'PreconditionFailed';
+          Object.assign(err, { $metadata: { httpStatusCode: 412 } });
+          throw err;
+        }
+      }
       this.store.delete(key);
       return {} as T;
     }
@@ -376,6 +385,38 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       // Object is gone from S3
       const check = await service.getItinerary('deletable.json', 'driver@example.com');
       expect(check).toBeNull();
+
+      // Verify DeleteObjectCommand was dispatched with IfMatch
+      const delCall = mockS3.calls.find(
+        (c) =>
+          c.name === 'DeleteObjectCommand' &&
+          c.input.Key === 'users/driver@example.com/itineraries/deletable.json'
+      );
+      expect(delCall).toBeDefined();
+      expect(delCall?.input.IfMatch).toBe(saved.etag);
+    });
+
+    it('marks sample_itinerary.json as protected in both list and get when stored in S3', async () => {
+      const service = new S3ItineraryStorageService({
+        bucketName: 'test-bucket',
+        s3Client: mockS3 as unknown as S3Client,
+        fallbackDirectories: [tempFallbackDir],
+      });
+
+      await service.saveItinerary(
+        'sample_itinerary.json',
+        { trip_name: 'S3 Stored Sample', checkpoints: [] },
+        { userEmail: 'driver@example.com' }
+      );
+
+      const list = await service.listItineraries('driver@example.com');
+      const sampleItem = list.find((i) => i.fileName === 'sample_itinerary.json');
+      expect(sampleItem).toBeDefined();
+      expect(sampleItem?.isProtected).toBe(true);
+
+      const retrieved = await service.getItinerary('sample_itinerary.json', 'driver@example.com');
+      expect(retrieved).toBeDefined();
+      expect(retrieved?._isProtected).toBe(true);
     });
   });
 
