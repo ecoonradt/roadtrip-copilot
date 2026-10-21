@@ -11,6 +11,7 @@ import type {
   ScoutScope,
   ScoutStreamEvent,
 } from '../types/scout';
+import type { AuthStatusResponse } from '../types/auth';
 
 export interface GenerateAlertRequestOptions {
   apiKey?: string;
@@ -372,4 +373,57 @@ export async function generateDayTitle(
     throw new Error(errorData.error || `Day title generation failed with HTTP ${res.status}`);
   }
   return (await res.json()) as { title: string; engine: AiEngineType };
+}
+
+export async function fetchAuthStatus(signal?: AbortSignal): Promise<AuthStatusResponse> {
+  try {
+    const res = await fetch('/api/auth/status', {
+      credentials: 'same-origin',
+      signal,
+    });
+    if (res.status === 401) {
+      return {
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
+        user: null,
+      };
+    }
+    if (!res.ok) {
+      try {
+        const errorData = (await res.json()) as AuthStatusResponse;
+        if (typeof errorData?.authEnabled === 'boolean') {
+          return errorData;
+        }
+      } catch {
+        // Fallback below
+      }
+      return {
+        authEnabled: true,
+        authenticated: false,
+        authorized: false,
+        user: null,
+        message: `Unable to connect to the authentication service (HTTP ${res.status}). Please check your connection and retry.`,
+      };
+    }
+    return (await res.json()) as AuthStatusResponse;
+  } catch {
+    return {
+      authEnabled: true,
+      authenticated: false,
+      authorized: false,
+      user: null,
+      message: 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
+    };
+  }
+}
+
+export async function logoutAuth(): Promise<void> {
+  const res = await fetch('/api/auth/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    throw new Error(`Logout failed with status ${res.status}`);
+  }
 }

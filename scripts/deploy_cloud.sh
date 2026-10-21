@@ -37,6 +37,12 @@ export AWS_REGION
 export CDK_DEFAULT_REGION="$AWS_REGION"
 echo "Deploying to AWS Region: $AWS_REGION"
 
+export ALLOWED_HOSTS="${ALLOWED_HOSTS:-}"
+export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
+if [ -n "${ORIGIN_VERIFY_SECRET:-}" ]; then
+  export ORIGIN_VERIFY_SECRET
+fi
+
 # 3. Build React Web Studio
 echo "Building Route Builder Web Studio..."
 cd "$ROOT_DIR/route-builder"

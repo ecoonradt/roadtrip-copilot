@@ -65,4 +65,7 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_OIDC_PROVIDER_ARN: ${{ vars.GITHUB_OIDC_PROVIDER_ARN }}
+          ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET }}
+          ALLOWED_HOSTS: ${{ vars.ALLOWED_HOSTS }}
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
         run: ./scripts/deploy_cloud.sh

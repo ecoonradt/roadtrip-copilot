@@ -15,6 +15,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
   githubRepo?: string;
   githubOidcProviderArn?: string;
+  authEnabled?: string;
+  allowedEmails?: string;
+  googleClientId?: string;
+  googleClientIdSsmParam?: string;
+  googleClientSecretSsmParam?: string;
+  jwtSecretSsmParam?: string;
+  allowedEmailsSsmParam?: string;
+  publicBaseUrlSsmParam?: string;
+  originVerifySecretSsmParam?: string;
+  allowedHosts?: string;
+  publicBaseUrl?: string;
+  originVerifySecret?: string;
 }
 
 export class RoadtripCopilotCloudStack extends cdk.Stack {
@@ -23,11 +35,30 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
   public readonly fastifyApiFunction: lambda.DockerImageFunction;
   public readonly functionUrl: lambda.FunctionUrl;
   public readonly distribution: cloudfront.Distribution;
+  public readonly apiForwardedHostFunction: cloudfront.Function;
   public readonly githubActionsUser?: iam.User;
   public readonly githubActionsRole?: iam.Role;
 
   constructor(scope: Construct, id: string, props?: RoadtripCopilotCloudStackProps) {
     super(scope, id, props);
+
+    // Validate SSM parameter path prefixes to match IAM execution role boundaries
+    const ssmProps: Record<string, string | undefined> = {
+      googleClientIdSsmParam: props?.googleClientIdSsmParam,
+      googleClientSecretSsmParam: props?.googleClientSecretSsmParam,
+      jwtSecretSsmParam: props?.jwtSecretSsmParam,
+      allowedEmailsSsmParam: props?.allowedEmailsSsmParam,
+      publicBaseUrlSsmParam: props?.publicBaseUrlSsmParam,
+      originVerifySecretSsmParam: props?.originVerifySecretSsmParam,
+    };
+
+    for (const [propName, paramPath] of Object.entries(ssmProps)) {
+      if (paramPath && !paramPath.startsWith('/roadtrip-copilot/')) {
+        throw new Error(
+          `Invalid SSM parameter path "${paramPath}" for ${propName}. All SSM parameter paths must start with "/roadtrip-copilot/".`,
+        );
+      }
+    }
 
     // 1. StaticSiteBucket (S3 Bucket)
     // Ephemeral build artifacts (dist/) are synced from git repository builds and contain no user data.
@@ -64,6 +95,18 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         AWS_LWA_INVOKE_MODE: 'response_stream',
         AWS_LWA_READINESS_CHECK_PATH: '/api/health',
         S3_STORAGE_BUCKET: this.appDataBucket.bucketName,
+        AUTH_ENABLED: props?.authEnabled ?? 'true',
+        ALLOWED_EMAILS: props?.allowedEmails ?? '',
+        GOOGLE_CLIENT_ID: props?.googleClientId ?? '',
+        GOOGLE_CLIENT_ID_SSM_PARAM: props?.googleClientIdSsmParam ?? '/roadtrip-copilot/google-client-id',
+        GOOGLE_CLIENT_SECRET_SSM_PARAM: props?.googleClientSecretSsmParam ?? '/roadtrip-copilot/google-client-secret',
+        JWT_SECRET_SSM_PARAM: props?.jwtSecretSsmParam ?? '/roadtrip-copilot/jwt-secret',
+        ALLOWED_EMAILS_SSM_PARAM: props?.allowedEmailsSsmParam ?? '/roadtrip-copilot/allowed-emails',
+        ...(props?.publicBaseUrlSsmParam ? { PUBLIC_BASE_URL_SSM_PARAM: props.publicBaseUrlSsmParam } : {}),
+        ORIGIN_VERIFY_SECRET_SSM_PARAM: props?.originVerifySecretSsmParam ?? '/roadtrip-copilot/origin-verify-secret',
+        ALLOWED_HOSTS: props?.allowedHosts ?? '',
+        PUBLIC_BASE_URL: props?.publicBaseUrl ?? '',
+        ...(props?.originVerifySecret ? { ORIGIN_VERIFY_SECRET: props.originVerifySecret } : {}),
       },
     });
 
@@ -76,7 +119,30 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
     // Grant AppDataBucket read/write access to FastifyApiFunction
     this.appDataBucket.grantReadWrite(this.fastifyApiFunction);
 
-    // 4. CloudFront Function for SPA client routing on static site
+    // Grant least-privilege permissions to read SSM parameters and decrypt via KMS
+    this.fastifyApiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter', 'ssm:GetParameters'],
+        resources: [
+          `arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/roadtrip-copilot/*`,
+        ],
+      }),
+    );
+
+    this.fastifyApiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Decrypt'],
+        resources: ['*'],
+        conditions: {
+          StringEquals: {
+            'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
+          },
+        },
+      }),
+    );
+
+    // 4. CloudFront Functions
+    // SPA client routing function for static site:
     // Restricts client-side route rewrites strictly to defaultBehavior (S3 static site).
     // Leaves /api/* completely untouched so genuine API status codes (400, 401, 403, 404, 500) and JSON bodies are preserved.
     const spaRewriteFunction = new cloudfront.Function(this, 'SpaRewriteFunction', {
@@ -93,6 +159,23 @@ function handler(event) {
 }
 `),
     });
+
+    // Forwarded host header function for /api/* requests:
+    // Preserves CloudFront viewer host without introducing CloudFormation circular dependencies.
+    // Note: CloudFront Functions forbid mutating 'x-forwarded-proto' (read-only/reserved header in viewer request).
+    const apiForwardedHostFunction = new cloudfront.Function(this, 'ApiForwardedHostFunction', {
+      runtime: cloudfront.FunctionRuntime.JS_2_0,
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  if (request.headers && request.headers.host && request.headers.host.value) {
+    request.headers['x-forwarded-host'] = { value: request.headers.host.value };
+  }
+  return request;
+}
+`),
+    });
+    this.apiForwardedHostFunction = apiForwardedHostFunction;
 
     // 5. CloudFrontDistribution (Distribution)
     this.distribution = new cloudfront.Distribution(this, 'CloudFrontDistribution', {
@@ -112,11 +195,23 @@ function handler(event) {
         '/api/*': {
           origin: new origins.FunctionUrlOrigin(this.functionUrl, {
             readTimeout: cdk.Duration.seconds(60),
+            customHeaders: {
+              'x-copilot-origin-verify':
+                props?.originVerifySecret ||
+                process.env.ORIGIN_VERIFY_SECRET ||
+                `{{resolve:ssm:${props?.originVerifySecretSsmParam ?? '/roadtrip-copilot/origin-verify-secret'}}}`,
+            },
           }),
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          functionAssociations: [
+            {
+              function: apiForwardedHostFunction,
+              eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+            },
+          ],
         },
       },
     });
@@ -210,6 +305,28 @@ function handler(event) {
             resources: [
               `arn:${cdk.Aws.PARTITION}:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.distribution.distributionId}`,
             ],
+          }),
+        );
+
+        // Grant least-privilege permissions to read/write SSM parameters and KMS encryption/decryption
+        target.addToPolicy(
+          new iam.PolicyStatement({
+            actions: ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:PutParameter'],
+            resources: [
+              `arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/roadtrip-copilot/*`,
+            ],
+          }),
+        );
+
+        target.addToPolicy(
+          new iam.PolicyStatement({
+            actions: ['kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey'],
+            resources: ['*'],
+            conditions: {
+              StringEquals: {
+                'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
+              },
+            },
           }),
         );
       };

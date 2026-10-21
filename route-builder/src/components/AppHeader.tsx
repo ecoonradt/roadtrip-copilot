@@ -15,7 +15,9 @@ import {
   Loader2,
 } from 'lucide-react';
 import { InlineEdit } from './InlineEdit';
+import { AccountMenu } from './AccountMenu';
 import type { RouteResponse } from '../types/routing';
+import type { AuthUser } from '../types/auth';
 import type {
   TimelineCascadeResult,
   BackwardScheduleResult,
@@ -49,6 +51,9 @@ interface AppHeaderProps {
   onToggleScout?: () => void;
   isScoutOpen?: boolean;
   aiAvailable?: boolean;
+  authEnabled?: boolean;
+  authUser?: AuthUser | null;
+  onLogout?: () => void;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -77,6 +82,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onToggleScout,
   isScoutOpen = false,
   aiAvailable = true,
+  authEnabled = false,
+  authUser = null,
+  onLogout,
 }) => {
   const [isSchedulePopoverOpen, setIsSchedulePopoverOpen] = useState(false);
   const [isMapsDropdownOpen, setIsMapsDropdownOpen] = useState(false);
@@ -102,8 +110,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         setIsMapsDropdownOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
   }, []);
 
   const formatDuration = (seconds: number): string => {
@@ -132,20 +142,20 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   const totalTripSecs = cascadeResult.totalTripSeconds || 0;
 
   return (
-    <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between gap-3 text-slate-100 shrink-0 z-[1100] shadow-md">
+    <header className="h-14 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-2 text-slate-100 shrink-0 z-[1100] shadow-md min-w-0">
       {/* Left: Brand Logo & Status */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-md shadow-sky-500/20">
+      <div className="flex flex-1 items-center gap-2 sm:gap-3 min-w-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-md shadow-sky-500/20 shrink-0">
             <Compass className="w-5 h-5 text-white" />
           </div>
-          <div>
+          <div className="hidden md:block">
             <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5 leading-none">
               Roadtrip Co-Pilot
             </h1>
             <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-400">
               <span
-                className={`inline-block w-2 h-2 rounded-full ${
+                className={`inline-block w-2 h-2 rounded-full shrink-0 ${
                   isLoadingRoute
                     ? 'bg-amber-400 animate-pulse'
                     : routeError
@@ -153,7 +163,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                     : 'bg-emerald-400'
                 }`}
               />
-              <span className="text-[11px]">
+              <span className="text-[11px] truncate">
                 {isLoadingRoute
                   ? 'Calculating...'
                   : routeError
@@ -168,22 +178,23 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Route / Trip Selector Trigger */}
         {onOpenRouteSelector && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 border border-slate-700/80 rounded-xl text-xs font-medium shadow-sm ml-1 min-w-0">
+          <div className="flex flex-1 items-center gap-1.5 px-2.5 py-1.5 bg-slate-850 border border-slate-700/80 rounded-xl text-xs font-medium shadow-sm ml-0.5 sm:ml-1 min-w-0 max-w-[220px] 2xl:max-w-[340px]">
             <FolderOpen className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             {onRenameTrip ? (
               <InlineEdit
                 value={currentTripName}
                 onCommit={onRenameTrip}
                 tooltip="Rename this trip"
-                className="text-sm font-semibold text-white max-w-[200px] sm:max-w-[300px]"
+                className="text-sm font-semibold text-white"
               />
             ) : (
-              <span className="text-sm font-semibold text-white truncate max-w-[200px] sm:max-w-[300px]">{currentTripName}</span>
+              <span className="min-w-0 text-sm font-semibold text-white truncate">{currentTripName}</span>
             )}
             <button
               onClick={onOpenRouteSelector}
               className="p-0.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white cursor-pointer shrink-0"
               title="Switch itinerary, import JSON file, or start a new route"
+              aria-label="Switch itinerary"
             >
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
@@ -192,20 +203,23 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </div>
 
       {/* Right Controls: Schedule, Telemetry, Maps & Export */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 whitespace-nowrap">
         {/* Schedule Popover Trigger */}
         <div className="relative" ref={scheduleDropdownRef}>
           <button
             onClick={() => setIsSchedulePopoverOpen(!isSchedulePopoverOpen)}
             className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-xs text-slate-200 transition-colors shadow-sm cursor-pointer"
             title="Configure trip schedule and departure mode"
+            aria-label="Trip schedule"
+            aria-expanded={isSchedulePopoverOpen}
           >
             {schedulingMode === 'adhoc' ? (
               <Clock className="w-3.5 h-3.5 text-teal-400" />
             ) : (
               <Calendar className="w-3.5 h-3.5 text-sky-400" />
             )}
-            <span className="font-mono text-[11px]">
+            <span className="xl:hidden">Schedule</span>
+            <span className="hidden xl:inline font-mono text-[11px]">
               {schedulingMode === 'adhoc'
                 ? 'Ad-Hoc • Dynamic Start'
                 : `${baseDate} • ${
@@ -219,7 +233,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
           {/* Schedule Configuration Dropdown */}
           {isSchedulePopoverOpen && (
-            <div className="absolute right-0 mt-2 w-76 p-3.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 backdrop-blur-md space-y-3">
+            <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] p-3.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 backdrop-blur-md space-y-3 whitespace-normal">
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <span className="text-xs font-semibold text-white">Trip Schedule</span>
                 {/* Mode Selector */}
@@ -328,7 +342,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
         {/* Route Telemetry KPIs */}
         {totalDistance > 0 && (
-          <div className="hidden md:flex items-center gap-2 bg-slate-800/80 px-2.5 py-1 rounded-xl border border-slate-700/70 text-xs font-mono">
+          <div className="hidden xl:flex items-center gap-1.5 sm:gap-2 bg-slate-800/80 px-2 sm:px-2.5 py-1 rounded-xl border border-slate-700/70 text-xs font-mono">
             <div className="flex items-center gap-1 text-slate-200" title="Total Drive Distance">
               <Navigation className="w-3 h-3 text-sky-400" />
               <span>{totalDistance} mi</span>
@@ -336,12 +350,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             <span className="text-slate-600">&bull;</span>
             <div className="flex items-center gap-1 text-slate-300" title="Total Driving Time">
               <Clock className="w-3 h-3 text-sky-400" />
-              <span>{formatDuration(totalDriveSecs)} drive</span>
+              <span>{formatDuration(totalDriveSecs)}<span className="hidden 2xl:inline"> drive</span></span>
             </div>
             {totalTripSecs > totalDriveSecs && (
               <>
-                <span className="text-slate-600 hidden xl:inline">&bull;</span>
-                <div className="hidden xl:flex items-center gap-1 text-slate-400" title="Total Elapsed Time (Drive + Stops)">
+                <span className="text-slate-600 hidden 2xl:inline">&bull;</span>
+                <div className="hidden 2xl:flex items-center gap-1 text-slate-400" title="Total Elapsed Time (Drive + Stops)">
                   <Timer className="w-3 h-3 text-indigo-400" />
                   <span>{formatDuration(totalTripSecs)} total</span>
                 </div>
@@ -361,14 +375,17 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm"
                   title="Open navigation in Google Maps"
+                  aria-label="Open navigation in Google Maps"
                 >
-                  <span>Google Maps</span>
+                  <span className="xl:hidden">Maps</span>
+                  <span className="hidden xl:inline">Google Maps</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
                 <button
                   onClick={() => handleCopyUrl(googleMapsRoute.legs[0].url, 0)}
                   className="px-2 py-1 text-slate-300 hover:text-white rounded-lg hover:bg-slate-700 text-xs transition-colors"
                   title="Copy Google Maps navigation link"
+                  aria-label="Copy Google Maps navigation link"
                 >
                   {copiedLegIndex === 0 ? (
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -383,8 +400,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   onClick={() => setIsMapsDropdownOpen(!isMapsDropdownOpen)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-medium transition-colors shadow-sm cursor-pointer"
                   title="View Google Maps multi-leg links"
+                  aria-label={`Google Maps navigation links (${googleMapsRoute.totalLegs} legs)`}
+                  aria-expanded={isMapsDropdownOpen}
                 >
-                  <span>Google Maps ({googleMapsRoute.totalLegs} Legs)</span>
+                  <span className="xl:hidden">Maps ({googleMapsRoute.totalLegs})</span>
+                  <span className="hidden xl:inline">Google Maps ({googleMapsRoute.totalLegs} Legs)</span>
                   <ChevronDown className="w-3 h-3" />
                 </button>
 
@@ -420,6 +440,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                             onClick={() => handleCopyUrl(leg.url, leg.legIndex)}
                             className="p-1 text-slate-300 hover:text-white rounded hover:bg-slate-700"
                             title="Copy link"
+                            aria-label={`Copy Google Maps link for ${leg.title}`}
                           >
                             {copiedLegIndex === leg.legIndex ? (
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -442,6 +463,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <button
             onClick={aiAvailable ? onToggleScout : undefined}
             disabled={!aiAvailable}
+            aria-label="Route Scout"
+            aria-pressed={isScoutOpen}
             className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
               !aiAvailable
                 ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
@@ -466,7 +489,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   : 'text-cyan-400'
               }`}
             />
-            <span>Route Scout</span>
+            <span className="hidden xl:inline">Route Scout</span>
           </button>
         )}
 
@@ -475,6 +498,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <button
             onClick={onSaveTrip}
             disabled={isSaving || isLoadingRoute}
+            aria-label="Save itinerary"
             className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all cursor-pointer disabled:opacity-50 ${
               saveSuccess
                 ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300'
@@ -510,6 +534,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         <button
           onClick={onOpenExportModal}
           disabled={isLoadingRoute}
+          aria-label="Export itinerary"
           className={`flex items-center gap-1.5 py-1.5 px-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-950/40 transition-all cursor-pointer ${
             isLoadingRoute ? 'opacity-50 cursor-not-allowed' : ''
           }`}
@@ -520,8 +545,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           ) : (
             <Share2 className="w-3.5 h-3.5" />
           )}
-          <span>{isLoadingRoute ? 'Calculating...' : 'Export & Sync'}</span>
+          <span className="xl:hidden">Export</span>
+          <span className="hidden xl:inline">{isLoadingRoute ? 'Calculating...' : 'Export & Sync'}</span>
         </button>
+
+        {/* Account details are disclosed only on demand. */}
+        {authEnabled && authUser && (
+          <AccountMenu user={authUser} onLogout={onLogout} />
+        )}
       </div>
     </header>
   );

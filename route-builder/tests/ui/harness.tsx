@@ -8,7 +8,15 @@ import type { Waypoint, RouteResponse, GeocodeResult } from '../../src/types/rou
 import type { TimelineCascadeResult } from '../../src/engine/types';
 import type { ParsedTrip } from '../../src/engine/itineraryParser';
 
-const mockedApi = vi.hoisted(() => ({ fetchItinerary: vi.fn(), fetchRoute: vi.fn(), fetchAiStatus: vi.fn(), saveItinerary: vi.fn(), stageItinerary: vi.fn() }));
+const mockedApi = vi.hoisted(() => ({
+  fetchItinerary: vi.fn(),
+  fetchRoute: vi.fn(),
+  fetchAiStatus: vi.fn(),
+  saveItinerary: vi.fn(),
+  stageItinerary: vi.fn(),
+  fetchAuthStatus: vi.fn(),
+  logoutAuth: vi.fn(),
+}));
 export const api = mockedApi;
 export const act = renderer.act;
 const create = renderer.create;
@@ -96,6 +104,8 @@ beforeEach(() => {
   api.fetchItinerary.mockResolvedValue(fixture());
   api.fetchRoute.mockImplementation((coords: Array<{ lat: number; lng: number }>) => Promise.resolve(roadResponse(coords.length === 4 ? [3600, 1800, 1200] : [3600, 1800])));
   api.fetchAiStatus.mockResolvedValue({ available: false });
+  api.fetchAuthStatus.mockResolvedValue({ authEnabled: false, authenticated: true, authorized: true, user: null });
+  api.logoutAuth.mockResolvedValue(undefined);
   api.saveItinerary.mockResolvedValue({ success: true, fileName: 'test.json' });
   api.stageItinerary.mockResolvedValue({ downloadUrl: 'http://localhost:3001/test.json' });
   const entries = new Map<string, string>();

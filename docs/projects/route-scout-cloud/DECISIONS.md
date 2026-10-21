@@ -20,6 +20,7 @@ This document is the high-level Table of Contents and index for all Architecture
 | **ADR-0004** | 2026-10-18 | Hybrid Local Feature Development Mode | Accepted | Preserves `npm run dev` for feature engineering: itineraries/state stay strictly on local disk (isolated from prod S3) while AI uses Bedrock via local AWS credentials. | [0004-hybrid-local-dev-mode.md](decisions/0004-hybrid-local-dev-mode.md) |
 | **ADR-0005** | 2026-10-18 | AWS CDK IaC, GitHub Actions CI/CD & Continuous Deployment | Accepted | Establishes Milestone 0 (`infra/` CDK + `scripts/deploy_cloud.sh` + GitHub Actions) and requires CDK + live AWS deploy + manual check in every milestone. | [0005-cdk-iac-and-github-actions-cicd.md](decisions/0005-cdk-iac-and-github-actions-cicd.md) |
 | **ADR-0006** | 2026-10-18 | Scoped IAM CI Deployer Under AWS Project SCP | Accepted | Replaces default `iam:CreateOpenIDConnectProvider` (blocked by AWS Project SCP `DenyIAMRestrictedActions`) with a scoped IAM CI deployer user & role. | [0006-aws-project-scp-iam-ci-deployer.md](decisions/0006-aws-project-scp-iam-ci-deployer.md) |
+| **ADR-0007** | 2026-10-19 | Runtime SSM SecureString Resolution & CloudFront Forwarded Host | Accepted | Resolves `/roadtrip-copilot/*` SSM `SecureString` secrets at runtime via `@aws-sdk/client-ssm` and preserves viewer `Host` via a CloudFront `/api/*` `VIEWER_REQUEST` function. | [0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md](decisions/0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md) |
 
 ---
 

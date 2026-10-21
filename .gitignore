@@ -14,3 +14,6 @@ local.properties
 infra/node_modules
 infra/cdk.out
 infra/cdk-outputs.json
+.env
+.env.*
+!.env.example

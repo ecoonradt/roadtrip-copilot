@@ -12,6 +12,7 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
 * **AI Heads-Up Generation:** Instant generation of Android Auto heads-up cards (titles up to 30 characters, messages up to 2 lines) and natural spoken phonetic TTS scripts (15-25 words, spoken within 8-12 seconds) with trigger radii clamped between 0.3 and 6.0 miles.
 * **Multi-Stop Google Maps Navigation Links:** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are automatically partitioned into continuous driving legs with dedicated QR codes.
 * **1-Click Device Handoff:** Directly push itineraries to connected Android phones over ADB, download via local Wi-Fi QR codes, or export JSON files for Android Storage Access Framework (SAF) import.
+* **Compact Account Controls:** The single-row header keeps planning actions in view. Click your avatar or initials in the top-right for your name, email, and Sign out; the popover also supports keyboard navigation.
 
 ---
 
@@ -44,6 +45,8 @@ This runs both servers concurrently:
 2. **Vite Frontend:** `http://localhost:5173`
 
 Open `http://localhost:5173` in your browser.
+
+In authentication-enabled deployments, slow session checks show connection feedback after a short delay. A check that exceeds 15 seconds displays a connection error with **Retry Connection**, rather than leaving the screen blank.
 
 ---
 
@@ -107,6 +110,11 @@ The application works with zero configuration by default in an Antigravity envir
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
 | `PORT` | `3001` | Fastify backend listening port. |
+| `AUTH_ENABLED` | `false` | Set to `true` in cloud production to enforce Google OIDC + `ALLOWED_EMAILS` gating (`false` in `npm run dev` for local bypass). |
+| `ALLOWED_EMAILS` | *(None)* | Comma-separated allowlist of authorized Google account emails when `AUTH_ENABLED=true` (or resolved from SSM `/roadtrip-copilot/allowed-emails`). |
+| `GOOGLE_CLIENT_ID` | *(None)* | Google OAuth 2.0 Web Client ID (or resolved from SSM `/roadtrip-copilot/google-client-id`). |
+| `GOOGLE_CLIENT_SECRET` | *(None)* | Google OAuth 2.0 Web Client Secret (or resolved at runtime from SSM SecureString `/roadtrip-copilot/google-client-secret`). |
+| `JWT_SECRET` | *(None)* | Server HMAC-SHA256 secret for signing session cookies and Bearer JWTs (or resolved at runtime from SSM SecureString `/roadtrip-copilot/jwt-secret`). |
 | `GEMINI_API_KEY` | *(None)* | Optional Google AI Studio developer API key. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Explicit Gemini model ID for Google AI Studio cloud calls. |
 | `AGY_MODEL` | *(Auto-detected)* | Override the model passed to `agy` (by default auto-resolves the newest Flash model from `agy models`). |
@@ -116,16 +124,19 @@ The application works with zero configuration by default in an Antigravity envir
 
 ## Testing & Quality Gates
 
-The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by 162 Vitest unit and integration tests:
+The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by Vitest unit/integration tests and Playwright browser acceptance tests:
 
 ```bash
-npm test              # Run all 162 tests across all suites
-npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache
+npm test              # Run all Vitest suites
+npm run test:browser  # Browser geometry, account interactions, and session recovery
+npm run test:backend  # Fastify auth, routing proxies, Nominatim headers, OSRM cache
 npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
 npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
 npm run test:schema   # Itinerary V2 JSON export and ADB device service
 npm run build         # Production compile (client Vite bundle + backend tsc)
 ```
+
+Browser tests require Node.js 20+ and a one-time `npx playwright install chromium` (on Linux CI, use `npx playwright install --with-deps chromium`). They start their own frontend on `127.0.0.1:5174`, use local API fixtures, and need no running backend, AWS credentials, or Google sign-in. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use an existing compatible Chromium executable instead. These tests run separately from `npm test` and the unified CI script.
 
 ### Full-Stack CI Verification & Cloud Deployment
 From the repository root, run the unified verification pipeline and cloud deployment scripts:
@@ -140,6 +151,6 @@ The Route Builder is architected as a decoupled client-server application:
 
 * **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, Route Scout chat drawer, and Google Maps URL chunking.
 * **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout streaming SSE service, and ADB device synchronization.
-* **Testing (`tests/`):** Automated Vitest unit and integration tests validating routing proxies, timeline calculations, AI adapters, and V2 schema exports.
+* **Testing (`tests/`):** Vitest unit/integration tests validate routing proxies, timelines, AI adapters, exports, and authentication. Playwright tests verify header geometry and account/session interactions in a real browser.
 
 For detailed developer specifications, directory layouts, and design contracts, see [AGENTS.md](AGENTS.md) and [docs/archive/route_builder_research_and_architecture.md](../docs/archive/route_builder_research_and_architecture.md).

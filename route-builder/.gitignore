@@ -3,3 +3,8 @@ dist
 dist-server
 .vite
 .DS_Store
+playwright-report
+test-results
+.env
+.env.*
+!.env.example
