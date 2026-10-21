@@ -87,7 +87,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({
           /* Case A: Unauthenticated / Connection Issue */
           <div className="space-y-5">
             {status.message && (
-              <div className="bg-amber-950/60 border border-amber-700/70 rounded-xl p-4 text-amber-200 space-y-2">
+              <div role="alert" className="bg-amber-950/60 border border-amber-700/70 rounded-xl p-4 text-amber-200 space-y-2">
                 <div className="flex items-center gap-2 font-semibold text-sm text-amber-100">
                   <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Connection Issue</span>

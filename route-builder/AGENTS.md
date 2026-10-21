@@ -22,6 +22,7 @@
 * **Clean Visual Hierarchy:** Scannable cards in `TimelineSidebar.tsx` with progressive disclosure for deep edits.
 * **Zero Technical Jargon:** Never render internal verification tags, debug counters, or raw mathematical formulas in primary UI.
 * **Responsive Workspace:** Resizable sidebar (320px–680px) with `localStorage` persistence and double-click reset.
+* **Single-Row Header:** Keep the trip title shrinkable and compact secondary controls at narrower widths. Account details and Sign out live in a click-to-open avatar/initials popover with keyboard support; never hide overflowing actions with clipping.
 
 ### D. Pluggable AI Harness Adapters
 * AI generation adheres to the `AiHarnessAdapter` interface (`server/services/aiService.ts`):
@@ -49,6 +50,7 @@
 ### G. Dual-Mode Google OIDC Authentication & Allowlist Gating
 * **Zero-Trust Cloud Gate (`AUTH_ENABLED === 'true'`):** Protects `/api/*` endpoints via `authGuard.ts` (`preHandler` hook) supporting both browser sessions (`HTTP-Only`, `SameSite=Lax`, `Secure` cookie `copilot_session`) and native Android clients (`Authorization: Bearer <jwt>`), verified against `ALLOWED_EMAILS` (`401 Unauthorized` when unauthenticated, `403 Forbidden` when not allowlisted).
 * **Hybrid Local Dev Bypass (`AUTH_ENABLED !== 'true'`):** Automatically bypasses OIDC enforcement and injects a deterministic local developer user (`local-dev@localhost`) during `npm run dev` and automated tests.
+* **Session Recovery:** Startup and retry checks remain fail-closed, with delayed connection feedback, a 15-second deadline, and a connection-error Retry action. Superseded requests must not replace the current session state.
 * **Runtime SSM Secret Resolution:** Resolves `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, and `ALLOWED_EMAILS` from direct environment variables first, falling back to cached AWS SSM Parameter Store `SecureString` lookups (`/roadtrip-copilot/*`) on Lambda cold start.
 
 ---
@@ -68,6 +70,7 @@ route-builder/
 ├── tsconfig.json               # Frontend TypeScript configuration
 ├── tsconfig.server.json        # Backend TypeScript configuration
 ├── vite.config.ts              # Vite dev server and /api proxy configuration
+├── playwright.config.ts        # Chromium header/account acceptance tests against a fixture-backed frontend
 ├── tailwind.config.js          # Dark automotive theme color palette
 ├── server/
 │   ├── app.ts                  # Fastify application factory
@@ -96,7 +99,8 @@ route-builder/
 ├── src/
 │   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator
 │   ├── components/
-│   │   ├── AppHeader.tsx       # Top bar with route title, metrics, search, user badge, and global actions
+│   │   ├── AppHeader.tsx       # Single-row responsive top bar with route title, metrics, and global actions
+│   │   ├── AccountMenu.tsx     # Avatar/initials trigger and keyboard-accessible account details/sign-out popover
 │   │   ├── AuthGateScreen.tsx  # Google OIDC sign-in & 403 private preview restriction screen
 │   │   ├── DayTabBar.tsx       # Multi-day leg switcher tabs
 │   │   ├── MapCanvas.tsx       # Leaflet map with custom waypoint markers & OSRM polyline
@@ -121,7 +125,8 @@ route-builder/
     ├── ai/                     # Harness adapters, alert/schema generation, Scout
     ├── backend/                # Auth, routing, storage, device handoff, geocoding
     ├── engine/                 # Cascade, schema, timezone and navigation-link math
-    └── ui/                     # Portable React scheduling & auth gate acceptance tests & harness
+    ├── ui/                     # Portable React scheduling, account, and auth recovery tests & harness
+    └── browser/                # Playwright geometry and account interaction regressions (*.browser.ts)
 ```
 
 ---
@@ -134,6 +139,9 @@ npm run dev
 
 # Run all Vitest suites
 npm test
+
+# Browser acceptance tests (one-time setup: npx playwright install chromium)
+npm run test:browser
 
 # Granular test suites
 npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache

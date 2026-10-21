@@ -150,6 +150,7 @@ The repository includes a desktop-first web application in `route-builder/` for 
 * **AI Heads-Up Generation:** Instant generation of Android Auto heads-up cards and TTS scripts tailored to car audio constraints.
 * **Multi-Leg Google Maps Export:** Generates route-shaping navigation links with automatic 9-stop leg chunking and QR codes to prevent unwanted highway rerouting.
 * **1-Click Device Handoff:** Instant ADB push to phone storage, local Wi-Fi QR code download, or SAF file export.
+* **Responsive Account & Session Controls:** Single-row header with an avatar account popover; slow session checks provide connection feedback and a timeout with Retry instead of an indefinite blank screen.
 
 ### Quickstart
 

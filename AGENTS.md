@@ -68,10 +68,15 @@ Subproject directory details are maintained locally in their respective handbook
   ```bash
   cd route-builder && npm run build
   ```
-* **Run All 224 Vitest Tests:**
+* **Run All Vitest Tests:**
   ```bash
   cd route-builder && npm test
   ```
+* **Run Browser Header & Account Acceptance Tests:**
+  ```bash
+  cd route-builder && npm run test:browser
+  ```
+  Requires one-time `npx playwright install chromium`; runs against local API fixtures without cloud credentials. Browser tests are separate from `scripts/ci_check.sh`.
 * **Run Granular Test Suites:**
   ```bash
   cd route-builder && npm run test:backend  # OSRM, Nominatim, LRU cache

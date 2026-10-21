@@ -176,51 +176,92 @@ export function App() {
 
   // Authentication state (null while determining initial session status to prevent flashing UI)
   const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const authSeqRef = useRef(0);
+  const authMountedRef = useRef(false);
+  const cancelAuthCheckRef = useRef<(() => void) | null>(null);
 
-  const refreshAuthStatus = useCallback(async () => {
+  const invalidateAuthCheck = useCallback(() => {
+    authSeqRef.current += 1;
+    cancelAuthCheckRef.current?.();
+    cancelAuthCheckRef.current = null;
+  }, []);
+
+  const refreshAuthStatus = useCallback(async (): Promise<AuthStatusResponse | null> => {
+    if (!authMountedRef.current) return null;
+    invalidateAuthCheck();
+    const seq = authSeqRef.current;
+    const controller = new AbortController();
+    setAuthStatus(null);
+    setIsConnecting(false);
+
+    const connectingTimer = setTimeout(() => {
+      if (seq === authSeqRef.current) setIsConnecting(true);
+    }, 750);
+    const timeoutError = new Error(
+      'The connection to Roadtrip Co-Pilot timed out. Please check your connection and retry.'
+    );
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      deadlineTimer = setTimeout(() => {
+        reject(timeoutError);
+        controller.abort();
+      }, 15_000);
+    });
+    const cancelled = new Promise<null>((resolve) => {
+      cancelAuthCheckRef.current = () => {
+        clearTimeout(connectingTimer);
+        clearTimeout(deadlineTimer);
+        resolve(null);
+        controller.abort();
+      };
+    });
+
     try {
-      const status = await fetchAuthStatus();
+      // Race the entire operation, including its body, even if a transport ignores abort.
+      const status = await Promise.race([fetchAuthStatus(controller.signal), deadline, cancelled]);
+      if (seq !== authSeqRef.current || !status) return null;
       setAuthStatus(status);
-    } catch {
-      setAuthStatus({
+      return status;
+    } catch (err: unknown) {
+      if (seq !== authSeqRef.current) return null;
+      const status: AuthStatusResponse = {
         authEnabled: true,
         authenticated: false,
         authorized: false,
         user: null,
-        message: 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
-      });
+        message: err instanceof Error && err === timeoutError
+          ? err.message
+          : 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
+      };
+      setAuthStatus(status);
+      return status;
+    } finally {
+      clearTimeout(connectingTimer);
+      clearTimeout(deadlineTimer);
+      if (seq === authSeqRef.current) {
+        cancelAuthCheckRef.current = null;
+        setIsConnecting(false);
+      }
     }
-  }, []);
+  }, [invalidateAuthCheck]);
 
   useEffect(() => {
-    let isSubscribed = true;
-    if (typeof fetchAuthStatus === 'function') {
-      fetchAuthStatus()
-        .then((status) => {
-          if (isSubscribed && status) {
-            setAuthStatus(status);
-          }
-        })
-        .catch(() => {
-          if (isSubscribed) {
-            setAuthStatus({
-              authEnabled: true,
-              authenticated: false,
-              authorized: false,
-              user: null,
-              message: 'Unable to connect to Roadtrip Co-Pilot server. Please check your connection and retry.',
-            });
-          }
-        });
-    }
+    authMountedRef.current = true;
+    void refreshAuthStatus();
     return () => {
-      isSubscribed = false;
+      authMountedRef.current = false;
+      invalidateAuthCheck();
     };
-  }, []);
+  }, [refreshAuthStatus, invalidateAuthCheck]);
 
   const handleLogout = useCallback(async () => {
+    const seq = authSeqRef.current;
     try {
       await logoutAuth();
+      if (!authMountedRef.current) return;
+      invalidateAuthCheck();
+      setIsConnecting(false);
       setAuthStatus({
         authEnabled: true,
         authenticated: false,
@@ -228,6 +269,7 @@ export function App() {
         user: null,
       });
     } catch (err: unknown) {
+      if (!authMountedRef.current || seq !== authSeqRef.current) return;
       const msg = err instanceof Error ? err.message : 'Logout failed';
       setAuthStatus((prev) =>
         prev
@@ -238,7 +280,7 @@ export function App() {
           : null
       );
     }
-  }, []);
+  }, [invalidateAuthCheck]);
 
   // Generation counter to guard against superseded loadInitialTrip requests overwriting newer state/edits
   const loadTripSeqRef = useRef<number>(0);
@@ -314,23 +356,17 @@ export function App() {
     loadInitialTrip();
   }, [loadInitialTrip]);
 
-  const prevAuthErrorRef = useRef<boolean>(false);
   const retryInitialization = useCallback(async () => {
-    prevAuthErrorRef.current = false;
-    await refreshAuthStatus();
-    loadInitialTrip();
-    checkAiAvailability();
-  }, [refreshAuthStatus, loadInitialTrip, checkAiAvailability]);
-
-  useEffect(() => {
-    if (!authStatus) return;
-    const hasConnectionError = Boolean(authStatus.message && !authStatus.authenticated);
-    if (prevAuthErrorRef.current && !hasConnectionError && authStatus.authenticated) {
-      loadInitialTrip();
-      checkAiAvailability();
+    if (cancelAuthCheckRef.current) return;
+    const pendingStatus = refreshAuthStatus();
+    const seq = authSeqRef.current;
+    const status = await pendingStatus;
+    if (seq !== authSeqRef.current || !status) return;
+    if (!status.authEnabled || (status.authenticated && status.authorized)) {
+      void loadInitialTrip();
+      void checkAiAvailability();
     }
-    prevAuthErrorRef.current = hasConnectionError;
-  }, [authStatus, loadInitialTrip, checkAiAvailability]);
+  }, [refreshAuthStatus, loadInitialTrip, checkAiAvailability]);
 
   // Current active day data
   const currentDay = useMemo(() => {
@@ -1137,7 +1173,15 @@ export function App() {
 
   // Render solid dark automotive blue background while session status is determining to prevent UI flash
   if (!authStatus) {
-    return <div className="min-h-screen w-screen bg-slate-950" />;
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 flex items-center justify-center">
+        {isConnecting && (
+          <p role="status" className="text-sm text-slate-400">
+            Connecting to Roadtrip Co-Pilot…
+          </p>
+        )}
+      </div>
+    );
   }
 
   if (authStatus.authEnabled && (!authStatus.authenticated || !authStatus.authorized)) {

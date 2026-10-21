@@ -375,10 +375,11 @@ export async function generateDayTitle(
   return (await res.json()) as { title: string; engine: AiEngineType };
 }
 
-export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
+export async function fetchAuthStatus(signal?: AbortSignal): Promise<AuthStatusResponse> {
   try {
     const res = await fetch('/api/auth/status', {
       credentials: 'same-origin',
+      signal,
     });
     if (res.status === 401) {
       return {

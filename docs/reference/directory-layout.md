@@ -74,6 +74,7 @@ roadtrip-copilot/
 │   ├── README.md              # User-facing web studio documentation & setup
 │   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
+│   ├── playwright.config.ts   # Fixture-backed Chromium header/account acceptance test configuration
 │   ├── server/                # Fastify TypeScript backend
 │   │   ├── app.ts             # Fastify app factory with CORS, authGuard hook, and routes
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
@@ -83,11 +84,11 @@ roadtrip-copilot/
 │   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
-│   │   ├── components/        # AppHeader, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
+│   │   ├── components/        # AppHeader, AccountMenu, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models (auth, routing, ai, scout)
-│   └── tests/                 # Vitest suites: backend, engine, AI, schema/device, and React scheduling workflows (ui/)
+│   └── tests/                 # Vitest suites (backend, engine, AI, schema/device, ui/) and Playwright header/account/session checks (browser/)
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/

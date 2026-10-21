@@ -32,7 +32,7 @@ export const InlineEdit: React.FC<InlineEditProps> = ({ value, onCommit, tooltip
           if (e.key === 'Enter') commit();
           if (e.key === 'Escape') { setDraft(value); setEditing(false); }
         }}
-        className={`bg-slate-900 border border-sky-500/60 rounded px-1.5 py-0.5 text-xs text-white outline-none w-56 ${className}`}
+        className={`bg-slate-900 border border-sky-500/60 rounded px-1.5 py-0.5 text-xs text-white outline-none w-56 min-w-0 max-w-full ${className}`}
       />
     );
   }
@@ -40,9 +40,9 @@ export const InlineEdit: React.FC<InlineEditProps> = ({ value, onCommit, tooltip
     <button
       onClick={() => setEditing(true)}
       title={tooltip}
-      className="group flex items-center gap-1 min-w-0 cursor-pointer"
+      className="group flex items-center gap-1 min-w-0 max-w-full cursor-pointer"
     >
-      <span className={`truncate ${className}`}>{value}</span>
+      <span className={`min-w-0 truncate ${className}`}>{value}</span>
       <Pencil className="w-3 h-3 text-slate-500 group-hover:text-sky-400 shrink-0" />
     </button>
   );

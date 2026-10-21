@@ -85,15 +85,15 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
 * **`route-builder/src/types/auth.ts`**
   * Frontend TypeScript interfaces (`AuthUser`, `AuthStatusResponse`).
 * **`route-builder/src/services/api.ts`**
-  * Adds `fetchAuthStatus(): Promise<AuthStatusResponse>` and `logoutAuth(): Promise<void>`.
+  * Adds `fetchAuthStatus(signal?: AbortSignal): Promise<AuthStatusResponse>` and `logoutAuth(): Promise<void>`.
 * **`route-builder/src/components/AuthGateScreen.tsx`**
   * Clean, dark-automotive-themed authentication gate rendered when `authStatus.authEnabled` is `true` and the user is either:
     1. **Unauthenticated (`!authStatus.authenticated`):** Displays the Roadtrip Co-Pilot branding, explanation of private cloud access, and a **"Sign in with Google"** CTA button linking to `/api/auth/google`.
     2. **Unauthorized (`authStatus.authenticated && !authStatus.authorized` — `403` Private Preview):** Displays the `"Roadtrip Co-Pilot is in private preview"` message, shows the currently signed-in Google account (`user.email`), and provides a **"Sign Out / Switch Account"** button that invokes `POST /api/auth/logout` and redirects to `/api/auth/google`.
 * **`route-builder/src/components/AppHeader.tsx` & `route-builder/src/App.tsx`**
-  * `App.tsx` queries `fetchAuthStatus()` on mount alongside existing initialization (keeping optimistic initial state so existing unit tests and authenticated sessions experience zero waterfall delay).
+  * `App.tsx` queries `fetchAuthStatus()` on mount alongside existing initialization, withholding studio/sign-in rendering until the session is known. Slow checks show delayed connection feedback; a 15-second deadline presents a fail-closed connection error with Retry.
   * When `authStatus.authEnabled && (!authStatus.authenticated || !authStatus.authorized)`, `App.tsx` renders `<AuthGateScreen />`.
-  * `AppHeader.tsx` accepts optional `authUser?: AuthUser | null`, `authEnabled?: boolean`, and `onLogout?: () => void`, displaying a compact signed-in user badge (avatar/initial + email/name) and Sign Out button when `authEnabled && authUser` is present.
+  * `AppHeader.tsx` accepts optional `authUser?: AuthUser | null`, `authEnabled?: boolean`, and `onLogout?: () => void`. When `authEnabled && authUser` is present, `AccountMenu.tsx` displays a compact avatar/initials trigger opening full account details and Sign out, while the single-row header truncates the trip title and compacts secondary controls as needed.
 
 ### 3. AWS CDK Infrastructure Updates (`infra/`)
 * **`infra/lib/roadtrip-cloud-stack.ts` & `infra/bin/infra.ts`**
@@ -162,6 +162,11 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
   - Update [`AGENTS.md`](../../../../AGENTS.md), [`README.md`](../../../../README.md), [`route-builder/AGENTS.md`](../../../../route-builder/AGENTS.md), [`route-builder/README.md`](../../../../route-builder/README.md), and [`docs/reference/directory-layout.md`](../../../reference/directory-layout.md).
   - Run `./scripts/ci_check.sh` across `route-builder` (224 tests + build), `infra` (15 CDK tests + `cdk synth`), and Android unit tests.
   - Push `feat/m1-dual-mode-oidc-auth` and open a green Pull Request (awaiting user permission before live AWS deployment).
+- [x] **Step 5: Approved Header & Session-Recovery Follow-Up (2026-10-20)**
+  - Keep a single header row: replace the user pill/sign-out pair with a click-to-open avatar/initials account popover, make the trip title shrinkable, and compact secondary controls at narrower widths without clipping actions.
+  - Preserve the initial dark background; show delayed connection feedback, enforce a 15-second session-check deadline, and provide a fail-closed error with Retry. Superseded requests and unmounts must not update current session state.
+  - Cover account keyboard/dismissal behavior, timeout/retry races, and real-browser header geometry at 1024, 1280, 1366, 1440, 1536, and 1920 CSS pixels (including long names, multi-leg routes, and routing/save states).
+  - Explicitly defer `.env`/service initialization changes to future configuration work; no backend, infrastructure, deployment, or Android changes are authorized by this follow-up.
 
 ---
 
@@ -172,6 +177,8 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
 ./scripts/ci_check.sh
 ```
 *(Executes `cd route-builder && npm test && npm run build`, `cd infra && npm test && npx cdk synth`, and `./gradlew testDebugUnitTest`).*
+
+For the header/session follow-up, also run `cd route-builder && npm run test:browser` after installing Chromium with `npx playwright install chromium` (or setting `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to an existing compatible browser). This suite uses mocked APIs and requires no backend or cloud credentials.
 
 ### Live Deployment & Manual Cloud Verification Checklist (After User Permission)
 1. Store Google OAuth credentials and JWT secret in SSM Parameter Store (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`). Note that `/roadtrip-copilot/origin-verify-secret` is auto-generated as a strong 256-bit `SecureString` and saved to SSM by `./scripts/deploy_cloud.sh` if not already set.
@@ -213,6 +220,13 @@ Protect `/api/*` endpoints with zero-trust Google OpenID Connect (OIDC) authenti
   * **Infrastructure Build Cleanliness & CI Integration (P2):** Removed unused `aws_ssm as ssm` import from `roadtrip-cloud-stack.ts` (`TS6133`) and integrated `npm run build` (`tsc --noEmit`) into `scripts/ci_check.sh` under infrastructure checks.
   * **SSM Parameter Path Policy & Boundary Validation (P2):** Enforced synth-time assertion in `RoadtripCopilotCloudStack` requiring all configured SSM parameter props to begin with `/roadtrip-copilot/`, keeping IAM permissions strictly scoped to `parameter/roadtrip-copilot/*` without unnecessary multi-prefix complexity. Added rejection assertion to `roadtrip-cloud-stack.test.ts`.
 
+* **2026-10-20 — Approved Single-Row Account Menu & Bounded Session Recovery:**
+  * Replaced the inline identity/sign-out pair with `AccountMenu.tsx`: click/native keyboard activation, full name/email disclosure, Sign out, image-failure initials fallback, Escape focus restoration, and outside pointer/focus dismissal. The title now shrinks through both display and edit paths; secondary labels compact without clipping actions. Distance/drive metrics remain visible from 1280px, with elapsed-time details from 1536px.
+  * Initial and retry session checks share delayed connection feedback (750ms), an abortable 15-second whole-operation deadline, and request-generation guards. Timeout/error states remain fail-closed with Retry; only a current, successful authorization check reloads itinerary and AI readiness, once.
+  * Added Playwright acceptance coverage for all six agreed viewport widths, single/multi-leg navigation, routing/edit/dirty/saving/saved geometry, account keyboard/pointer interactions, sign-out, and timeout/retry recovery. The orchestrator independently verified **283 Vitest tests**, **22 Chromium browser tests**, strict browser-test typing, and the production build. Browser tests run separately from the unified CI script.
+  * Per user direction, `.env`/service initialization remains unchanged and deferred to later configuration/AI migration work. No infrastructure, backend, Android, or live deployment changes were made; M1 remains open pending its live verification checklist.
+  * Follow-up review also requires normal text wrapping in the schedule popover (rather than inheriting the toolbar's nonwrapping labels) and restoring avatar-trigger focus when Sign out dismisses the popover, so a failed sign-out remains keyboard-recoverable. Targeted unit/browser regressions cover these cases.
+
 ### Future Custom Domain Architecture & Setup Guide
 When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded custom domain (e.g. `copilot.roadtrip.com`):
 1. **ACM Certificate in `us-east-1`:** CloudFront distributions require viewer SSL/TLS certificates to be provisioned in `us-east-1` via AWS Certificate Manager.
@@ -227,5 +241,5 @@ When migrating from default CloudFront domains (`*.cloudfront.net`) to a branded
 
 ## 6. Next Session Handoff
 
-* **Current State:** All Milestone 1 code, review defect fixes, unit tests (`245/245` in `route-builder`, `17/17` in `infra`), CDK synthesis, and living documentation updates are complete on `feat/m1-dual-mode-oidc-auth` with an open Pull Request.
+* **Current State:** Milestone 1 implementation and the approved header/session-recovery follow-up are complete on `feat/m1-dual-mode-oidc-auth`. Latest follow-up verification: `283/283` Route Builder Vitest tests, `22/22` Chromium browser tests, strict browser-test typing, and production build. Earlier infrastructure verification (`17/17` CDK tests and synthesis) is unchanged; this follow-up did not deploy or re-verify cloud resources. The branch has an open Pull Request.
 * **Next Immediate Step:** With `/roadtrip-copilot/origin-verify-secret` created in SSM Parameter Store, populate the remaining OAuth secrets (`/roadtrip-copilot/google-client-id`, `/roadtrip-copilot/google-client-secret`, `/roadtrip-copilot/jwt-secret`, `/roadtrip-copilot/allowed-emails`), run `./scripts/deploy_cloud.sh` to deploy M1 to AWS, complete manual cloud verification, and archive `WP-01-dual-mode-oidc-auth.md`.
