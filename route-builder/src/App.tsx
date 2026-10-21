@@ -1128,10 +1128,17 @@ export function App() {
       const updatedTrip = getSynchronizedTrip();
       const serialized = serializeTripToItineraryJson(updatedTrip, { preserveTargetTimes: true });
       const fileName = updatedTrip.fileName || `${updatedTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
-      const saveRes = await saveItinerary(fileName, serialized, { ifMatch: updatedTrip.etag });
-      const snapshot = { ...updatedTrip, fileName, etag: saveRes.etag || updatedTrip.etag };
-      setTrip(snapshot);
+      const conditionalOptions = updatedTrip.etag
+        ? { ifMatch: updatedTrip.etag }
+        : { ifNoneMatch: '*' };
+      const saveRes = await saveItinerary(fileName, serialized, conditionalOptions);
       if (savedRevision !== tripRevisionRef.current) return;
+      const snapshot = { ...updatedTrip, fileName, etag: saveRes.etag || updatedTrip.etag };
+      setTrip((prev) => ({
+        ...prev,
+        fileName,
+        etag: saveRes.etag || prev.etag,
+      }));
       setLastSavedTripJson(JSON.stringify(snapshot));
       setSaveSuccess(true);
       localStorage.setItem('copilot_active_file', fileName);
@@ -1145,7 +1152,7 @@ export function App() {
         (Boolean(err) && typeof err === 'object' && (err as { status?: number }).status === 412);
       const msg = err instanceof Error ? err.message : 'Save failed';
       if (isConflict || msg.includes('412') || msg.toLowerCase().includes('precondition')) {
-        alert('Conflict detected: This itinerary has been modified elsewhere. Please reload the itinerary or save under a new name to avoid overwriting changes.');
+        alert('Conflict detected: This itinerary already exists or has been modified elsewhere. Please reload the itinerary or save under a new name to avoid overwriting changes.');
       } else {
         alert(`Save error: ${msg}`);
       }

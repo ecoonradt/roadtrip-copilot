@@ -113,11 +113,12 @@ Implement cloud-native itinerary persistence backed by Amazon S3 (`users/{email}
 1. **Non-Breaking ETag Integration on ItineraryRecord:** To preserve 100% backward compatibility with existing tests and callers expecting `Record<string, unknown>` directly from `getItinerary`, `ItineraryRecord` extends `Record<string, unknown>` with optional `_etag?: string`, `_lastModified?: string`, and `_isProtected?: boolean`. This enables Fastify routes to propagate the `ETag` HTTP response header while preserving direct property access (`itinerary.trip_name`).
 2. **Frontend Concurrency Conflict Alert:** In `App.tsx` and `RouteSelectorModal.tsx`, `saveItinerary` and `deleteItinerary` propagate `If-Match` using the itinerary's active `etag`. If a concurrent update occurs elsewhere, the backend returns HTTP 412, and the UI displays a clean, user-friendly conflict notice advising the user to reload before overwriting.
 3. **CDK `grantReadWrite` Policy Statement Action:** AWS CDK's `bucket.grantReadWrite(grantee)` produces discrete IAM actions including `'s3:PutObject'`, `'s3:PutObjectLegalHold'`, `'s3:PutObjectRetention'` rather than wildcard `'s3:PutObject*'`. CDK unit tests were calibrated to match this exact least-privilege policy structure.
+4. **Code Review Concurrency & Namespace Hardening:** Hardened S3 namespace scoping against cross-user collisions (`+` character preservation and hex percent-encoding in `getUserPrefix`), eliminated slow-save trip overwrite and state reversion in `App.tsx` via revision guards and functional state updates, enforced create-only write protection (`If-None-Match: *`) for new trips and imports, cleared foreign ETags on imported JSON and unpersisted fallback templates, ensured atomic local write/delete synchronization via in-memory keyed FIFO locks and temp file renames, added S3 continuation pagination handling, and eliminated hardcoded `us-east-1` client region defaulting.
 
 ---
 
 ## 6. Next Session Handoff
 
-* **Where We Stopped:** Milestone 2 implementation, tests, CDK assertions, and living documentation are 100% complete and verified green locally (`./scripts/ci_check.sh`). Branch `feat/m2-s3-itinerary-storage` is ready for PR creation.
-* **Next Step:** Commit changes, push branch `feat/m2-s3-itinerary-storage` to GitHub, and open pull request targeting `main`. Cloud deployment will be performed upon user instruction or CI merge.
+* **Where We Stopped:** Milestone 2 implementation, independent review fixes, comprehensive regression tests, CDK assertions, and living documentation are 100% complete and verified green locally (`./scripts/ci_check.sh` and `npm run test:browser`).
+* **Next Step:** Push branch `feat/m2-s3-itinerary-storage` to GitHub and open pull request targeting `main`. Cloud deployment will be performed upon user instruction or CI merge.
 

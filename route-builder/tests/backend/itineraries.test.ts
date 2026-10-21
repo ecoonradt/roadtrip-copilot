@@ -538,5 +538,106 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect(body.error).toMatch(/precondition failed/i);
       expect(body.error).toMatch(/ETag mismatch/i);
     });
+
+    it('enforces atomic concurrent conditional writes with same ETag (exactly one succeeds)', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await storageService.saveItinerary('race_condition.json', { trip_name: 'Initial State' });
+      const initialEtag = initial.etag;
+
+      // Two concurrent saves with the same original ETag
+      const results = await Promise.allSettled([
+        storageService.saveItinerary('race_condition.json', { trip_name: 'Update A' }, { ifMatch: initialEtag }),
+        storageService.saveItinerary('race_condition.json', { trip_name: 'Update B' }, { ifMatch: initialEtag }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('enforces atomic concurrent create-only writes (If-None-Match: *) (exactly one succeeds)', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      // Two concurrent creates with If-None-Match: * for the same non-existent file
+      const results = await Promise.allSettled([
+        storageService.saveItinerary('concurrent_create.json', { trip_name: 'Create A' }, { ifNoneMatch: '*' }),
+        storageService.saveItinerary('concurrent_create.json', { trip_name: 'Create B' }, { ifNoneMatch: '*' }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('enforces atomic concurrent conditional deletes with same ETag (exactly one succeeds)', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await storageService.saveItinerary('concurrent_delete.json', { trip_name: 'To Delete' });
+      const etag = initial.etag;
+
+      const results = await Promise.allSettled([
+        storageService.deleteItinerary('concurrent_delete.json', { ifMatch: etag }),
+        storageService.deleteItinerary('concurrent_delete.json', { ifMatch: etag }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('returns _etag undefined when loaded from secondary directory, allowing first save with If-None-Match: *', async () => {
+      const secondaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-secondary-'));
+      try {
+        await fs.writeFile(
+          path.join(secondaryDir, 'secondary_sample.json'),
+          JSON.stringify({ trip_name: 'Secondary Sample', checkpoints: [] }, null, 2),
+          'utf-8'
+        );
+
+        const storageService = new ItineraryStorageService({
+          storageDirectories: [tempDir, secondaryDir],
+          primaryWriteDirectory: tempDir,
+        });
+
+        // Loaded from secondary directory: _etag must be undefined because it doesn't exist in primaryWriteDirectory
+        const loaded = await storageService.getItinerary('secondary_sample.json');
+        expect(loaded).toBeDefined();
+        expect(loaded?._isProtected).toBe(true);
+        expect(loaded?._etag).toBeUndefined();
+
+        // Saving to primary directory with If-None-Match: * succeeds
+        const saved = await storageService.saveItinerary(
+          'secondary_sample.json',
+          { trip_name: 'Secondary Sample Promoted', checkpoints: [] },
+          { ifNoneMatch: '*' }
+        );
+        expect(saved.success).toBe(true);
+        expect(saved.etag).toBeDefined();
+
+        // Now it exists in primary directory, so getItinerary returns the primary etag
+        const loadedPrimary = await storageService.getItinerary('secondary_sample.json');
+        expect(loadedPrimary?._etag).toBe(saved.etag);
+      } finally {
+        await fs.rm(secondaryDir, { recursive: true, force: true });
+      }
+    });
   });
 });

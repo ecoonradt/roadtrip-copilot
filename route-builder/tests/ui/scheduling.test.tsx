@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, saved, exportProps, exported } from './harness';
+import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, saved, exportProps, exported, points } from './harness';
 import { calculateTimelineCascade, detectTimezone, parseLocalToUtcEpoch } from '../../src/engine/cascade';
 import { formatMultiDayItinerary, type SingleRouteItineraryV2 } from '../../src/engine/export';
 import { parseItineraryJson } from '../../src/engine/itineraryParser';
@@ -230,5 +230,66 @@ describe('Scheduling acceptance workflows', () => {
     expect(header(app).cascadeResult.stops[2].arrivalTime).toBe('12:00:00');
     expect(new URL(window.location.href).searchParams.get('day')).toBe('1');
     expect(header(app).isDirty).toBe(true);
+  });
+
+  it('does not restore trip A when switching to trip B during trip A slow save', async () => {
+    let finish!: () => void;
+    api.saveItinerary.mockReturnValue(new Promise<void>((resolve) => { finish = resolve }));
+    const app = await mountApp();
+    let saving!: Promise<void>;
+    await act(async () => { saving = header(app).onSaveTrip() });
+
+    // While saving trip A, user selects trip B
+    const tripB = parseItineraryJson(
+      {
+        trip_name: 'Trip B Destination',
+        days: [
+          {
+            dayNumber: 1,
+            date: '2026-10-15',
+            departureTime: '10:00:00',
+            waypoints: points(1),
+          },
+        ],
+      },
+      'trip_b.json'
+    );
+    await act(async () => { selectTrip(app, tripB) });
+
+    expect(trip(app).tripName).toBe('Trip B Destination');
+    expect(new URL(window.location.href).searchParams.get('route')).toBe('trip_b.json');
+
+    // Trip A's save resolves
+    await act(async () => { finish(); await saving });
+
+    // Active trip MUST STILL be Trip B, NOT restored to Trip A
+    expect(trip(app).tripName).toBe('Trip B Destination');
+    expect(new URL(window.location.href).searchParams.get('route')).toBe('trip_b.json');
+  });
+
+  it('sends If-None-Match: * on save when trip has no etag, and If-Match when etag is present', async () => {
+    const app = await mountApp();
+
+    // Fresh trip without etag
+    const tripWithoutEtag = { ...trip(app), etag: undefined };
+    await act(async () => { selectTrip(app, tripWithoutEtag) });
+    await act(async () => { await header(app).onSaveTrip() });
+
+    expect(api.saveItinerary).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      { ifNoneMatch: '*' }
+    );
+
+    // Trip with etag
+    const tripWithEtag = { ...trip(app), etag: '"etag-12345"' };
+    await act(async () => { selectTrip(app, tripWithEtag) });
+    await act(async () => { await header(app).onSaveTrip() });
+
+    expect(api.saveItinerary).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(Object),
+      { ifMatch: '"etag-12345"' }
+    );
   });
 });

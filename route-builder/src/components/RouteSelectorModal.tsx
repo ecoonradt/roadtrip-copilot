@@ -163,7 +163,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
     if (!importedJson) return;
     try {
       const raw = JSON.parse(importedJson) as unknown;
-      const parsed = parseItineraryJson(raw, importFileName);
+      const parsed = parseItineraryJson(raw, importFileName, { isImport: true });
       onSelectTrip(parsed);
       onClose();
     } catch (err: unknown) {

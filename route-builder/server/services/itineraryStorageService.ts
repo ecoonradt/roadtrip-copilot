@@ -258,6 +258,29 @@ function isPreconditionFailedError(err: unknown): boolean {
   );
 }
 
+class FileKeyedLock {
+  private queues = new Map<string, Promise<unknown>>();
+
+  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.queues.get(key) || Promise.resolve();
+    let resolveNext!: () => void;
+    const next = new Promise<void>((resolve) => {
+      resolveNext = resolve;
+    });
+    this.queues.set(key, next);
+
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      resolveNext();
+      if (this.queues.get(key) === next) {
+        this.queues.delete(key);
+      }
+    }
+  }
+}
+
 export interface LocalFileSystemStorageOptions {
   storageDirectories?: string[];
   primaryWriteDirectory?: string;
@@ -266,6 +289,7 @@ export interface LocalFileSystemStorageOptions {
 export class LocalFileSystemStorageService implements IItineraryStorageService {
   private storageDirectories: string[];
   private primaryWriteDirectory: string;
+  private fileLock = new FileKeyedLock();
 
   constructor(options: LocalFileSystemStorageOptions = {}) {
     const defaultRoot = path.resolve(process.cwd(), '..');
@@ -309,7 +333,6 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
           try {
             const rawContent = await fs.readFile(filePath, 'utf-8');
             const data = JSON.parse(rawContent) as Record<string, unknown>;
-
             if (!isItineraryData(data)) {
               continue;
             }
@@ -317,7 +340,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
             const stat = await fs.stat(filePath);
             const isPrimary = path.resolve(dir) === path.resolve(this.primaryWriteDirectory);
             const isProtected = !isPrimary || entry.name === 'sample_itinerary.json';
-            const etag = computeLocalEtag(rawContent);
+            const etag = isPrimary ? computeLocalEtag(rawContent) : undefined;
             const summary = extractMetadataSummary(
               entry.name,
               data,
@@ -357,7 +380,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
         const data = JSON.parse(raw) as ItineraryRecord;
         const stat = await fs.stat(filePath);
         const isPrimary = path.resolve(dir) === path.resolve(this.primaryWriteDirectory);
-        data._etag = computeLocalEtag(raw);
+        data._etag = isPrimary ? computeLocalEtag(raw) : undefined;
         data._lastModified = stat.mtime.toISOString();
         data._isProtected = !isPrimary || safeName === 'sample_itinerary.json';
         return data;
@@ -381,59 +404,63 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
 
-    let existingContent: string | null = null;
-    let existingEtag: string | null = null;
-    try {
-      existingContent = await fs.readFile(targetPath, 'utf-8');
-      existingEtag = computeLocalEtag(existingContent);
-    } catch {
-      // File does not exist yet
-    }
-
-    if (options?.ifNoneMatch) {
-      if (options.ifNoneMatch === '*' && existingContent !== null) {
-        throw new PreconditionFailedError(
-          `Precondition failed: Resource already exists (If-None-Match: *)`
-        );
+    return this.fileLock.runExclusive(targetPath, async () => {
+      let existingContent: string | null = null;
+      let existingEtag: string | null = null;
+      try {
+        existingContent = await fs.readFile(targetPath, 'utf-8');
+        existingEtag = computeLocalEtag(existingContent);
+      } catch {
+        // File does not exist yet
       }
-      if (
-        options.ifNoneMatch !== '*' &&
-        existingEtag &&
-        normalizeEtag(existingEtag) === normalizeEtag(options.ifNoneMatch)
-      ) {
-        throw new PreconditionFailedError(
-          `Precondition failed: Resource matches If-None-Match: ${options.ifNoneMatch}`
-        );
-      }
-    }
 
-    if (options?.ifMatch) {
-      if (existingContent === null) {
-        throw new PreconditionFailedError(
-          `Precondition failed: Resource does not exist for If-Match: ${options.ifMatch}`
-        );
+      if (options?.ifNoneMatch) {
+        if (options.ifNoneMatch === '*' && existingContent !== null) {
+          throw new PreconditionFailedError(
+            `Precondition failed: Resource already exists (If-None-Match: *)`
+          );
+        }
+        if (
+          options.ifNoneMatch !== '*' &&
+          existingEtag &&
+          normalizeEtag(existingEtag) === normalizeEtag(options.ifNoneMatch)
+        ) {
+          throw new PreconditionFailedError(
+            `Precondition failed: Resource matches If-None-Match: ${options.ifNoneMatch}`
+          );
+        }
       }
-      if (
-        options.ifMatch !== '*' &&
-        existingEtag &&
-        normalizeEtag(existingEtag) !== normalizeEtag(options.ifMatch)
-      ) {
-        throw new PreconditionFailedError(
-          `Precondition failed: ETag mismatch for If-Match (existing ${existingEtag} does not match ${options.ifMatch})`
-        );
+
+      if (options?.ifMatch) {
+        if (existingContent === null) {
+          throw new PreconditionFailedError(
+            `Precondition failed: Resource does not exist for If-Match: ${options.ifMatch}`
+          );
+        }
+        if (
+          options.ifMatch !== '*' &&
+          existingEtag &&
+          normalizeEtag(existingEtag) !== normalizeEtag(options.ifMatch)
+        ) {
+          throw new PreconditionFailedError(
+            `Precondition failed: ETag mismatch for If-Match (existing ${existingEtag} does not match ${options.ifMatch})`
+          );
+        }
       }
-    }
 
-    const jsonString = JSON.stringify(content, null, 2);
-    await fs.writeFile(targetPath, jsonString, 'utf-8');
-    const newEtag = computeLocalEtag(jsonString);
+      const jsonString = JSON.stringify(content, null, 2);
+      const tempPath = `${targetPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+      await fs.writeFile(tempPath, jsonString, 'utf-8');
+      await fs.rename(tempPath, targetPath);
+      const newEtag = computeLocalEtag(jsonString);
 
-    return {
-      success: true,
-      fileName: safeName,
-      filePath: targetPath,
-      etag: newEtag,
-    };
+      return {
+        success: true,
+        fileName: safeName,
+        filePath: targetPath,
+        etag: newEtag,
+      };
+    });
   }
 
   async deleteItinerary(
@@ -451,31 +478,33 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
 
-    let existingContent: string;
-    try {
-      existingContent = await fs.readFile(targetPath, 'utf-8');
-    } catch {
-      throw new Error(`Itinerary "${safeName}" not found in writable storage`);
-    }
-
-    if (options?.ifMatch) {
-      const existingEtag = computeLocalEtag(existingContent);
-      if (
-        options.ifMatch !== '*' &&
-        normalizeEtag(existingEtag) !== normalizeEtag(options.ifMatch)
-      ) {
-        throw new PreconditionFailedError(
-          `Precondition failed: ETag mismatch for If-Match (existing ${existingEtag} does not match ${options.ifMatch})`
-        );
+    return this.fileLock.runExclusive(targetPath, async () => {
+      let existingContent: string;
+      try {
+        existingContent = await fs.readFile(targetPath, 'utf-8');
+      } catch {
+        throw new Error(`Itinerary "${safeName}" not found in writable storage`);
       }
-    }
 
-    await fs.unlink(targetPath);
+      if (options?.ifMatch) {
+        const existingEtag = computeLocalEtag(existingContent);
+        if (
+          options.ifMatch !== '*' &&
+          normalizeEtag(existingEtag) !== normalizeEtag(options.ifMatch)
+        ) {
+          throw new PreconditionFailedError(
+            `Precondition failed: ETag mismatch for If-Match (existing ${existingEtag} does not match ${options.ifMatch})`
+          );
+        }
+      }
 
-    return {
-      success: true,
-      fileName: safeName,
-    };
+      await fs.unlink(targetPath);
+
+      return {
+        success: true,
+        fileName: safeName,
+      };
+    });
   }
 }
 
@@ -498,10 +527,11 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
         'S3ItineraryStorageService requires bucketName option or S3_STORAGE_BUCKET environment variable'
       );
     }
+    const region = options.region || process.env.AWS_REGION;
     this.client =
       options.s3Client ||
       new S3Client({
-        region: options.region || process.env.AWS_REGION || 'us-east-1',
+        ...(region ? { region } : {}),
       });
 
     const defaultRoot = path.resolve(process.cwd(), '..');
@@ -515,10 +545,10 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
   }
 
   getUserPrefix(userEmail?: string): string {
-    const safeEmail = (userEmail || 'local-dev@localhost')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9.@_-]/g, '_');
+    const rawEmail = (userEmail || 'local-dev@localhost').trim().toLowerCase();
+    const safeEmail = rawEmail.replace(/[^a-z0-9.@+_-]/g, (c) => {
+      return `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
+    });
     return `users/${safeEmail}/itineraries/`;
   }
 
@@ -527,18 +557,25 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
     const results: ItineraryMetadataSummary[] = [];
 
     let contents: { Key?: string; ETag?: string; LastModified?: Date }[] = [];
-    try {
-      const res = await this.client.send(
-        new ListObjectsV2Command({
-          Bucket: this.bucketName,
-          Prefix: prefix,
-        })
-      );
-      contents = res.Contents || [];
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to list itineraries from S3 (${this.bucketName}): ${msg}`);
-    }
+    let continuationToken: string | undefined;
+    do {
+      try {
+        const res = await this.client.send(
+          new ListObjectsV2Command({
+            Bucket: this.bucketName,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          })
+        );
+        if (res.Contents) {
+          contents.push(...res.Contents);
+        }
+        continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Failed to list itineraries from S3 (${this.bucketName}): ${msg}`);
+      }
+    } while (continuationToken);
 
     const jsonItems = contents.filter(
       (item) => typeof item.Key === 'string' && item.Key.endsWith('.json')
@@ -591,7 +628,7 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
               data,
               stat.mtime.toISOString(),
               true,
-              computeLocalEtag(raw)
+              undefined
             );
             results.push(summary);
             break;
@@ -641,7 +678,7 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
               const raw = await fs.readFile(samplePath, 'utf-8');
               const data = JSON.parse(raw) as ItineraryRecord;
               const stat = await fs.stat(samplePath);
-              data._etag = computeLocalEtag(raw);
+              data._etag = undefined;
               data._lastModified = stat.mtime.toISOString();
               data._isProtected = true;
               return data;

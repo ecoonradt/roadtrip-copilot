@@ -34,6 +34,7 @@ interface S3CommandLike {
 class MockS3Client {
   public store = new Map<string, MockS3Object>();
   public calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+  public pageSize?: number;
 
   async send<T = unknown>(command: unknown): Promise<T> {
     const cmd = command as S3CommandLike;
@@ -44,7 +45,20 @@ class MockS3Client {
     if (name === 'ListObjectsV2Command') {
       const prefix = input.Prefix || '';
       const matchingKeys = Array.from(this.store.keys()).filter((k) => k.startsWith(prefix));
-      const contents = matchingKeys.map((key) => {
+      const limit =
+        typeof input.MaxKeys === 'number'
+          ? input.MaxKeys
+          : this.pageSize && this.pageSize > 0
+          ? this.pageSize
+          : matchingKeys.length;
+      const startIndex =
+        typeof input.ContinuationToken === 'string'
+          ? parseInt(input.ContinuationToken, 10)
+          : 0;
+      const pageKeys = matchingKeys.slice(startIndex, startIndex + limit);
+      const isTruncated = startIndex + limit < matchingKeys.length;
+      const nextContinuationToken = isTruncated ? String(startIndex + limit) : undefined;
+      const contents = pageKeys.map((key) => {
         const obj = this.store.get(key)!;
         return {
           Key: key,
@@ -56,7 +70,8 @@ class MockS3Client {
       return {
         Contents: contents,
         KeyCount: contents.length,
-        IsTruncated: false,
+        IsTruncated: isTruncated,
+        NextContinuationToken: nextContinuationToken,
       } as T;
     }
 
@@ -179,7 +194,7 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       process.env.S3_STORAGE_BUCKET = orig;
     });
 
-    it('sanitizes user email into safe S3 key prefix', () => {
+    it('sanitizes user email into safe S3 key prefix without namespace collisions', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
@@ -187,15 +202,24 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       });
 
       expect(service.getUserPrefix('Driver+Test@Example.COM')).toBe(
+        'users/driver+test@example.com/itineraries/'
+      );
+      expect(service.getUserPrefix('driver_test@example.com')).toBe(
         'users/driver_test@example.com/itineraries/'
+      );
+      expect(service.getUserPrefix('Driver+Test@Example.COM')).not.toBe(
+        service.getUserPrefix('driver_test@example.com')
       );
       expect(service.getUserPrefix(undefined)).toBe('users/local-dev@localhost/itineraries/');
       expect(service.getUserPrefix('normal.user-123@sub.domain.org')).toBe(
         'users/normal.user-123@sub.domain.org/itineraries/'
       );
+      expect(service.getUserPrefix('../../malicious@domain.com')).toBe(
+        'users/..%2F..%2Fmalicious@domain.com/itineraries/'
+      );
     });
 
-    it('lists itineraries scoped to user prefix and appends bundled sample_itinerary.json as protected', async () => {
+    it('lists itineraries scoped to user prefix and appends bundled sample_itinerary.json as protected without etag', async () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
@@ -227,11 +251,36 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(sampleRoute).toBeDefined();
       expect(sampleRoute?.isProtected).toBe(true);
       expect(sampleRoute?.tripName).toBe('Bundled Sample Itinerary');
+      expect(sampleRoute?.etag).toBeUndefined();
 
       // List for user2: should only have the bundled sample, not user1's route
       const listUser2 = await service.listItineraries('user2@example.com');
       expect(listUser2).toHaveLength(1);
       expect(listUser2[0].fileName).toBe('sample_itinerary.json');
+    });
+
+    it('paginates through multiple pages of S3 objects when IsTruncated is true', async () => {
+      mockS3.pageSize = 2;
+      const service = new S3ItineraryStorageService({
+        bucketName: 'test-bucket',
+        s3Client: mockS3 as unknown as S3Client,
+        fallbackDirectories: [tempFallbackDir],
+      });
+
+      for (let i = 1; i <= 5; i++) {
+        await service.saveItinerary(
+          `trip_${i}.json`,
+          { trip_name: `Trip ${i}`, checkpoints: [] },
+          { userEmail: 'paginated@example.com' }
+        );
+      }
+
+      const list = await service.listItineraries('paginated@example.com');
+      // 5 user trips + 1 bundled sample
+      expect(list).toHaveLength(6);
+      const listCalls = mockS3.calls.filter((c) => c.name === 'ListObjectsV2Command');
+      expect(listCalls.length).toBeGreaterThanOrEqual(3);
+      mockS3.pageSize = undefined;
     });
 
     it('retrieves user itinerary from S3 with _etag and _lastModified', async () => {
@@ -259,7 +308,7 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(notFoundOtherUser).toBeNull();
     });
 
-    it('retrieves bundled sample_itinerary.json from fallback directory with _isProtected: true when not in S3', async () => {
+    it('retrieves bundled sample_itinerary.json from fallback directory with _isProtected: true and _etag undefined when not in S3, and allows fresh saving', async () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
@@ -270,7 +319,34 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(sample).toBeDefined();
       expect(sample?.trip_name).toBe('Bundled Sample Itinerary');
       expect(sample?._isProtected).toBe(true);
-      expect(sample?._etag).toBeDefined();
+      expect(sample?._etag).toBeUndefined();
+
+      // Fresh user can save this sample with If-None-Match: * into S3 without 412
+      const firstSave = await service.saveItinerary(
+        'sample_itinerary.json',
+        { trip_name: 'My Custom Sample', checkpoints: [] },
+        { userEmail: 'anybody@example.com', ifNoneMatch: '*' }
+      );
+      expect(firstSave.success).toBe(true);
+      expect(firstSave.etag).toBeDefined();
+
+      // Subsequent retrieval has the S3 ETag
+      const retrievedAfterSave = await service.getItinerary('sample_itinerary.json', 'anybody@example.com');
+      expect(retrievedAfterSave?._etag).toBe(firstSave.etag);
+    });
+
+    it('does not hardcode us-east-1 when region option and AWS_REGION are unset', () => {
+      const origRegion = process.env.AWS_REGION;
+      delete process.env.AWS_REGION;
+      try {
+        const service = new S3ItineraryStorageService({
+          bucketName: 'test-bucket',
+          s3Client: mockS3 as unknown as S3Client,
+        });
+        expect(service).toBeDefined();
+      } finally {
+        if (origRegion) process.env.AWS_REGION = origRegion;
+      }
     });
 
     it('enforces If-None-Match: * on saveItinerary: rejects when object already exists', async () => {
