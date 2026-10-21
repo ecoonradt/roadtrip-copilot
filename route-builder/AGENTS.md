@@ -53,6 +53,11 @@
 * **Session Recovery:** Startup and retry checks remain fail-closed, with delayed connection feedback, a 15-second deadline, and a connection-error Retry action. Superseded requests must not replace the current session state.
 * **Runtime SSM Secret Resolution:** Resolves `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, and `ALLOWED_EMAILS` from direct environment variables first, falling back to cached AWS SSM Parameter Store `SecureString` lookups (`/roadtrip-copilot/*`) on Lambda cold start.
 
+### H. Amazon S3 Atomic Itinerary Persistence & ETag Concurrency Safety
+* **Dual-Mode Persistence (`S3_STORAGE_BUCKET`):** When `S3_STORAGE_BUCKET` is configured, `ItineraryStorageService` delegates to `S3ItineraryStorageService` (`s3://<bucket>/users/{email}/itineraries/{slug}.json`), scoping itineraries to the authenticated user's email prefix while retaining fallback read access to the bundled `sample_itinerary.json`.
+* **Hybrid Local Dev Isolation:** When `S3_STORAGE_BUCKET` is unset (default in `npm run dev` and automated tests), `ItineraryStorageService` delegates to `LocalFileSystemStorageService` (`itineraries/*.json`), ensuring local development never touches or corrupts production S3 data.
+* **Atomic Conditional Writes (`ETag` / `If-Match` / `If-None-Match`):** Both storage backends and `/api/itineraries/*` endpoints enforce HTTP `ETag` headers and conditional writes (`If-Match` and `If-None-Match: *`). Stale writes and race conditions are safely rejected with `HTTP 412 Precondition Failed`.
+
 ---
 
 ## 3. Directory Layout

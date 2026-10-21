@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ItineraryStorageService } from '../../server/services/itineraryStorageService.js';
+import {
+  ItineraryStorageService,
+  PreconditionFailedError,
+  normalizeEtag,
+} from '../../server/services/itineraryStorageService.js';
 import { createApp } from '../../server/app.js';
 
 describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
@@ -182,6 +186,93 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
         /not found/i
       );
     });
+
+    it('computes and returns ETag on get and save', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saveRes = await service.saveItinerary('etag_test.json', { trip_name: 'ETag Route' });
+      expect(saveRes.etag).toBeDefined();
+      expect(saveRes.etag?.startsWith('"')).toBe(true);
+
+      const loaded = await service.getItinerary('etag_test.json');
+      expect(loaded?._etag).toBe(saveRes.etag);
+    });
+
+    it('enforces If-Match on saveItinerary: throws PreconditionFailedError on mismatch', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await service.saveItinerary('if_match_test.json', { trip_name: 'Initial' });
+
+      // Mismatched ETag should fail
+      await expect(
+        service.saveItinerary(
+          'if_match_test.json',
+          { trip_name: 'Updated' },
+          { ifMatch: '"wrong-etag"' }
+        )
+      ).rejects.toThrow(PreconditionFailedError);
+
+      // Correct ETag should succeed
+      const updated = await service.saveItinerary(
+        'if_match_test.json',
+        { trip_name: 'Updated' },
+        { ifMatch: initial.etag }
+      );
+      expect(updated.success).toBe(true);
+      expect(updated.etag).not.toBe(initial.etag);
+    });
+
+    it('enforces If-None-Match: * on saveItinerary: throws PreconditionFailedError if file already exists', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await service.saveItinerary('existing.json', { trip_name: 'Initial' });
+
+      await expect(
+        service.saveItinerary('existing.json', { trip_name: 'Overwritten' }, { ifNoneMatch: '*' })
+      ).rejects.toThrow(PreconditionFailedError);
+
+      // Should succeed on a brand new file
+      const newFileRes = await service.saveItinerary(
+        'brand_new.json',
+        { trip_name: 'New' },
+        { ifNoneMatch: '*' }
+      );
+      expect(newFileRes.success).toBe(true);
+    });
+
+    it('enforces If-Match on deleteItinerary: throws PreconditionFailedError on mismatch', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saved = await service.saveItinerary('delete_match.json', { trip_name: 'To Delete' });
+
+      await expect(
+        service.deleteItinerary('delete_match.json', { ifMatch: '"wrong-etag"' })
+      ).rejects.toThrow(PreconditionFailedError);
+
+      const delRes = await service.deleteItinerary('delete_match.json', { ifMatch: saved.etag });
+      expect(delRes.success).toBe(true);
+    });
+
+    it('normalizeEtag handles quotes and weak etags correctly', () => {
+      expect(normalizeEtag('"abcdef"')).toBe('abcdef');
+      expect(normalizeEtag("'abcdef'")).toBe('abcdef');
+      expect(normalizeEtag('W/"abcdef"')).toBe('abcdef');
+      expect(normalizeEtag('abcdef')).toBe('abcdef');
+      expect(normalizeEtag('')).toBe('');
+      expect(normalizeEtag(undefined)).toBe('');
+    });
   });
 
   describe('Fastify Endpoints Integration', () => {
@@ -320,6 +411,131 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect(response.statusCode).toBe(404);
       const body = JSON.parse(response.body) as { error: string };
       expect(body.error).toMatch(/not found/i);
+    });
+
+    it('GET /api/itineraries/:filename returns 200 and sets ETag response header', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saved = await storageService.saveItinerary('api_etag.json', { trip_name: 'Header Test' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/itineraries/api_etag.json',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['etag']).toBe(saved.etag);
+      const body = JSON.parse(response.body) as { _etag: string; trip_name: string };
+      expect(body._etag).toBe(saved.etag);
+      expect(body.trip_name).toBe('Header Test');
+    });
+
+    it('POST /api/itineraries/:filename with mismatched If-Match returns 412 Precondition Failed', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await storageService.saveItinerary('concurrent.json', { trip_name: 'Original' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/itineraries/concurrent.json',
+        headers: {
+          'if-match': '"stale-etag-123"',
+        },
+        payload: {
+          content: { trip_name: 'Conflicting Edit' },
+        },
+      });
+
+      expect(response.statusCode).toBe(412);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/ETag mismatch/i);
+    });
+
+    it('POST /api/itineraries/:filename with valid If-Match returns 200 and updated ETag header', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await storageService.saveItinerary('concurrent_ok.json', {
+        trip_name: 'Original',
+      });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/itineraries/concurrent_ok.json',
+        headers: {
+          'if-match': initial.etag!,
+        },
+        payload: {
+          content: { trip_name: 'Updated Edit' },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['etag']).toBeDefined();
+      expect(response.headers['etag']).not.toBe(initial.etag);
+    });
+
+    it('POST /api/itineraries/:filename with If-None-Match: * returns 412 if already exists', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await storageService.saveItinerary('existing_create.json', { trip_name: 'Original' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/itineraries/existing_create.json',
+        headers: {
+          'if-none-match': '*',
+        },
+        payload: {
+          content: { trip_name: 'Should Fail' },
+        },
+      });
+
+      expect(response.statusCode).toBe(412);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/already exists/i);
+    });
+
+    it('DELETE /api/itineraries/:filename with mismatched If-Match returns 412', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await storageService.saveItinerary('delete_etag_fail.json', { trip_name: 'Delete Guard' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/itineraries/delete_etag_fail.json',
+        headers: {
+          'if-match': '"obsolete-etag"',
+        },
+      });
+
+      expect(response.statusCode).toBe(412);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/ETag mismatch/i);
     });
   });
 });

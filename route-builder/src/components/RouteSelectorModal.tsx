@@ -123,7 +123,8 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
     setIsDeletingFile(fileName);
     setError(null);
     try {
-      await deleteItinerary(fileName);
+      const targetRoute = workspaceRoutes.find((r) => r.fileName === fileName);
+      await deleteItinerary(fileName, { ifMatch: targetRoute?.etag });
       setWorkspaceRoutes((prev) => prev.filter((r) => r.fileName !== fileName));
       setConfirmDeleteFile(null);
       if (onDeleteTrip) {

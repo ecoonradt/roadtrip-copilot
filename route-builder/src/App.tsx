@@ -1127,9 +1127,9 @@ export function App() {
       const updatedTrip = getSynchronizedTrip();
       const serialized = serializeTripToItineraryJson(updatedTrip, { preserveTargetTimes: true });
       const fileName = updatedTrip.fileName || `${updatedTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
-      const snapshot = { ...updatedTrip, fileName };
+      const saveRes = await saveItinerary(fileName, serialized, { ifMatch: updatedTrip.etag });
+      const snapshot = { ...updatedTrip, fileName, etag: saveRes.etag || updatedTrip.etag };
       setTrip(snapshot);
-      await saveItinerary(fileName, serialized);
       if (savedRevision !== tripRevisionRef.current) return;
       setLastSavedTripJson(JSON.stringify(snapshot));
       setSaveSuccess(true);
@@ -1140,7 +1140,11 @@ export function App() {
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Save failed';
-      alert(`Save error: ${msg}`);
+      if (msg.includes('412') || msg.toLowerCase().includes('precondition')) {
+        alert('Conflict detected: This itinerary has been modified elsewhere. Please reload the itinerary or save under a new name to avoid overwriting changes.');
+      } else {
+        alert(`Save error: ${msg}`);
+      }
     } finally {
       setIsSaving(false);
     }

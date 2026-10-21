@@ -27,6 +27,7 @@ export interface ParsedTrip {
   google_maps_url?: string;
   days: ParsedDay[];
   isAdHoc?: boolean;
+  etag?: string;
 }
 
 function parseSchedulingMode(value: unknown): SchedulingMode | undefined {
@@ -229,6 +230,7 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     google_maps_url: typeof data.google_maps_url === 'string' ? data.google_maps_url : parsedDays[0]?.google_maps_url,
     days: parsedDays,
     isAdHoc: isTripAdHoc,
+    etag: typeof data._etag === 'string' ? data._etag : undefined,
   };
 }
 

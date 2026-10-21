@@ -12,6 +12,7 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
 * **AI Heads-Up Generation:** Instant generation of Android Auto heads-up cards (titles up to 30 characters, messages up to 2 lines) and natural spoken phonetic TTS scripts (15-25 words, spoken within 8-12 seconds) with trigger radii clamped between 0.3 and 6.0 miles.
 * **Multi-Stop Google Maps Navigation Links:** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are automatically partitioned into continuous driving legs with dedicated QR codes.
 * **1-Click Device Handoff:** Directly push itineraries to connected Android phones over ADB, download via local Wi-Fi QR codes, or export JSON files for Android Storage Access Framework (SAF) import.
+* **Atomic Cloud & Local Persistence:** Multi-day itineraries are persisted either in Amazon S3 (`users/{email}/itineraries/*.json`) with conditional write safety (`If-Match` / `If-None-Match` & `ETag`) when `S3_STORAGE_BUCKET` is configured, or on local disk (`itineraries/*.json`) for isolated offline development.
 * **Compact Account Controls:** The single-row header keeps planning actions in view. Click your avatar or initials in the top-right for your name, email, and Sign out; the popover also supports keyboard navigation.
 
 ---

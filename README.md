@@ -171,7 +171,7 @@ For complete documentation on route authoring, AI model configuration, test suit
 ### Cloud Deployment & CI/CD (AWS CDK)
 
 The Route Builder Web Studio can also be deployed to AWS as a serverless application using AWS CDK (`infra/`):
-* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming, protected by stateless dual-mode Google OIDC authentication (`ALLOWED_EMAILS` allowlist + SSM Parameter Store `SecureString` secrets).
+* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming, protected by stateless dual-mode Google OIDC authentication (`ALLOWED_EMAILS` allowlist + SSM Parameter Store `SecureString` secrets), with atomic user itinerary persistence in Amazon S3 (`users/{email}/itineraries/*.json`) and ETag concurrency safety.
 * **Verification Pipeline:**
   ```bash
   ./scripts/ci_check.sh
