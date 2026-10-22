@@ -37,6 +37,43 @@ export AWS_REGION
 export CDK_DEFAULT_REGION="$AWS_REGION"
 echo "Deploying to AWS Region: $AWS_REGION"
 
+# 2b. Authenticate Docker to Amazon ECR Public before any image build.
+# The Fastify container pulls public base images from `public.ecr.aws` (the Node runtime
+# and the AWS Lambda Web Adapter extension). Anonymous pulls share a single, non-adjustable
+# monthly data quota per source IP (Amazon ECR Public service quotas), which GitHub-hosted
+# runners exhaust collectively, surfacing as:
+#   429 Too Many Requests - toomanyrequests: Data limit exceeded
+# Authenticating with an ECR Public authorization token raises that limit (ADR-0009).
+#
+# `us-east-1` is mandatory, not the deployment Region: the Amazon ECR Public registry is a
+# global service and its GetAuthorizationToken API rejects every other Region with
+# "GetAuthorizationToken command is only supported in us-east-1". The returned token is then
+# valid for `public.ecr.aws` pulls regardless of where the stack lives. No resources are
+# created in us-east-1.
+#
+# Best-effort by design: the IAM grant that enables this arrives with the stack update that
+# itself needs a container build, so the first deploy without it must still be able to run
+# (falling back to anonymous, rate-limited pulls) instead of deadlocking.
+ECR_PUBLIC_REGION="us-east-1"
+ECR_PUBLIC_REGISTRY="public.ecr.aws"
+if ! aws ecr-public help >/dev/null 2>&1; then
+  echo "Warning: this AWS CLI has no 'ecr-public' command; cannot authenticate to ${ECR_PUBLIC_REGISTRY}." >&2
+  echo "Upgrade to AWS CLI v2. Falling back to anonymous pulls (shared monthly data quota, HTTP 429 risk)." >&2
+elif ECR_PUBLIC_AUTH="$(aws ecr-public get-login-password --region "$ECR_PUBLIC_REGION" 2>&1)"; then
+  if printf '%s' "$ECR_PUBLIC_AUTH" | docker login --username AWS --password-stdin "$ECR_PUBLIC_REGISTRY" >/dev/null 2>&1; then
+    echo "Authenticated Docker to ${ECR_PUBLIC_REGISTRY} (Amazon ECR Public) to avoid anonymous pull limits."
+  else
+    echo "Warning: Docker rejected the Amazon ECR Public credentials for ${ECR_PUBLIC_REGISTRY}." >&2
+    echo "Falling back to anonymous pulls (shared monthly data quota, HTTP 429 risk)." >&2
+  fi
+else
+  echo "Warning: could not obtain an Amazon ECR Public authorization token." >&2
+  echo "Reason: $(printf '%s' "$ECR_PUBLIC_AUTH" | tr -s '\n' ' ' | sed 's/^ //')" >&2
+  echo "The deploy identity needs 'ecr-public:GetAuthorizationToken' and 'sts:GetServiceBearerToken'." >&2
+  echo "Falling back to anonymous pulls (shared monthly data quota, HTTP 429 risk)." >&2
+fi
+unset ECR_PUBLIC_AUTH
+
 export ALLOWED_HOSTS="${ALLOWED_HOSTS:-}"
 export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
 if [ -n "${ORIGIN_VERIFY_SECRET:-}" ]; then

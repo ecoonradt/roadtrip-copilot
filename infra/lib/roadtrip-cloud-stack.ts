@@ -297,6 +297,17 @@ function handler(event) {
           }),
         );
 
+        // Authenticated Amazon ECR Public pulls for the container build (ADR-0009).
+        // Anonymous `public.ecr.aws` pulls share a non-adjustable monthly data quota per
+        // source IP, which GitHub-hosted runners exhaust collectively, failing the
+        // `DockerImageFunction` asset build with "429 Too Many Requests".
+        target.addToPolicy(
+          new iam.PolicyStatement({
+            actions: ['ecr-public:GetAuthorizationToken', 'sts:GetServiceBearerToken'],
+            resources: ['*'],
+          }),
+        );
+
         this.staticSiteBucket.grantReadWrite(target);
 
         target.addToPolicy(
