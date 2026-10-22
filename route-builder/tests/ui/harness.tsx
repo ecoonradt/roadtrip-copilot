@@ -61,6 +61,8 @@ export interface HeaderProps {
   setBaseDate: (date: string) => void;
   setSchedulingMode: (mode: 'forward' | 'backward' | 'adhoc') => void;
   setTargetArrivalTime: (time: string) => void;
+  onRenameTrip: (name: string) => void;
+  currentTripName: string;
 }
 interface SidebarProps { onUpdateWaypoint: (id: string, update: Partial<Waypoint>) => void; onSelectLocation: (result: GeocodeResult) => void }
 interface DayProps { onSelectDay: (index: number) => void; onAddDay: () => void; onDeleteDay: (index: number) => void }
@@ -127,9 +129,10 @@ beforeEach(() => {
   api.stageItinerary.mockResolvedValue({ downloadUrl: 'http://localhost:3001/test.json' });
   const entries = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => entries.set(key, value) });
+   const alertMock = vi.fn();
+  vi.stubGlobal('alert', alertMock);
   const location = { href: 'http://localhost:5173/?route=test.json&day=0', search: '?route=test.json&day=0' };
-  vi.stubGlobal('window', { location, history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search } }, addEventListener: () => {}, removeEventListener: () => {} });
-  vi.stubGlobal('alert', vi.fn());
+  vi.stubGlobal('window', { location, alert: alertMock, history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search } }, addEventListener: () => {}, removeEventListener: () => {} });
 });
 afterEach(async () => {
   for (const app of mounted) await act(async () => app.unmount());

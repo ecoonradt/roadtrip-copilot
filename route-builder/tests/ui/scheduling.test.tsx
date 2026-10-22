@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, saved, exportProps, exported, points } from './harness';
 import { calculateTimelineCascade, detectTimezone, parseLocalToUtcEpoch } from '../../src/engine/cascade';
 import { formatMultiDayItinerary, type SingleRouteItineraryV2 } from '../../src/engine/export';
@@ -218,23 +218,24 @@ describe('Scheduling acceptance workflows', () => {
   });
 
   it('does not erase newer edits or reset the selected day when a slow Save finishes', async () => {
-    let finish!: () => void;
-    api.saveItinerary.mockReturnValue(new Promise<void>(resolve => { finish = resolve }));
+    let finish!: (value: { success: boolean; fileName: string; etag: string }) => void;
+    api.saveItinerary.mockReturnValue(new Promise<{ success: boolean; fileName: string; etag: string }>(resolve => { finish = resolve }));
     const app = await mountApp();
     let saving!: Promise<void>;
     await act(async () => { saving = header(app).onSaveTrip() });
     await act(async () => tabs(app).onSelectDay(1));
     await act(async () => sidebar(app).onUpdateWaypoint('d2_stop', { dwell_minutes: 90 }));
-    await act(async () => { finish(); await saving });
+    await act(async () => { finish({ success: true, fileName: 'test.json', etag: '"etag-saved"' }); await saving });
     expect(trip(app).days[1].waypoints[1].dwell_minutes).toBe(90);
     expect(header(app).cascadeResult.stops[2].arrivalTime).toBe('12:00:00');
     expect(new URL(window.location.href).searchParams.get('day')).toBe('1');
     expect(header(app).isDirty).toBe(true);
+    expect(window.alert).not.toHaveBeenCalled();
   });
 
   it('does not restore trip A when switching to trip B during trip A slow save', async () => {
-    let finish!: () => void;
-    api.saveItinerary.mockReturnValue(new Promise<void>((resolve) => { finish = resolve }));
+    let finish!: (value: { success: boolean; fileName: string; etag: string }) => void;
+    api.saveItinerary.mockReturnValue(new Promise<{ success: boolean; fileName: string; etag: string }>((resolve) => { finish = resolve }));
     const app = await mountApp();
     let saving!: Promise<void>;
     await act(async () => { saving = header(app).onSaveTrip() });
@@ -260,11 +261,12 @@ describe('Scheduling acceptance workflows', () => {
     expect(new URL(window.location.href).searchParams.get('route')).toBe('trip_b.json');
 
     // Trip A's save resolves
-    await act(async () => { finish(); await saving });
+    await act(async () => { finish({ success: true, fileName: 'test.json', etag: '"etag-saved"' }); await saving });
 
     // Active trip MUST STILL be Trip B, NOT restored to Trip A
     expect(trip(app).tripName).toBe('Trip B Destination');
     expect(new URL(window.location.href).searchParams.get('route')).toBe('trip_b.json');
+    expect(window.alert).not.toHaveBeenCalled();
   });
 
   it('sends If-None-Match: * on save when trip has no etag, and If-Match when etag is present', async () => {
@@ -291,5 +293,196 @@ describe('Scheduling acceptance workflows', () => {
       expect.any(Object),
       { ifMatch: '"etag-12345"' }
     );
+  });
+
+  it('does not overwrite loaded itinerary fileName or ETag when a save of visible fallback completes', async () => {
+    let resolveInitialLoad!: (value: unknown) => void;
+    api.fetchItinerary.mockImplementation((file: string) => {
+      if (file === 'itinerary_b.json') {
+        return new Promise((resolve) => { resolveInitialLoad = resolve; });
+      }
+      return Promise.resolve(fixture());
+    });
+
+    const alertMock = vi.fn();
+    vi.stubGlobal('alert', alertMock);
+    const location = {
+      href: 'http://localhost:5173/?route=itinerary_b.json&day=0',
+      search: '?route=itinerary_b.json&day=0',
+    };
+    vi.stubGlobal('window', {
+      location,
+      alert: alertMock,
+      history: {
+        replaceState: (_state: unknown, _title: string, url: string) => {
+          location.href = url;
+          location.search = new URL(url).search;
+        },
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+
+    let finishFallbackSave!: (val: { success: boolean; fileName: string; etag: string }) => void;
+    api.saveItinerary.mockImplementation(() => new Promise((resolve) => { finishFallbackSave = resolve; }));
+
+    const app = await mountApp();
+
+    // Visible trip is still initial fallback trip while itinerary_b.json is in-flight
+    expect(trip(app).fileName).toBe('sample_itinerary.json');
+
+    let fallbackSaving!: Promise<void>;
+    await act(async () => {
+      fallbackSaving = header(app).onSaveTrip();
+    });
+
+    // Itinerary B finishes loading with its own fileName and ETag
+    const rawB = {
+      trip_name: 'Itinerary B Destination',
+      _etag: '"etag-b-initial"',
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-20',
+          departureTime: '08:00:00',
+          waypoints: points(1),
+        },
+      ],
+    };
+    await act(async () => {
+      resolveInitialLoad(rawB);
+    });
+
+    expect(trip(app).tripName).toBe('Itinerary B Destination');
+    expect(trip(app).fileName).toBe('itinerary_b.json');
+    expect(trip(app).etag).toBe('"etag-b-initial"');
+
+    // The fallback save resolves
+    await act(async () => {
+      finishFallbackSave({ success: true, fileName: 'sample_itinerary.json', etag: '"etag-sample-saved"' });
+      await fallbackSaving;
+    });
+
+    // Itinerary B must not have been overwritten with fallback metadata
+    expect(trip(app).fileName).toBe('itinerary_b.json');
+    expect(trip(app).etag).toBe('"etag-b-initial"');
+    expect(window.alert).not.toHaveBeenCalled();
+
+    // Subsequent save must target Itinerary B's file with its ETag
+    api.saveItinerary.mockResolvedValueOnce({
+      success: true,
+      fileName: 'itinerary_b.json',
+      etag: '"etag-b-v2"',
+    });
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    expect(api.saveItinerary).toHaveBeenLastCalledWith(
+      'itinerary_b.json',
+      expect.any(Object),
+      { ifMatch: '"etag-b-initial"' }
+    );
+    expect(trip(app).etag).toBe('"etag-b-v2"');
+  });
+
+  it('leaves isDirty false after saving a blank trip without further edits', async () => {
+    const app = await mountApp();
+    const blankTrip: ParsedTrip = {
+      tripName: 'Brand New Trip',
+      isMultiDay: false,
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-10',
+          title: 'Brand New Trip',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: [],
+        },
+      ],
+    };
+    await act(async () => {
+      selectTrip(app, blankTrip);
+    });
+
+    expect(header(app).isDirty).toBe(false);
+
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    expect(header(app).isDirty).toBe(false);
+    expect(window.alert).not.toHaveBeenCalled();
+  });
+
+  it('recovers from 412 filename collision by renaming the trip and saving under the new filename', async () => {
+    const app = await mountApp();
+    const importedTrip: ParsedTrip = {
+      tripName: 'Existing Collision Trip',
+      fileName: 'collision_route.json',
+      etag: undefined,
+      isMultiDay: false,
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-10',
+          title: 'Existing Collision Trip',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: points(1),
+        },
+      ],
+    };
+    await act(async () => {
+      selectTrip(app, importedTrip);
+    });
+
+    api.saveItinerary.mockRejectedValueOnce(new api.ApiError('Precondition Failed', 412));
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    expect(window.alert).toHaveBeenCalledWith(
+      expect.stringContaining('Conflict detected')
+    );
+
+    // Renaming the trip should update tripName and derive new fileName, resetting conflict
+    await act(async () => {
+      header(app).onRenameTrip('Unique Route Name');
+    });
+
+    expect(trip(app).tripName).toBe('Unique Route Name');
+    expect(trip(app).fileName).toBe('unique_route_name.json');
+    expect(trip(app).etag).toBeUndefined();
+    expect(localStorage.getItem('copilot_active_file')).toBe('unique_route_name.json');
+    expect(new URL(window.location.href).searchParams.get('route')).toBe('unique_route_name.json');
+
+    // Subsequent save succeeds under the new filename with ifNoneMatch: '*'
+    api.saveItinerary.mockResolvedValueOnce({
+      success: true,
+      fileName: 'unique_route_name.json',
+      etag: '"etag-safe-new"',
+    });
+
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    expect(api.saveItinerary).toHaveBeenLastCalledWith(
+      'unique_route_name.json',
+      expect.any(Object),
+      { ifNoneMatch: '*' }
+    );
+    expect(trip(app).etag).toBe('"etag-safe-new"');
+    expect(header(app).isDirty).toBe(false);
+
+    // If a trip with an etag is renamed without a conflict, existing filename is preserved
+    await act(async () => {
+      header(app).onRenameTrip('Renamed Title Keep File');
+    });
+    expect(trip(app).tripName).toBe('Renamed Title Keep File');
+    expect(trip(app).fileName).toBe('unique_route_name.json');
+    expect(trip(app).etag).toBe('"etag-safe-new"');
   });
 });

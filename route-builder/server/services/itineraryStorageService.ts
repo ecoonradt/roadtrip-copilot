@@ -258,26 +258,118 @@ function isPreconditionFailedError(err: unknown): boolean {
   );
 }
 
-class FileKeyedLock {
-  private queues = new Map<string, Promise<unknown>>();
+export interface CrossProcessFileLockOptions {
+  retryDelayMs?: number;
+  timeoutMs?: number;
+  staleLockMs?: number;
+}
 
-  async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.queues.get(key) || Promise.resolve();
+export class CrossProcessFileLock {
+  private static inProcessQueues = new Map<string, Promise<unknown>>();
+  static readonly DEFAULT_RETRY_DELAY_MS = 20;
+  static readonly DEFAULT_LOCK_TIMEOUT_MS = 5000;
+  static readonly DEFAULT_STALE_LOCK_MS = 5000;
+
+  static async runExclusive<T>(
+    filePath: string,
+    fn: () => Promise<T>,
+    options?: CrossProcessFileLockOptions
+  ): Promise<T> {
+    const canonicalPath = path.resolve(filePath);
+
+    // In-process static queue per canonical path to line up concurrent requests cleanly without polling
+    const prev = CrossProcessFileLock.inProcessQueues.get(canonicalPath) || Promise.resolve();
     let resolveNext!: () => void;
     const next = new Promise<void>((resolve) => {
       resolveNext = resolve;
     });
-    this.queues.set(key, next);
+    CrossProcessFileLock.inProcessQueues.set(canonicalPath, next);
 
     try {
-      await prev;
-      return await fn();
+      try {
+        await prev;
+      } catch {
+        // Proceed even if previous queued promise threw an error
+      }
+      return await CrossProcessFileLock.acquireLockAndRun(canonicalPath, fn, options);
     } finally {
       resolveNext();
-      if (this.queues.get(key) === next) {
-        this.queues.delete(key);
+      if (CrossProcessFileLock.inProcessQueues.get(canonicalPath) === next) {
+        CrossProcessFileLock.inProcessQueues.delete(canonicalPath);
       }
     }
+  }
+
+  private static async acquireLockAndRun<T>(
+    canonicalPath: string,
+    fn: () => Promise<T>,
+    options?: CrossProcessFileLockOptions
+  ): Promise<T> {
+    const retryDelay = options?.retryDelayMs ?? CrossProcessFileLock.DEFAULT_RETRY_DELAY_MS;
+    const timeoutMs = options?.timeoutMs ?? CrossProcessFileLock.DEFAULT_LOCK_TIMEOUT_MS;
+    const staleLockMs = options?.staleLockMs ?? CrossProcessFileLock.DEFAULT_STALE_LOCK_MS;
+
+    const lockPath = `${canonicalPath}.lock`;
+    await fs.mkdir(path.dirname(lockPath), { recursive: true }).catch(() => {});
+
+    const startTime = Date.now();
+
+    while (true) {
+      let handle: fs.FileHandle | null = null;
+      try {
+        handle = await fs.open(lockPath, 'wx');
+        const lockInfo = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+        await handle.writeFile(lockInfo, 'utf-8');
+        await handle.close();
+        handle = null;
+        break; // Lock acquired
+      } catch (err: unknown) {
+        if (handle) {
+          await handle.close().catch(() => {});
+          await fs.unlink(lockPath).catch(() => {});
+          handle = null;
+        }
+
+        const isEExist = Boolean(
+          err && typeof err === 'object' && (err as { code?: string }).code === 'EEXIST'
+        );
+        if (!isEExist) {
+          throw err;
+        }
+
+        // Stale lock detection: if existing lockfile mtime is > 5000ms old, unlink and retry
+        try {
+          const stat = await fs.stat(lockPath);
+          const age = Date.now() - stat.mtimeMs;
+          if (age > staleLockMs) {
+            await fs.unlink(lockPath).catch(() => {});
+            continue;
+          }
+        } catch {
+          // Lock may have been removed concurrently; continue retry loop
+        }
+
+        if (Date.now() - startTime >= timeoutMs) {
+          throw new Error(`Timeout acquiring lock for ${canonicalPath} after ${timeoutMs}ms`);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      }
+    }
+
+    try {
+      return await fn();
+    } finally {
+      await fs.unlink(lockPath).catch(() => {});
+    }
+  }
+
+  async runExclusive<T>(
+    filePath: string,
+    fn: () => Promise<T>,
+    options?: CrossProcessFileLockOptions
+  ): Promise<T> {
+    return CrossProcessFileLock.runExclusive(filePath, fn, options);
   }
 }
 
@@ -289,7 +381,6 @@ export interface LocalFileSystemStorageOptions {
 export class LocalFileSystemStorageService implements IItineraryStorageService {
   private storageDirectories: string[];
   private primaryWriteDirectory: string;
-  private fileLock = new FileKeyedLock();
 
   constructor(options: LocalFileSystemStorageOptions = {}) {
     const defaultRoot = path.resolve(process.cwd(), '..');
@@ -404,7 +495,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
 
-    return this.fileLock.runExclusive(targetPath, async () => {
+    return CrossProcessFileLock.runExclusive(targetPath, async () => {
       let existingContent: string | null = null;
       let existingEtag: string | null = null;
       try {
@@ -478,7 +569,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
 
-    return this.fileLock.runExclusive(targetPath, async () => {
+    return CrossProcessFileLock.runExclusive(targetPath, async () => {
       let existingContent: string;
       try {
         existingContent = await fs.readFile(targetPath, 'utf-8');

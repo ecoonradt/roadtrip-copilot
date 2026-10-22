@@ -125,6 +125,7 @@ export function App() {
   const [routeCoordKey, setRouteCoordKey] = useState('');
   const [tripRevision, setTripRevision] = useState(0);
   const tripRevisionRef = useRef(0);
+  const lastSaveConflictRef = useRef<boolean>(false);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
 
@@ -301,6 +302,8 @@ export function App() {
       if (seq !== loadTripSeqRef.current) return;
       if (raw) {
         const parsed = parseItineraryJson(raw, file);
+        tripRevisionRef.current += 1;
+        setTripRevision(tripRevisionRef.current);
         setTrip(parsed);
         setLastSavedTripJson(JSON.stringify(parsed));
         const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
@@ -326,6 +329,8 @@ export function App() {
           if (seq !== loadTripSeqRef.current) return;
           if (fallbackRaw) {
             const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
+            tripRevisionRef.current += 1;
+            setTripRevision(tripRevisionRef.current);
             setTrip(parsed);
             setLastSavedTripJson(JSON.stringify(parsed));
             setActiveDayIndex(0);
@@ -348,6 +353,9 @@ export function App() {
       }
     }
     if (seq !== loadTripSeqRef.current) return;
+    tripRevisionRef.current += 1;
+    setTripRevision(tripRevisionRef.current);
+    setTrip(INITIAL_FALLBACK_TRIP);
     setLastSavedTripJson(JSON.stringify(INITIAL_FALLBACK_TRIP));
     setRoute(null);
     setIsInitializing(false);
@@ -844,7 +852,23 @@ export function App() {
     invalidatePendingInitialLoad();
     const trimmed = name.trim();
     if (!trimmed) return;
-    setTrip((prev) => (prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed }));
+    const nextFileName = `${trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
+    setTrip((prev) => {
+      if (!prev.fileName || lastSaveConflictRef.current) {
+        lastSaveConflictRef.current = false;
+        localStorage.setItem('copilot_active_file', nextFileName);
+        const url = new URL(window.location.href);
+        url.searchParams.set('route', nextFileName);
+        window.history.replaceState({}, '', url.toString());
+        return {
+          ...prev,
+          tripName: trimmed,
+          fileName: nextFileName,
+          etag: undefined,
+        };
+      }
+      return prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed };
+    });
   }, [invalidatePendingInitialLoad]);
 
   const handleRenameDay = useCallback((index: number, title: string) => {
@@ -1088,6 +1112,7 @@ export function App() {
 
   const handleSelectTrip = useCallback((newTrip: ParsedTrip) => {
     invalidatePendingInitialLoad();
+    lastSaveConflictRef.current = false;
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     setTrip(newTrip);
@@ -1124,6 +1149,7 @@ export function App() {
   const handleSaveTrip = useCallback(async () => {
     setIsSaving(true);
     const savedRevision = tripRevisionRef.current;
+    const tripWhenSaveStarted = trip;
     try {
       const updatedTrip = getSynchronizedTrip();
       const serialized = serializeTripToItineraryJson(updatedTrip, { preserveTargetTimes: true });
@@ -1133,12 +1159,18 @@ export function App() {
         : { ifNoneMatch: '*' };
       const saveRes = await saveItinerary(fileName, serialized, conditionalOptions);
       if (savedRevision !== tripRevisionRef.current) return;
-      const snapshot = { ...updatedTrip, fileName, etag: saveRes.etag || updatedTrip.etag };
-      setTrip((prev) => ({
-        ...prev,
-        fileName,
-        etag: saveRes.etag || prev.etag,
-      }));
+      lastSaveConflictRef.current = false;
+      const snapshot: ParsedTrip = { ...updatedTrip, fileName, etag: saveRes.etag || updatedTrip.etag };
+      setTrip((prev) => {
+        if (prev === tripWhenSaveStarted || JSON.stringify(prev) === JSON.stringify(tripWhenSaveStarted)) {
+          return snapshot;
+        }
+        return {
+          ...prev,
+          fileName,
+          etag: saveRes.etag || prev.etag,
+        };
+      });
       setLastSavedTripJson(JSON.stringify(snapshot));
       setSaveSuccess(true);
       localStorage.setItem('copilot_active_file', fileName);
@@ -1152,6 +1184,7 @@ export function App() {
         (Boolean(err) && typeof err === 'object' && (err as { status?: number }).status === 412);
       const msg = err instanceof Error ? err.message : 'Save failed';
       if (isConflict || msg.includes('412') || msg.toLowerCase().includes('precondition')) {
+        lastSaveConflictRef.current = true;
         alert('Conflict detected: This itinerary already exists or has been modified elsewhere. Please reload the itinerary or save under a new name to avoid overwriting changes.');
       } else {
         alert(`Save error: ${msg}`);
@@ -1159,7 +1192,7 @@ export function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [getSynchronizedTrip]);
+  }, [getSynchronizedTrip, trip]);
 
   // Dirty state tracking (indicates unsaved changes)
   const isDirty = useMemo(() => {

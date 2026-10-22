@@ -6,6 +6,7 @@ import {
   ItineraryStorageService,
   PreconditionFailedError,
   normalizeEtag,
+  CrossProcessFileLock,
 } from '../../server/services/itineraryStorageService.js';
 import { createApp } from '../../server/app.js';
 
@@ -263,6 +264,121 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
 
       const delRes = await service.deleteItinerary('delete_match.json', { ifMatch: saved.etag });
       expect(delRes.success).toBe(true);
+    });
+
+    it('guarantees cross-instance atomicity when saving concurrently with the same initial ETag', async () => {
+      const service1 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+      const service2 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      // Seed initial file
+      const initial = await service1.saveItinerary('concurrent_update.json', {
+        trip_name: 'Initial State',
+        checkpoints: [],
+      });
+      expect(initial.success).toBe(true);
+      const initialEtag = initial.etag;
+      expect(initialEtag).toBeDefined();
+
+      // Both instances attempt concurrent update with the same initial ETag
+      const [res1, res2] = await Promise.allSettled([
+        service1.saveItinerary(
+          'concurrent_update.json',
+          { trip_name: 'Update by Instance 1', checkpoints: [] },
+          { ifMatch: initialEtag }
+        ),
+        service2.saveItinerary(
+          'concurrent_update.json',
+          { trip_name: 'Update by Instance 2', checkpoints: [] },
+          { ifMatch: initialEtag }
+        ),
+      ]);
+
+      const fulfilled = [res1, res2].filter(
+        (r): r is PromiseFulfilledResult<{ success: boolean; etag?: string }> =>
+          r.status === 'fulfilled'
+      );
+      const rejected = [res1, res2].filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected'
+      );
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(fulfilled[0].value.success).toBe(true);
+      expect(rejected[0].reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('guarantees cross-instance atomicity for concurrent create-only writes (If-None-Match: *)', async () => {
+      const service1 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+      const service2 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const [res1, res2] = await Promise.allSettled([
+        service1.saveItinerary(
+          'concurrent_create.json',
+          { trip_name: 'Created by Instance 1', checkpoints: [] },
+          { ifNoneMatch: '*' }
+        ),
+        service2.saveItinerary(
+          'concurrent_create.json',
+          { trip_name: 'Created by Instance 2', checkpoints: [] },
+          { ifNoneMatch: '*' }
+        ),
+      ]);
+
+      const fulfilled = [res1, res2].filter(
+        (r): r is PromiseFulfilledResult<{ success: boolean; etag?: string }> =>
+          r.status === 'fulfilled'
+      );
+      const rejected = [res1, res2].filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected'
+      );
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(fulfilled[0].value.success).toBe(true);
+      expect(rejected[0].reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('CrossProcessFileLock recovers from stale lockfiles and cleans up on completion or error', async () => {
+      const targetFile = path.join(tempDir, 'lock_test.json');
+      const lockFile = `${targetFile}.lock`;
+
+      // Create a simulated stale lockfile (> 5000ms old)
+      await fs.writeFile(
+        lockFile,
+        JSON.stringify({ pid: 99999, timestamp: Date.now() - 10000 }),
+        'utf-8'
+      );
+      const pastTime = new Date(Date.now() - 10000);
+      await fs.utimes(lockFile, pastTime, pastTime);
+
+      let executed = false;
+      await CrossProcessFileLock.runExclusive(targetFile, async () => {
+        executed = true;
+      });
+
+      expect(executed).toBe(true);
+      // Lock file must be cleanly removed
+      await expect(fs.stat(lockFile)).rejects.toThrow();
+
+      // Clean removal on error
+      await expect(
+        CrossProcessFileLock.runExclusive(targetFile, async () => {
+          throw new Error('boom');
+        })
+      ).rejects.toThrow('boom');
+      await expect(fs.stat(lockFile)).rejects.toThrow();
     });
 
     it('normalizeEtag handles quotes and weak etags correctly', () => {

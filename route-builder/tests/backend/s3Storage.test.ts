@@ -335,17 +335,37 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(retrievedAfterSave?._etag).toBe(firstSave.etag);
     });
 
-    it('does not hardcode us-east-1 when region option and AWS_REGION are unset', () => {
+    it('does not hardcode us-east-1 when region option and AWS_REGION are unset', async () => {
       const origRegion = process.env.AWS_REGION;
+      const origProfile = process.env.AWS_PROFILE;
+      const origConfigFile = process.env.AWS_CONFIG_FILE;
+
+      const tempConfigFile = path.join(
+        os.tmpdir(),
+        `aws-config-${Date.now()}-${Math.random().toString(36).slice(2)}.ini`
+      );
+      await fs.writeFile(
+        tempConfigFile,
+        '[profile copilot-test-profile]\nregion = eu-west-1\n',
+        'utf-8'
+      );
+
+      process.env.AWS_CONFIG_FILE = tempConfigFile;
+      process.env.AWS_PROFILE = 'copilot-test-profile';
       delete process.env.AWS_REGION;
+
       try {
-        const service = new S3ItineraryStorageService({
-          bucketName: 'test-bucket',
-          s3Client: mockS3 as unknown as S3Client,
-        });
-        expect(service).toBeDefined();
+        const service = new S3ItineraryStorageService({ bucketName: 'test-bucket' });
+        const client = (service as unknown as { client: S3Client }).client;
+        expect(await client.config.region()).toBe('eu-west-1');
       } finally {
-        if (origRegion) process.env.AWS_REGION = origRegion;
+        if (origRegion !== undefined) process.env.AWS_REGION = origRegion;
+        else delete process.env.AWS_REGION;
+        if (origProfile !== undefined) process.env.AWS_PROFILE = origProfile;
+        else delete process.env.AWS_PROFILE;
+        if (origConfigFile !== undefined) process.env.AWS_CONFIG_FILE = origConfigFile;
+        else delete process.env.AWS_CONFIG_FILE;
+        await fs.unlink(tempConfigFile).catch(() => {});
       }
     });
 
