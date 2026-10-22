@@ -141,44 +141,72 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect((loaded as Record<string, unknown>).trip_name).toBe('Saved Trip');
     });
 
-    it('marks sample_itinerary.json as protected and allows deleting custom routes', async () => {
+    it('creates the primary write directory on first save', async () => {
+      const nestedWriteDir = path.join(tempDir, 'fresh', 'nested');
       const service = new ItineraryStorageService({
         storageDirectories: [tempDir],
-        primaryWriteDirectory: tempDir,
+        primaryWriteDirectory: nestedWriteDir,
       });
 
-      // Write a sample itinerary and a custom trip
-      await fs.writeFile(
-        path.join(tempDir, 'sample_itinerary.json'),
-        JSON.stringify({ trip_name: 'Sample Route', checkpoints: [] }),
-        'utf-8'
-      );
-      await fs.writeFile(
-        path.join(tempDir, 'deletable_trip.json'),
-        JSON.stringify({ trip_name: 'Deletable Trip', checkpoints: [] }),
-        'utf-8'
-      );
+      const saveResult = await service.saveItinerary('nested_trip.json', {
+        trip_name: 'Nested Trip',
+        checkpoints: [],
+      });
+      expect(saveResult.success).toBe(true);
 
-      const list = await service.listItineraries();
-      const sample = list.find((i) => i.fileName === 'sample_itinerary.json');
-      const custom = list.find((i) => i.fileName === 'deletable_trip.json');
+      const filePath = path.join(nestedWriteDir, 'nested_trip.json');
+      const stat = await fs.stat(filePath);
+      expect(stat.isFile()).toBe(true);
 
-      expect(sample?.isProtected).toBe(true);
-      expect(custom?.isProtected).toBe(false);
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      expect(parsed.trip_name).toBe('Nested Trip');
+    });
 
-      // Attempting to delete sample_itinerary.json should throw
-      await expect(service.deleteItinerary('sample_itinerary.json')).rejects.toThrow(
-        /Cannot delete protected itinerary/
-      );
+    it('protects itineraries outside the primary write directory and allows deleting custom routes', async () => {
+      const secondaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-secondary-'));
+      try {
+        const service = new ItineraryStorageService({
+          storageDirectories: [tempDir, secondaryDir],
+          primaryWriteDirectory: tempDir,
+        });
 
-      // Deleting custom trip should succeed
-      const result = await service.deleteItinerary('deletable_trip.json');
-      expect(result.success).toBe(true);
-      expect(result.fileName).toBe('deletable_trip.json');
+        // A route that only exists in the secondary directory is read-only
+        await fs.writeFile(
+          path.join(secondaryDir, 'read_only_trip.json'),
+          JSON.stringify({ trip_name: 'Read Only Trip', checkpoints: [] }),
+          'utf-8'
+        );
+        // A custom route in the primary write directory is fully editable
+        await fs.writeFile(
+          path.join(tempDir, 'deletable_trip.json'),
+          JSON.stringify({ trip_name: 'Deletable Trip', checkpoints: [] }),
+          'utf-8'
+        );
 
-      // Verify file is gone
-      const deletedCheck = await service.getItinerary('deletable_trip.json');
-      expect(deletedCheck).toBeNull();
+        const list = await service.listItineraries();
+        const readOnly = list.find((i) => i.fileName === 'read_only_trip.json');
+        const custom = list.find((i) => i.fileName === 'deletable_trip.json');
+
+        expect(readOnly?.isProtected).toBe(true);
+        expect(readOnly?.etag).toBeUndefined();
+        expect(custom?.isProtected).toBe(false);
+
+        const loadedReadOnly = await service.getItinerary('read_only_trip.json');
+        expect(loadedReadOnly?._isProtected).toBe(true);
+        expect(loadedReadOnly?._etag).toBeUndefined();
+
+        // Deleting custom trip should succeed
+        const result = await service.deleteItinerary('deletable_trip.json');
+        expect(result.success).toBe(true);
+        expect(result.fileName).toBe('deletable_trip.json');
+
+        // Verify file is gone
+        const deletedCheck = await service.getItinerary('deletable_trip.json');
+        expect(deletedCheck).toBeNull();
+      } finally {
+        await fs.rm(secondaryDir, { recursive: true, force: true });
+      }
     });
 
     it('throws when trying to delete non-existent itinerary', async () => {
@@ -631,24 +659,6 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
 
       const onDisk = await storageService.getItinerary('trip_to_delete.json');
       expect(onDisk).toBeNull();
-    });
-
-    it('DELETE /api/itineraries/sample_itinerary.json returns 403 Forbidden', async () => {
-      const storageService = new ItineraryStorageService({
-        storageDirectories: [tempDir],
-        primaryWriteDirectory: tempDir,
-      });
-
-      const app = createApp({ storageService });
-
-      const response = await app.inject({
-        method: 'DELETE',
-        url: '/api/itineraries/sample_itinerary.json',
-      });
-
-      expect(response.statusCode).toBe(403);
-      const body = JSON.parse(response.body) as { error: string };
-      expect(body.error).toMatch(/Cannot delete protected itinerary/);
     });
 
     it('DELETE /api/itineraries/:filename returns 404 when file does not exist', async () => {

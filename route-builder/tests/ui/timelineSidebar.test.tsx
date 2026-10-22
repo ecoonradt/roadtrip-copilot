@@ -58,7 +58,6 @@ describe('TimelineSidebar estimated arrival time (ETA) display', () => {
           onDeleteWaypoint={vi.fn()}
           onUpdateWaypoint={vi.fn()}
           onMoveWaypoint={vi.fn()}
-          onResetSample={vi.fn()}
           onClearAll={vi.fn()}
           onSelectLocation={vi.fn()}
         />
@@ -103,7 +102,6 @@ describe('TimelineSidebar estimated arrival time (ETA) display', () => {
           onDeleteWaypoint={vi.fn()}
           onUpdateWaypoint={vi.fn()}
           onMoveWaypoint={vi.fn()}
-          onResetSample={vi.fn()}
           onClearAll={vi.fn()}
           onSelectLocation={vi.fn()}
         />
@@ -117,5 +115,34 @@ describe('TimelineSidebar estimated arrival time (ETA) display', () => {
     expect(tree).toContain('+1h 45m');
     expect(tree).toContain('+2h 15m');
     expect(tree).toContain('m dwell');
+  });
+
+  it('empty state prompts to add a stop and offers no sample affordance', () => {
+    const cascadeResult = calculateTimelineCascade({
+      baseDate: '2026-10-09',
+      departureTime: '09:00:00',
+      waypoints: [],
+    });
+
+    let component: renderer.ReactTestRenderer | null = null;
+    renderer.act(() => {
+      component = renderer.create(
+        <TimelineSidebar
+          waypoints={[]}
+          cascadeResult={cascadeResult}
+          isLoadingRoute={false}
+          onDeleteWaypoint={vi.fn()}
+          onUpdateWaypoint={vi.fn()}
+          onMoveWaypoint={vi.fn()}
+          onClearAll={vi.fn()}
+          onSelectLocation={vi.fn()}
+        />
+      );
+    });
+
+    const tree = JSON.stringify(component!.toJSON());
+
+    expect(tree).toContain('Add First Stop');
+    expect(tree).not.toMatch(/sample/i);
   });
 });

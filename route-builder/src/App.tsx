@@ -37,87 +37,38 @@ import {
   type ParsedDay,
 } from './engine/itineraryParser';
 
-// Fallback initial route from sample itinerary if offline or initial load
-const INITIAL_FALLBACK_TRIP: ParsedTrip = {
-  fileName: 'sample_itinerary.json',
-  tripName: 'Scenic Southwest: Phoenix to Flagstaff',
-  isMultiDay: true,
-  dates: { start: '2026-10-09', end: '2026-10-09' },
-  days: [
-    {
+function createPlaceholderTrip(): ParsedTrip {
+  return {
+    tripName: 'Untitled Road Trip',
+    isMultiDay: false,
+    days: [{
       dayNumber: 1,
-      date: '2026-10-09',
-      title: 'Red Rock Entry & Oak Creek Canyon Switchbacks',
-      departureTime: '14:30:00',
+      date: new Date().toISOString().slice(0, 10),
+      title: 'New Route',
+      departureTime: '09:00:00',
       timezone: 'America/Phoenix',
-      origin: 'Phoenix Sky Harbor International Airport (PHX)',
-      destination: 'Flagstaff, AZ',
-      waypoints: [
-        {
-          id: 'wp_phx_rental',
-          name: 'PHX Rental Car Facility',
-          type: 'origin',
-          lat: 33.4357,
-          lng: -112.0152,
-          target_time: '14:30:00',
-          dwell_minutes: 0,
-          trigger_radius_miles: 0.5,
-          notification: {
-            title: 'Road Trip Begins!',
-            message: 'Departing PHX via I-17 N towards Sedona.',
-            speech: 'Welcome to Arizona. We are departing Phoenix heading north on I-17 toward Sedona.',
-          },
-        },
-        {
-          id: 'wp_sedona_bell_rock',
-          name: 'Sedona Red Rock Vistas (Bell Rock)',
-          type: 'scenic_pull_off',
-          lat: 34.8010,
-          lng: -111.7645,
-          target_time: '16:30:00',
-          dwell_minutes: 30,
-          trigger_radius_miles: 3.0,
-          notification: {
-            title: 'Approaching Sedona Red Rocks',
-            message: 'Target arrival: 4:30 PM. Recommended 30-min stop for red rock vistas.',
-            speech: 'Approaching Sedona on Highway 179. Pull-offs for Bell Rock and Courthouse Butte coming up in two miles.',
-          },
-        },
-        {
-          id: 'wp_flagstaff_destination',
-          name: 'Flagstaff Historic Downtown & Visitor Center',
-          type: 'destination',
-          lat: 35.1982,
-          lng: -111.6465,
-          target_time: '18:15:00',
-          dwell_minutes: 0,
-          trigger_radius_miles: 1.0,
-          notification: {
-            title: 'Arrival in Flagstaff',
-            message: 'Arrived in historic Flagstaff. Explore downtown Route 66 and local dining.',
-            speech: 'Arriving in Flagstaff. Welcome to historic Route 66 and the downtown district.',
-          },
-        },
-      ],
-    },
-  ],
-};
+      waypoints: [],
+    }],
+  };
+}
 
-function getInitialRouteInfo(): { file: string; day: number } {
-  if (typeof window === 'undefined') return { file: 'sample_itinerary.json', day: 0 };
+function getInitialRouteInfo(): { file: string | null; day: number } {
+  if (typeof window === 'undefined') return { file: null, day: 0 };
   const params = new URLSearchParams(window.location.search);
   const routeParam = params.get('route');
   const dayParam = params.get('day');
   const savedRoute = localStorage.getItem('copilot_active_file');
   const savedDay = localStorage.getItem('copilot_active_day');
 
-  const file = routeParam || savedRoute || 'sample_itinerary.json';
+  const file = routeParam || savedRoute || null;
   const day = dayParam !== null ? parseInt(dayParam, 10) : savedDay !== null ? parseInt(savedDay, 10) : 0;
   return { file, day: isNaN(day) ? 0 : day };
 }
 
 export function App() {
-  const [trip, setTrip] = useState<ParsedTrip>(INITIAL_FALLBACK_TRIP);
+  const [trip, setTrip] = useState<ParsedTrip>(() => createPlaceholderTrip());
+  const [hasActiveTrip, setHasActiveTrip] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [activeDayIndex, setActiveDayIndex] = useState<number>(() => getInitialRouteInfo().day);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
 
@@ -137,7 +88,7 @@ export function App() {
 
   // Modal dialog states
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isRouteSelectorOpen, setIsRouteSelectorOpen] = useState(false);
+  const [isRouteSelectorOpen, setIsRouteSelectorOpen] = useState(() => getInitialRouteInfo().file === null);
 
   // Route Scout conversational assistant states
   const [isScoutOpen, setIsScoutOpen] = useState(false);
@@ -296,7 +247,7 @@ export function App() {
     setIsInitializing(false);
   }, []);
 
-  // Helper to apply loaded trip state consistently across all initial-load and fallback branches
+  // Helper to apply loaded trip state consistently across initial-load paths
   const applyLoadedTrip = useCallback((parsed: ParsedTrip, file: string, day: number) => {
     lastSaveConflictRef.current = false;
     tripRevisionRef.current += 1;
@@ -318,53 +269,63 @@ export function App() {
     window.history.replaceState({}, '', url.toString());
     setIsNeverSaved(false);
     setIsInitializing(false);
+    setHasActiveTrip(true);
     hasActiveTripRef.current = true;
   }, []);
 
-  // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
+  const resetToNoActiveRoute = useCallback(() => {
+    loadTripSeqRef.current += 1;
+    tripRevisionRef.current += 1;
+    saveTargetEpochRef.current += 1;
+    hasActiveTripRef.current = false;
+    setHasActiveTrip(false);
+    setTrip(createPlaceholderTrip());
+    setTripRevision(tripRevisionRef.current);
+    setLastSavedTripJson('');
+    setIsNeverSaved(false);
+    lastSaveConflictRef.current = false;
+    setActiveDayIndex(0);
+    setSchedulingMode('forward');
+    setTargetArrivalTime('18:00:00');
+    setSelectedWaypointId(null);
+    setRoute(null);
+    setRouteError(null);
+    localStorage.removeItem('copilot_active_file');
+    localStorage.removeItem('copilot_active_day');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('route');
+    url.searchParams.delete('day');
+    window.history.replaceState({}, '', url.toString());
+    setIsRouteSelectorOpen(true);
+  }, []);
+
+  // Auto-load active itinerary on initial mount (from URL or localStorage)
   const loadInitialTrip = useCallback(async () => {
     const seq = ++loadTripSeqRef.current;
     setIsInitializing(true);
+    setInitialLoadError(null);
     const { file, day } = getInitialRouteInfo();
-    try {
-      const raw = await fetchItinerary(file);
-      if (seq !== loadTripSeqRef.current) return;
-      if (raw) {
-        const parsed = parseItineraryJson(raw, file);
-        applyLoadedTrip(parsed, file, day);
-        return;
-      }
-    } catch {
-      if (seq !== loadTripSeqRef.current) return;
-      // If an active trip is already loaded, do not clobber it on network/fetch failure
-      if (hasActiveTripRef.current) {
-        setIsInitializing(false);
-        return;
-      }
-      // If specified file fails to load (e.g. was deleted), try fallback sample_itinerary.json
-      if (file !== 'sample_itinerary.json') {
-        try {
-          const fallbackRaw = await fetchItinerary('sample_itinerary.json');
-          if (seq !== loadTripSeqRef.current) return;
-          if (fallbackRaw) {
-            const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
-            applyLoadedTrip(parsed, 'sample_itinerary.json', 0);
-            return;
-          }
-        } catch {
-          if (seq !== loadTripSeqRef.current) return;
-          // Fall back to INITIAL_FALLBACK_TRIP below
-        }
-      }
-    }
-    if (seq !== loadTripSeqRef.current) return;
-    if (hasActiveTripRef.current) {
+    if (!file) {
+      setIsRouteSelectorOpen(true);
       setIsInitializing(false);
       return;
     }
-    const fallbackFile = INITIAL_FALLBACK_TRIP.fileName ?? 'sample_itinerary.json';
-    applyLoadedTrip(INITIAL_FALLBACK_TRIP, fallbackFile, 0);
-  }, [applyLoadedTrip]);
+    try {
+      const raw = await fetchItinerary(file);
+      if (seq !== loadTripSeqRef.current) return;
+      applyLoadedTrip(parseItineraryJson(raw, file), file, day);
+    } catch (err: unknown) {
+      if (seq !== loadTripSeqRef.current) return;
+      if (hasActiveTripRef.current) { setIsInitializing(false); return; }
+      if (err instanceof ApiError && err.status === 404) {
+        resetToNoActiveRoute();
+        setIsInitializing(false);
+        return;
+      }
+      setInitialLoadError(err instanceof Error ? err.message : 'Unable to load your routes.');
+      setIsInitializing(false);
+    }
+  }, [applyLoadedTrip, resetToNoActiveRoute]);
 
   useEffect(() => {
     loadInitialTrip();
@@ -745,10 +706,6 @@ export function App() {
     updateCurrentDayWaypoints(next);
   }, [updateCurrentDayWaypoints, waypoints]);
 
-  const handleResetSample = useCallback(() => {
-    updateCurrentDayWaypoints(INITIAL_FALLBACK_TRIP.days[0].waypoints);
-  }, [updateCurrentDayWaypoints]);
-
   const handleClearAll = useCallback(() => {
     updateCurrentDayWaypoints([]);
     setRoute(null);
@@ -868,10 +825,6 @@ export function App() {
 
     if (isNewFileTarget) {
       saveTargetEpochRef.current += 1;
-      localStorage.setItem('copilot_active_file', nextFileName);
-      const url = new URL(window.location.href);
-      url.searchParams.set('route', nextFileName);
-      window.history.replaceState({}, '', url.toString());
 
       setTrip((prev) => ({
         ...prev,
@@ -1126,6 +1079,8 @@ export function App() {
   const handleSelectTrip = useCallback((newTrip: ParsedTrip, options?: { unsaved?: boolean }) => {
     invalidatePendingInitialLoad();
     hasActiveTripRef.current = true;
+    setHasActiveTrip(true);
+    setInitialLoadError(null);
     setIsNeverSaved(Boolean(options?.unsaved));
     lastSaveConflictRef.current = false;
     tripRevisionRef.current += 1;
@@ -1137,12 +1092,17 @@ export function App() {
     setRoute(null);
     setSchedulingMode(newTrip.days[0] ? getDaySchedulingMode(newTrip.days[0], newTrip.isAdHoc) : 'forward');
     setTargetArrivalTime(newTrip.days[0]?.targetArrivalTime || '18:00:00');
-    const fileName = newTrip.fileName || `${newTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
-    localStorage.setItem('copilot_active_file', fileName);
+    const persistPointer = !options?.unsaved && Boolean(newTrip.fileName);
     localStorage.setItem('copilot_active_day', '0');
     const url = new URL(window.location.href);
-    url.searchParams.set('route', fileName);
     url.searchParams.set('day', '0');
+    if (persistPointer && newTrip.fileName) {
+      localStorage.setItem('copilot_active_file', newTrip.fileName);
+      url.searchParams.set('route', newTrip.fileName);
+    } else {
+      localStorage.removeItem('copilot_active_file');
+      url.searchParams.delete('route');
+    }
     window.history.replaceState({}, '', url.toString());
   }, [invalidatePendingInitialLoad]);
 
@@ -1150,20 +1110,9 @@ export function App() {
     async (deletedFile: string, startedGeneration = loadTripSeqRef.current) => {
       if (startedGeneration !== loadTripSeqRef.current) return;
       const activeFile = trip.fileName || localStorage.getItem('copilot_active_file');
-      if (activeFile === deletedFile) {
-        const seq = startedGeneration;
-        try {
-          const fallbackRaw = await fetchItinerary('sample_itinerary.json');
-          if (seq !== loadTripSeqRef.current) return;
-          const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
-          handleSelectTrip(parsed);
-        } catch {
-          if (seq !== loadTripSeqRef.current) return;
-          handleSelectTrip(INITIAL_FALLBACK_TRIP);
-        }
-      }
+      if (activeFile === deletedFile) resetToNoActiveRoute();
     },
-    [trip.fileName, handleSelectTrip]
+    [trip.fileName, resetToNoActiveRoute]
   );
 
   const handleSaveTrip = useCallback(async () => {
@@ -1269,6 +1218,23 @@ export function App() {
     );
   }
 
+  if (!hasActiveTrip && initialLoadError) {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 flex items-center justify-center px-4">
+        <div className="max-w-sm w-full text-center space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-sm font-semibold text-slate-100">Unable to load your routes</p>
+            <p role="alert" className="text-xs text-slate-400 break-words">{initialLoadError}</p>
+          </div>
+          <div className="flex items-center justify-center gap-2">
+            <button type="button" onClick={() => void loadInitialTrip()} className="px-3.5 py-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-xl shadow-md transition-colors cursor-pointer">Retry</button>
+            <button type="button" onClick={() => { setInitialLoadError(null); setIsRouteSelectorOpen(true); }} className="px-3.5 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition-colors cursor-pointer">Start a new route</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950">
       {authStatus.message && (
@@ -1311,7 +1277,7 @@ export function App() {
         currentTripName={trip.tripName}
         onRenameTrip={handleRenameTrip}
         onOpenRouteSelector={() => setIsRouteSelectorOpen(true)}
-        onSaveTrip={handleSaveTrip}
+        onSaveTrip={hasActiveTrip ? handleSaveTrip : undefined}
         isSaving={isSaving}
         saveSuccess={saveSuccess}
         isDirty={isDirty}
@@ -1346,7 +1312,6 @@ export function App() {
           onUpdateWaypoint={handleUpdateWaypoint}
           onBatchUpdateWaypoints={handleBatchUpdateWaypoints}
           onMoveWaypoint={handleMoveWaypoint}
-          onResetSample={handleResetSample}
           onClearAll={handleClearAll}
           onSelectLocation={handleSelectLocation}
           onOpenScoutForDay={handleOpenScoutForDay}
@@ -1410,6 +1375,7 @@ export function App() {
         currentFileName={trip.fileName}
         onDeleteTrip={handleDeleteTrip}
         getTripGeneration={() => loadTripSeqRef.current}
+        dismissible={hasActiveTrip}
       />
 
       {/* Export & Phone Handoff Modal */}

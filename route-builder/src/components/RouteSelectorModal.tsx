@@ -18,6 +18,7 @@ import {
   type ItineraryMetadataSummary,
 } from '../services/api';
 import { parseItineraryJson, type ParsedTrip } from '../engine/itineraryParser';
+import { createSampleTrip } from '../engine/sampleTrip';
 import { DEFAULT_TIMEZONE } from '../engine/cascade';
 
 interface RouteSelectorModalProps {
@@ -27,6 +28,7 @@ interface RouteSelectorModalProps {
   currentFileName?: string;
   onDeleteTrip?: (fileName: string, startedGeneration?: number) => void;
   getTripGeneration?: () => number;
+  dismissible?: boolean;
 }
 
 export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
@@ -36,6 +38,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   currentFileName,
   onDeleteTrip,
   getTripGeneration,
+  dismissible = true,
 }) => {
   const [activeTab, setActiveTab] = useState<'workspace' | 'import' | 'new'>('workspace');
   const [workspaceRoutes, setWorkspaceRoutes] = useState<ItineraryMetadataSummary[]>([]);
@@ -44,6 +47,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   const [confirmDeleteFile, setConfirmDeleteFile] = useState<string | null>(null);
   const [isDeletingFile, setIsDeletingFile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   // Generation counter to guard against superseded workspace route selections
   const selectSeqRef = useRef<number>(0);
@@ -88,7 +92,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
     return () => {
       isSubscribed = false;
     };
-  }, [isOpen]);
+  }, [isOpen, reloadNonce]);
 
   // Invalidate in-flight workspace selections whenever the modal opens or closes
   // (keyed on isOpen only: onClose is an inline callback and changes identity every render)
@@ -105,13 +109,14 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
       return;
     }
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!dismissible) return;
       if (e.key === 'Escape') {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, dismissible]);
 
   if (!isOpen) return null;
 
@@ -210,9 +215,20 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
     onClose();
   };
 
+  const handleStartFromSample = () => {
+    onSelectTrip(createSampleTrip(), { unsaved: true });
+    onClose();
+  };
+
+  const handleRetryLoadRoutes = () => {
+    setError(null);
+    setReloadNonce((prev) => prev + 1);
+  };
+
   const modalContent = (
     <div
       onClick={(e) => {
+        if (!dismissible) return;
         if (e.target === e.currentTarget) {
           onClose();
         }
@@ -231,16 +247,18 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
                 Open &amp; Manage Itineraries
               </h2>
               <p className="text-xs text-slate-400">
-                Load existing workspace routes, import local JSON files, or start fresh
+                Load a saved workspace route, import a local JSON file, or start a new itinerary
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          {dismissible && (
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Tab Navigation */}
@@ -278,7 +296,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
             }`}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>New Blank Route</span>
+            <span>New Route</span>
           </button>
         </div>
 
@@ -287,7 +305,13 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
           {error && (
             <div className="p-3 bg-rose-950/70 border border-rose-800/80 rounded-xl text-xs text-rose-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>{error}</span>
+              <span className="flex-1">{error}</span>
+              <button
+                onClick={handleRetryLoadRoutes}
+                className="shrink-0 px-2.5 py-1 rounded-lg bg-rose-900/80 hover:bg-rose-800 text-rose-100 text-xs font-semibold border border-rose-700/80 transition-colors cursor-pointer"
+              >
+                Retry
+              </button>
             </div>
           )}
 
@@ -300,8 +324,24 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
                   <span className="text-xs">Scanning workspace for itinerary files...</span>
                 </div>
               ) : workspaceRoutes.length === 0 ? (
-                <div className="py-10 text-center text-slate-400 text-xs">
-                  No itinerary JSON files found in workspace. Use "Import JSON File" to upload one.
+                <div className="py-8 px-4 text-center text-slate-400 text-xs space-y-4">
+                  <p className="leading-relaxed">
+                    Routes you save will appear here, ready to reopen or reload.
+                  </p>
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                    <button
+                      onClick={handleStartFromSample}
+                      className="w-full sm:w-auto px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold shadow-md transition-colors cursor-pointer"
+                    >
+                      Start from Sample Route
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('new')}
+                      className="w-full sm:w-auto px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
+                    >
+                      Start Blank
+                    </button>
+                  </div>
                 </div>
               ) : (
                 workspaceRoutes.map((route) => {
@@ -465,7 +505,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
             </div>
           )}
 
-          {/* Tab 3: New Blank Route */}
+          {/* Tab 3: New Route */}
           {activeTab === 'new' && (
             <div className="space-y-3.5 p-2">
               <div>
@@ -501,6 +541,19 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
                   <Plus className="w-4 h-4" />
                   <span>Create Blank Itinerary</span>
                 </button>
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 space-y-1.5">
+                <button
+                  onClick={handleStartFromSample}
+                  className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-xl text-xs font-semibold border border-slate-700 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  Start from Sample Route
+                </button>
+                <p className="text-[11px] text-slate-400 leading-relaxed text-center">
+                  Loads a complete Phoenix → Sedona → Flagstaff example you can edit and save as
+                  your own.
+                </p>
               </div>
             </div>
           )}

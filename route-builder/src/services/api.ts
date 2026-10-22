@@ -181,7 +181,10 @@ export async function fetchItineraryList(): Promise<{ itineraries: ItineraryMeta
     const errorData = (await res.json().catch(() => ({ error: 'Failed to list itineraries' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to list itineraries with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to list itineraries with HTTP ${res.status}`,
+      res.status
+    );
   }
   return (await res.json()) as { itineraries: ItineraryMetadataSummary[] };
 }
@@ -192,7 +195,10 @@ export async function fetchItinerary(fileName: string): Promise<Record<string, u
     const errorData = (await res.json().catch(() => ({ error: 'Failed to load itinerary' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to load itinerary with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to load itinerary with HTTP ${res.status}`,
+      res.status
+    );
   }
   const data = (await res.json()) as Record<string, unknown>;
   const etag = res.headers.get('ETag');

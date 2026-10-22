@@ -423,7 +423,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
             const stat = await fs.stat(filePath);
             const isPrimary = path.resolve(dir) === path.resolve(this.primaryWriteDirectory);
-            const isProtected = !isPrimary || entry.name === 'sample_itinerary.json';
+            const isProtected = !isPrimary;
             const etag = isPrimary ? computeLocalEtag(rawContent) : undefined;
             const summary = extractMetadataSummary(
               entry.name,
@@ -466,7 +466,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
         const isPrimary = path.resolve(dir) === path.resolve(this.primaryWriteDirectory);
         data._etag = isPrimary ? computeLocalEtag(raw) : undefined;
         data._lastModified = stat.mtime.toISOString();
-        data._isProtected = !isPrimary || safeName === 'sample_itinerary.json';
+        data._isProtected = !isPrimary;
         return data;
       } catch {
         // Continue searching other directories
@@ -533,6 +533,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
       }
 
       const jsonString = JSON.stringify(content, null, 2);
+      await fs.mkdir(this.primaryWriteDirectory, { recursive: true });
       const tempPath = `${targetPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
       await fs.writeFile(tempPath, jsonString, 'utf-8');
       await fs.rename(tempPath, targetPath);
@@ -554,10 +555,6 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
     let safeName = path.basename(fileName);
     if (!safeName.endsWith('.json')) {
       safeName = `${safeName}.json`;
-    }
-
-    if (safeName === 'sample_itinerary.json') {
-      throw new Error(`Cannot delete protected itinerary: ${safeName}`);
     }
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
@@ -596,13 +593,11 @@ export interface S3ItineraryStorageOptions {
   bucketName?: string;
   s3Client?: S3Client;
   region?: string;
-  fallbackDirectories?: string[];
 }
 
 export class S3ItineraryStorageService implements IItineraryStorageService {
   private bucketName: string;
   private client: S3Client;
-  private fallbackDirectories: string[];
 
   constructor(options: S3ItineraryStorageOptions = {}) {
     this.bucketName = options.bucketName || process.env.S3_STORAGE_BUCKET || '';
@@ -617,15 +612,6 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
       new S3Client({
         ...(region ? { region } : {}),
       });
-
-    const defaultRoot = path.resolve(process.cwd(), '..');
-    const defaultItineraries = path.resolve(defaultRoot, 'itineraries');
-    const defaultAssets = path.resolve(defaultRoot, 'app/src/main/assets');
-    this.fallbackDirectories = options.fallbackDirectories || [
-      defaultAssets,
-      defaultItineraries,
-      defaultRoot,
-    ];
   }
 
   getUserPrefix(userEmail?: string): string {
@@ -682,12 +668,11 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
           const fileName = path.basename(item.Key);
           const lastModified = (item.LastModified || getRes.LastModified)?.toISOString();
           const etag = item.ETag || getRes.ETag;
-          const isProtected = fileName === 'sample_itinerary.json';
           const summary = extractMetadataSummary(
             fileName,
             data,
             lastModified,
-            isProtected,
+            undefined,
             etag
           );
           results.push(summary);
@@ -696,32 +681,6 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
         }
       })
     );
-
-    // If user list does not contain sample_itinerary.json, check fallback directories
-    const hasSample = results.some((r) => r.fileName === 'sample_itinerary.json');
-    if (!hasSample) {
-      for (const dir of this.fallbackDirectories) {
-        const samplePath = path.join(dir, 'sample_itinerary.json');
-        try {
-          const raw = await fs.readFile(samplePath, 'utf-8');
-          const data = JSON.parse(raw) as Record<string, unknown>;
-          if (isItineraryData(data)) {
-            const stat = await fs.stat(samplePath);
-            const summary = extractMetadataSummary(
-              'sample_itinerary.json',
-              data,
-              stat.mtime.toISOString(),
-              true,
-              undefined
-            );
-            results.push(summary);
-            break;
-          }
-        } catch {
-          // Continue searching fallback directories
-        }
-      }
-    }
 
     return results.sort((a, b) => {
       if (a.isMultiDay !== b.isMultiDay) {
@@ -751,26 +710,9 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
       const data = JSON.parse(bodyStr) as ItineraryRecord;
       data._etag = res.ETag;
       data._lastModified = res.LastModified?.toISOString();
-      data._isProtected = safeName === 'sample_itinerary.json';
       return data;
     } catch (err: unknown) {
       if (isNotFoundError(err)) {
-        if (safeName === 'sample_itinerary.json') {
-          for (const dir of this.fallbackDirectories) {
-            const samplePath = path.join(dir, 'sample_itinerary.json');
-            try {
-              const raw = await fs.readFile(samplePath, 'utf-8');
-              const data = JSON.parse(raw) as ItineraryRecord;
-              const stat = await fs.stat(samplePath);
-              data._etag = undefined;
-              data._lastModified = stat.mtime.toISOString();
-              data._isProtected = true;
-              return data;
-            } catch {
-              // Try next fallback directory
-            }
-          }
-        }
         return null;
       }
       throw err;
@@ -830,10 +772,6 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
     let safeName = path.basename(fileName);
     if (!safeName.endsWith('.json')) {
       safeName = `${safeName}.json`;
-    }
-
-    if (safeName === 'sample_itinerary.json') {
-      throw new Error(`Cannot delete protected itinerary: ${safeName}`);
     }
 
     const prefix = this.getUserPrefix(options?.userEmail);
@@ -907,7 +845,6 @@ export class ItineraryStorageService implements IItineraryStorageService {
         bucketName: s3Bucket,
         s3Client: options.s3Client,
         region: options.region,
-        fallbackDirectories: options.storageDirectories,
       });
     } else {
       this.delegate = new LocalFileSystemStorageService(options);

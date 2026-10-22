@@ -20,8 +20,8 @@ roadtrip-copilot/
 ├── AGENTS.md                  # Shared developer and agent handbook
 ├── README.md                  # Project overview and setup guide
 ├── itineraries/               # Workspace itineraries directory (git-ignored custom routes)
-│   ├── .gitignore             # Ignores *.json while tracking sample_itinerary.json
-│   └── sample_itinerary.json  # Bundled sample route (Phoenix → Sedona → Flagstaff)
+│   ├── .gitignore             # Ignores *.json (user-saved routes are never committed)
+│   └── .gitkeep               # Keeps the empty workspace directory in a fresh checkout
 ├── docs/
 │   ├── README.md              # Documentation directory map & architectural taxonomy
 │   ├── IDEAS.md               # Feature backlog and uncommitted ideas (incubator)
@@ -86,7 +86,7 @@ roadtrip-copilot/
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
 │   │   ├── components/        # AppHeader, AccountMenu, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
-│   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import)
+│   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import), sampleTrip.ts (in-code sample route factory)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   └── types/             # Frontend data models (auth, routing, ai, scout)
 │   └── tests/                 # Vitest suites (backend, engine, AI, schema/device, ui/) and Playwright header/account/session checks (browser/)

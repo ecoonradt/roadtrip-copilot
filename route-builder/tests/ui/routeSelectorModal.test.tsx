@@ -1,6 +1,7 @@
 import React from 'react';
 import * as renderer from 'react-test-renderer';
-import type { ReactTestRenderer } from 'react-test-renderer';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
+import { X } from 'lucide-react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RouteSelectorModal } from '../../src/components/RouteSelectorModal';
 import {
@@ -18,6 +19,27 @@ vi.mock('../../src/services/api', () => ({
 
 const act = renderer.act;
 const create = renderer.create;
+
+type KeydownListener = (event: { key: string }) => void;
+
+const addEventListenerMock = vi.fn<(type: string, listener: KeydownListener) => void>();
+const removeEventListenerMock = vi.fn<(type: string, listener: KeydownListener) => void>();
+
+/** Flattens the rendered text of a node, including text nested inside child elements. */
+const buttonText = (node: ReactTestInstance): string => {
+  const collect = (child: string | ReactTestInstance): string =>
+    typeof child === 'string' ? child : child.children.map(collect).join('');
+  return node.children.map(collect).join('');
+};
+
+/** Returns the most recently registered window keydown listener from the test stub. */
+const findLastKeydownListener = (): KeydownListener | undefined => {
+  const calls = addEventListenerMock.mock.calls.filter(([type]) => type === 'keydown');
+  return calls.length > 0 ? calls[calls.length - 1][1] : undefined;
+};
+
+const findButton = (root: ReactTestRenderer, label: string): ReactTestInstance | undefined =>
+  root.root.findAllByType('button').find((b) => buttonText(b).includes(label));
 
 const sampleWorkspaceSummary = {
   fileName: 'workspace_trip.json',
@@ -51,8 +73,8 @@ describe('RouteSelectorModal regression tests', () => {
     vi.useFakeTimers();
     vi.resetAllMocks();
     vi.stubGlobal('window', {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: addEventListenerMock,
+      removeEventListener: removeEventListenerMock,
     });
     vi.mocked(fetchItineraryList).mockResolvedValue({
       itineraries: [sampleWorkspaceSummary],
@@ -209,7 +231,7 @@ describe('RouteSelectorModal regression tests', () => {
     const tabButtons = root.root.findAllByType('button');
     const newTab = tabButtons.find((b) => {
       const text = b.children.map((c) => (typeof c === 'string' ? c : (c as { children?: string[] }).children?.join('') || '')).join('');
-      return text.includes('New Blank Route');
+      return text.includes('New Route');
     });
     expect(newTab).toBeDefined();
 
@@ -458,5 +480,235 @@ describe('RouteSelectorModal regression tests', () => {
 
     // onDeleteTrip should have received generation 42 (captured when delete was initiated)
     expect(onDeleteTrip).toHaveBeenCalledWith('workspace_trip.json', 42);
+  });
+
+  it('New tab: Start from Sample Route selects a fresh sample trip', async () => {
+    const onSelectTrip = vi.fn();
+    const onClose = vi.fn();
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={onSelectTrip}
+          currentFileName="current.json"
+        />
+      );
+    });
+    mounted.push(root);
+
+    const newTab = findButton(root, 'New Route');
+    expect(newTab).toBeDefined();
+
+    await act(async () => {
+      newTab!.props.onClick();
+    });
+
+    // The blank-itinerary form and the sample action both render on this tab
+    expect(findButton(root, 'Create Blank Itinerary')).toBeDefined();
+    const sampleBtn = findButton(root, 'Start from Sample Route');
+    expect(sampleBtn).toBeDefined();
+
+    await act(async () => {
+      sampleBtn!.props.onClick();
+    });
+
+    expect(onSelectTrip).toHaveBeenCalledTimes(1);
+    expect(onSelectTrip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tripName: 'Scenic Southwest: Phoenix to Flagstaff',
+        isAdHoc: true,
+        isMultiDay: false,
+      }),
+      { unsaved: true }
+    );
+
+    const [selectedTrip] = vi.mocked(onSelectTrip).mock.calls[0];
+    const parsedTrip = selectedTrip as ParsedTrip;
+    expect(parsedTrip.days[0].waypoints).toHaveLength(4);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Workspace empty state: offers both sample and blank starts', async () => {
+    vi.mocked(fetchItineraryList).mockResolvedValue({ itineraries: [] });
+    const onSelectTrip = vi.fn();
+    const onClose = vi.fn();
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={onSelectTrip}
+          currentFileName="current.json"
+        />
+      );
+    });
+    mounted.push(root);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(findButton(root, 'Start from Sample Route')).toBeDefined();
+    expect(findButton(root, 'Start Blank')).toBeDefined();
+
+    await act(async () => {
+      findButton(root, 'Start from Sample Route')!.props.onClick();
+    });
+
+    expect(onSelectTrip).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tripName: 'Scenic Southwest: Phoenix to Flagstaff',
+        isAdHoc: true,
+        isMultiDay: false,
+      }),
+      { unsaved: true }
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      findButton(root, 'Start Blank')!.props.onClick();
+    });
+
+    expect(JSON.stringify(root.toJSON())).toContain('Trip / Route Name');
+    expect(findButton(root, 'Create Blank Itinerary')).toBeDefined();
+  });
+
+  it('dismissible={false} hides the X button and blocks Escape and backdrop dismissal', async () => {
+    const onClose = vi.fn();
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={vi.fn()}
+          currentFileName="current.json"
+          dismissible={false}
+        />
+      );
+    });
+    mounted.push(root);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(root.root.findAllByType(X)).toHaveLength(0);
+
+    const keydown = findLastKeydownListener();
+    expect(keydown).toBeDefined();
+    act(() => {
+      keydown!({ key: 'Escape' });
+    });
+    expect(onClose).not.toHaveBeenCalled();
+
+    const backdrop = root.root.findAll(
+      (node) =>
+        typeof node.props.className === 'string' &&
+        node.props.className.includes('fixed inset-0 z-[1200]')
+    )[0];
+    expect(backdrop).toBeDefined();
+
+    act(() => {
+      const backdropNode = {};
+      backdrop.props.onClick({ target: backdropNode, currentTarget: backdropNode });
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('dismissible mode still closes via X, Escape, and backdrop click', async () => {
+    const onClose = vi.fn();
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={vi.fn()}
+          currentFileName="current.json"
+        />
+      );
+    });
+    mounted.push(root);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(root.root.findAllByType(X)).toHaveLength(1);
+
+    const keydown = findLastKeydownListener();
+    expect(keydown).toBeDefined();
+    act(() => {
+      keydown!({ key: 'Escape' });
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const backdrop = root.root.findAll(
+      (node) =>
+        typeof node.props.className === 'string' &&
+        node.props.className.includes('fixed inset-0 z-[1200]')
+    )[0];
+    expect(backdrop).toBeDefined();
+    act(() => {
+      const backdropNode = {};
+      backdrop.props.onClick({ target: backdropNode, currentTarget: backdropNode });
+    });
+    expect(onClose).toHaveBeenCalledTimes(2);
+
+    const closeBtn = root.root
+      .findAllByType('button')
+      .find((b) => b.props.onClick === onClose);
+    expect(closeBtn).toBeDefined();
+    act(() => {
+      closeBtn!.props.onClick();
+    });
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it('list failure shows an error with Retry that re-fetches and renders the routes', async () => {
+    vi.mocked(fetchItineraryList)
+      .mockRejectedValueOnce(new Error('Workspace unavailable'))
+      .mockResolvedValueOnce({ itineraries: [sampleWorkspaceSummary] });
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onSelectTrip={vi.fn()}
+          currentFileName="current.json"
+        />
+      );
+    });
+    mounted.push(root);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(JSON.stringify(root.toJSON())).toContain('Workspace unavailable');
+    const retryBtn = findButton(root, 'Retry');
+    expect(retryBtn).toBeDefined();
+    expect(fetchItineraryList).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      retryBtn!.props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchItineraryList).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(root.toJSON())).toContain('Workspace Trip');
+    expect(JSON.stringify(root.toJSON())).not.toContain('Workspace unavailable');
   });
 });

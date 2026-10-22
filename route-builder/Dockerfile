@@ -26,7 +26,6 @@ WORKDIR /app/route-builder
 COPY package.json ./
 COPY --from=builder /app/route-builder/node_modules ./node_modules
 COPY --from=builder /app/route-builder/dist-server ./dist-server
-COPY itineraries/sample_itinerary.json /app/itineraries/sample_itinerary.json
 
 EXPOSE 3001
 

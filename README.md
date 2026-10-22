@@ -188,7 +188,7 @@ The Route Builder Web Studio can also be deployed to AWS as a serverless applica
 ## Android App Features & In-Car Controls
 
 * **Android Auto Dashboard:** Native car display dashboard built with Android for Cars App Library (`androidx.car.app`), featuring a live telemetry pane, chronological milestones view, dynamic route switcher, and audio settings.
-* **Dynamic Route Loading:** Import any custom itinerary from phone storage without rebuilding the APK. Bundled sample routes in `assets/` serve as built-in examples and offline fallbacks.
+* **Dynamic Route Loading:** Import any custom itinerary from phone storage without rebuilding the APK. Routes authored and exported from the Route Builder web studio load directly on the device.
 * **In-Car Route Switcher (`RouteListScreen`):** Conforms to Android Auto distraction guidelines by capping items at 6 per page with "Prev" and "Next" paging. Active routes display a `"✓ "` indicator.
 * **Audio Channel Routing:** Toggle between the vehicle's **Media Channel** (standard stereo volume knob) and **Navigation Channel** (dedicated car navigation guidance stream).
 * **Pause vs. Duck:** Cleanly pauses music during announcements by default, with an option for subtle -14 dB background ducking.

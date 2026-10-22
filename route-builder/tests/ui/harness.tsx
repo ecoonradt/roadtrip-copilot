@@ -51,7 +51,7 @@ import { App } from '../../src/App';
 import { DayTabBar } from '../../src/components/DayTabBar';
 
 export interface HeaderProps {
-  onSaveTrip: () => Promise<void>;
+  onSaveTrip?: () => Promise<void> | void;
   cascadeResult: TimelineCascadeResult;
   isLoadingRoute: boolean;
   routeError: string | null;
@@ -100,6 +100,7 @@ export function selectTrip(app: ReactTestRenderer, next: ParsedTrip, options?: {
 export function selectorProps(app: ReactTestRenderer) {
   return app.root.findByType('test-selector').props as {
     isOpen: boolean;
+    dismissible?: boolean;
     onClose: () => void;
     onSelectTrip: (trip: ParsedTrip, options?: { unsaved?: boolean }) => void;
     currentFileName?: string;
@@ -132,6 +133,29 @@ export async function exported<T extends ItineraryExportModel = MultiDayItinerar
   await act(async () => { (button.props as { onClick: () => void }).onClick() });
   return JSON.parse(text(modal.root.findByType('pre'))) as T;
 }
+const entries = new Map<string, string>();
+
+export function seedStorage(values: Record<string, string>): void {
+  for (const [key, value] of Object.entries(values)) entries.set(key, value);
+}
+
+export function clearStorage(): void {
+  entries.clear();
+}
+
+export function stubWindowLocation(search: string): void {
+  const alertMock = vi.fn();
+  vi.stubGlobal('alert', alertMock);
+  const location = { href: `http://localhost:5173/${search}`, search };
+  vi.stubGlobal('window', {
+    location,
+    alert: alertMock,
+    history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search } },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks();
   api.fetchItinerary.mockResolvedValue(fixture());
@@ -143,12 +167,13 @@ beforeEach(() => {
   api.logoutAuth.mockResolvedValue(undefined);
   api.saveItinerary.mockResolvedValue({ success: true, fileName: 'test.json' });
   api.stageItinerary.mockResolvedValue({ downloadUrl: 'http://localhost:3001/test.json' });
-  const entries = new Map<string, string>();
-  vi.stubGlobal('localStorage', { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => entries.set(key, value) });
-   const alertMock = vi.fn();
-  vi.stubGlobal('alert', alertMock);
-  const location = { href: 'http://localhost:5173/?route=test.json&day=0', search: '?route=test.json&day=0' };
-  vi.stubGlobal('window', { location, alert: alertMock, history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search } }, addEventListener: () => {}, removeEventListener: () => {} });
+  clearStorage();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => entries.set(key, value),
+    removeItem: (key: string) => { entries.delete(key); },
+  });
+  stubWindowLocation('?route=test.json&day=0');
 });
 afterEach(async () => {
   for (const app of mounted) await act(async () => app.unmount());

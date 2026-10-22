@@ -3,7 +3,7 @@ import type { AuthStatusResponse } from '../../src/types/auth';
 import type { RouteResponse, Waypoint } from '../../src/types/routing';
 
 const ORIGIN = 'http://127.0.0.1:5174';
-const FILE_NAME = 'sample_itinerary.json';
+const FILE_NAME = 'demo_route.json';
 const TRIP_NAME = 'An exceptionally long Southwest road trip through red rock canyons, mountain overlooks, historic towns, and desert vistas';
 const USER_NAME = 'Alexandria ' + 'Very Long Browser Regression Driver Name '.repeat(4);
 const USER_EMAIL = 'alexandria.' + 'verylongallowlistedroadtripdriver'.repeat(5) + '@example.test';
@@ -115,6 +115,10 @@ const test = base.extend<BrowserOptions & { api: BrowserApi }>({
       // Existing pending requests stay held; only a new retry is allowed through.
       allowAuth: () => { pendingAuth = false; },
     };
+
+    await page.addInitScript((fileName) => {
+      window.localStorage.setItem('copilot_active_file', fileName);
+    }, FILE_NAME);
 
     await page.route('**/*', async (route) => {
       const request = route.request();

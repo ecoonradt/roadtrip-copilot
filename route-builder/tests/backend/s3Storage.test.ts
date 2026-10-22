@@ -165,17 +165,18 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
     mockS3 = new MockS3Client();
     tempFallbackDir = await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-s3-test-'));
 
-    // Create a bundled sample_itinerary.json in the fallback directory
-    const sample = {
-      trip_name: 'Bundled Sample Itinerary',
+    // Write a local itinerary outside S3. It is never passed to the service, so the
+    // S3 backend must never surface it in lists or reads.
+    const localDecoy = {
+      trip_name: 'Local Decoy Itinerary',
       checkpoints: [
         { id: '1', name: 'Start', lat: 34.0, lng: -118.0 },
         { id: '2', name: 'End', lat: 36.0, lng: -115.0 },
       ],
     };
     await fs.writeFile(
-      path.join(tempFallbackDir, 'sample_itinerary.json'),
-      JSON.stringify(sample, null, 2),
+      path.join(tempFallbackDir, 'local_decoy.json'),
+      JSON.stringify(localDecoy, null, 2),
       'utf-8'
     );
   });
@@ -198,7 +199,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       expect(service.getUserPrefix('Driver+Test@Example.COM')).toBe(
@@ -219,11 +219,10 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       );
     });
 
-    it('lists itineraries scoped to user prefix and appends bundled sample_itinerary.json as protected without etag', async () => {
+    it('lists itineraries scoped to the user prefix', async () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       // Save a route for user1
@@ -236,27 +235,17 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
         { userEmail: 'user1@example.com' }
       );
 
-      // List for user1
+      // List for user1: exactly the one S3 object, no local fallback file appended
       const listUser1 = await service.listItineraries('user1@example.com');
-      expect(listUser1).toHaveLength(2);
+      expect(listUser1).toHaveLength(1);
+      expect(listUser1[0].fileName).toBe('pacific_coast.json');
+      expect(listUser1[0].isProtected).toBeFalsy();
+      expect(listUser1[0].tripName).toBe('Pacific Coast Highway');
+      expect(listUser1[0].etag).toBeDefined();
 
-      const customRoute = listUser1.find((i) => i.fileName === 'pacific_coast.json');
-      const sampleRoute = listUser1.find((i) => i.fileName === 'sample_itinerary.json');
-
-      expect(customRoute).toBeDefined();
-      expect(customRoute?.isProtected).toBe(false);
-      expect(customRoute?.tripName).toBe('Pacific Coast Highway');
-      expect(customRoute?.etag).toBeDefined();
-
-      expect(sampleRoute).toBeDefined();
-      expect(sampleRoute?.isProtected).toBe(true);
-      expect(sampleRoute?.tripName).toBe('Bundled Sample Itinerary');
-      expect(sampleRoute?.etag).toBeUndefined();
-
-      // List for user2: should only have the bundled sample, not user1's route
+      // List for user2: isolation, no user1 route and no local fallback file
       const listUser2 = await service.listItineraries('user2@example.com');
-      expect(listUser2).toHaveLength(1);
-      expect(listUser2[0].fileName).toBe('sample_itinerary.json');
+      expect(listUser2).toHaveLength(0);
     });
 
     it('paginates through multiple pages of S3 objects when IsTruncated is true', async () => {
@@ -264,7 +253,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       for (let i = 1; i <= 5; i++) {
@@ -276,8 +264,7 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       }
 
       const list = await service.listItineraries('paginated@example.com');
-      // 5 user trips + 1 bundled sample
-      expect(list).toHaveLength(6);
+      expect(list).toHaveLength(5);
       const listCalls = mockS3.calls.filter((c) => c.name === 'ListObjectsV2Command');
       expect(listCalls.length).toBeGreaterThanOrEqual(3);
       mockS3.pageSize = undefined;
@@ -287,7 +274,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       const saved = await service.saveItinerary(
@@ -301,38 +287,11 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(retrieved?.trip_name).toBe('Historic Route 66');
       expect(retrieved?._etag).toBe(saved.etag);
       expect(retrieved?._lastModified).toBeDefined();
-      expect(retrieved?._isProtected).toBe(false);
+      expect(retrieved?._isProtected).toBeUndefined();
 
       // Different user cannot access driver's file
       const notFoundOtherUser = await service.getItinerary('route66.json', 'stranger@example.com');
       expect(notFoundOtherUser).toBeNull();
-    });
-
-    it('retrieves bundled sample_itinerary.json from fallback directory with _isProtected: true and _etag undefined when not in S3, and allows fresh saving', async () => {
-      const service = new S3ItineraryStorageService({
-        bucketName: 'test-bucket',
-        s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
-      });
-
-      const sample = await service.getItinerary('sample_itinerary.json', 'anybody@example.com');
-      expect(sample).toBeDefined();
-      expect(sample?.trip_name).toBe('Bundled Sample Itinerary');
-      expect(sample?._isProtected).toBe(true);
-      expect(sample?._etag).toBeUndefined();
-
-      // Fresh user can save this sample with If-None-Match: * into S3 without 412
-      const firstSave = await service.saveItinerary(
-        'sample_itinerary.json',
-        { trip_name: 'My Custom Sample', checkpoints: [] },
-        { userEmail: 'anybody@example.com', ifNoneMatch: '*' }
-      );
-      expect(firstSave.success).toBe(true);
-      expect(firstSave.etag).toBeDefined();
-
-      // Subsequent retrieval has the S3 ETag
-      const retrievedAfterSave = await service.getItinerary('sample_itinerary.json', 'anybody@example.com');
-      expect(retrievedAfterSave?._etag).toBe(firstSave.etag);
     });
 
     it('does not hardcode us-east-1 when region option and AWS_REGION are unset', async () => {
@@ -373,7 +332,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       // First write with If-None-Match: * succeeds
@@ -398,7 +356,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       const initial = await service.saveItinerary(
@@ -426,23 +383,10 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(updated.etag).not.toBe(initial.etag);
     });
 
-    it('protects sample_itinerary.json from deletion in S3', async () => {
-      const service = new S3ItineraryStorageService({
-        bucketName: 'test-bucket',
-        s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
-      });
-
-      await expect(
-        service.deleteItinerary('sample_itinerary.json', { userEmail: 'driver@example.com' })
-      ).rejects.toThrow(/Cannot delete protected itinerary/);
-    });
-
     it('deleteItinerary throws 404 error when object does not exist in S3', async () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       await expect(
@@ -454,7 +398,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       const service = new S3ItineraryStorageService({
         bucketName: 'test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
 
       const saved = await service.saveItinerary(
@@ -492,28 +435,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(delCall?.input.IfMatch).toBe(saved.etag);
     });
 
-    it('marks sample_itinerary.json as protected in both list and get when stored in S3', async () => {
-      const service = new S3ItineraryStorageService({
-        bucketName: 'test-bucket',
-        s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
-      });
-
-      await service.saveItinerary(
-        'sample_itinerary.json',
-        { trip_name: 'S3 Stored Sample', checkpoints: [] },
-        { userEmail: 'driver@example.com' }
-      );
-
-      const list = await service.listItineraries('driver@example.com');
-      const sampleItem = list.find((i) => i.fileName === 'sample_itinerary.json');
-      expect(sampleItem).toBeDefined();
-      expect(sampleItem?.isProtected).toBe(true);
-
-      const retrieved = await service.getItinerary('sample_itinerary.json', 'driver@example.com');
-      expect(retrieved).toBeDefined();
-      expect(retrieved?._isProtected).toBe(true);
-    });
   });
 
   describe('Fastify Endpoints Integration with S3 Storage & User Auth Scoping', () => {
@@ -544,7 +465,6 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       s3Service = new S3ItineraryStorageService({
         bucketName: 'fastify-test-bucket',
         s3Client: mockS3 as unknown as S3Client,
-        fallbackDirectories: [tempFallbackDir],
       });
     });
 
@@ -570,7 +490,7 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       });
       expect(postAlice.statusCode).toBe(200);
 
-      // Alice lists itineraries: sees her trip + bundled sample
+      // Alice lists itineraries: sees her trip
       const getAlice = await app.inject({
         method: 'GET',
         url: '/api/itineraries',
@@ -581,9 +501,8 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(getAlice.statusCode).toBe(200);
       const aliceBody = JSON.parse(getAlice.body) as { itineraries: Array<{ fileName: string }> };
       expect(aliceBody.itineraries.map((i) => i.fileName)).toContain('alice_mountains.json');
-      expect(aliceBody.itineraries.map((i) => i.fileName)).toContain('sample_itinerary.json');
 
-      // Bob lists itineraries: sees only bundled sample, NEVER Alice's trip
+      // Bob lists itineraries: NEVER Alice's trip, and no locally bundled routes
       const getBob = await app.inject({
         method: 'GET',
         url: '/api/itineraries',
@@ -594,7 +513,7 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(getBob.statusCode).toBe(200);
       const bobBody = JSON.parse(getBob.body) as { itineraries: Array<{ fileName: string }> };
       expect(bobBody.itineraries.map((i) => i.fileName)).not.toContain('alice_mountains.json');
-      expect(bobBody.itineraries.map((i) => i.fileName)).toContain('sample_itinerary.json');
+      expect(bobBody.itineraries).toHaveLength(0);
     });
 
     it('GET /api/itineraries/:filename sets ETag header and isolates by user', async () => {
@@ -709,21 +628,11 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
       expect(validUpdate.headers['etag']).not.toBe(v1Etag);
     });
 
-    it('DELETE /api/itineraries/:filename protects sample and handles If-Match (412 on race)', async () => {
+    it('DELETE /api/itineraries/:filename handles If-Match (412 on race)', async () => {
       const app = createApp({
         storageService: s3Service,
         authService,
       });
-
-      // Delete sample_itinerary.json returns 403 Forbidden
-      const delSample = await app.inject({
-        method: 'DELETE',
-        url: '/api/itineraries/sample_itinerary.json',
-        headers: {
-          authorization: `Bearer ${aliceToken}`,
-        },
-      });
-      expect(delSample.statusCode).toBe(403);
 
       // Create a deletable trip
       const createRes = await app.inject({
