@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 import type { Waypoint, WaypointType, GeocodeResult } from '../types/routing';
-import type { WaypointContext } from '../types/ai';
+import type { WaypointContext, AiModelOption } from '../types/ai';
 import type { TimelineCascadeResult, ScheduledStop } from '../engine/types';
 import { SearchBar } from './SearchBar';
 import { EditWaypointModal } from './EditWaypointModal';
@@ -39,6 +39,9 @@ interface TimelineSidebarProps {
   selectedWaypointId?: string | null;
   onSelectWaypoint?: (id: string | null) => void;
   aiAvailable?: boolean;
+  aiModels?: AiModelOption[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
 }
 
 const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
@@ -71,6 +74,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   selectedWaypointId,
   onSelectWaypoint,
   aiAvailable = true,
+  aiModels,
+  selectedModelId,
+  onSelectModel,
 }) => {
   // Resizable sidebar width with localStorage persistence
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -222,7 +228,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
         };
       });
 
-      const batchResult = await generateBatchCopilotAlerts(contexts);
+      const batchResult = await generateBatchCopilotAlerts(contexts, {
+        modelId: selectedModelId || undefined,
+      });
       const updatesMap: Record<string, Partial<Waypoint>> = {};
       for (const [wpId, alert] of Object.entries(batchResult.alerts)) {
         updatesMap[wpId] = {
@@ -1051,6 +1059,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
           onClose={() => setSelectedModal(null)}
           onSave={(waypointId, updates) => onUpdateWaypoint(waypointId, updates)}
           aiAvailable={aiAvailable}
+          aiModels={aiModels}
+          selectedModelId={selectedModelId}
+          onSelectModel={onSelectModel}
         />
       )}
     </aside>

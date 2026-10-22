@@ -26,6 +26,7 @@
 
 ### D. Pluggable AI Harness Adapters
 * AI generation adheres to the `AiHarnessAdapter` interface (`server/services/aiService.ts`):
+  * `AwsBedrockHarnessAdapter` (`server/services/bedrockService.ts`): Primary cloud adapter using Amazon Bedrock's unified `ConverseCommand` and `ConverseStreamCommand` (`@aws-sdk/client-bedrock-runtime`). Defaults to `us.moonshotai.kimi-k3` for Route Scout and `us.amazon.nova-2-lite-v1:0` for alert copywriting (`ADR-0010`), normalizes bare foundation model IDs to system-defined `us.` inference profiles where required, and exposes an allowlisted multi-vendor model catalog (`GET /api/ai/status`) for runtime UI selection.
   * `AgyHarnessAdapter`: Local Antigravity CLI dynamically resolving the latest Flash model.
   * `GeminiStudioHarnessAdapter`: Cloud API defaulting to `gemini-3.8-flash`.
   * Graceful UI Disabling: AI features (alert copywriting and Route Scout) require an active AI engine or API key; when unavailable, the studio gracefully disables all AI buttons with informative tooltips.
@@ -36,11 +37,11 @@
   * **Day Scope:** Evaluates overall driving pace, scenic corridors, overlook opportunities, and meal/fuel deserts.
   * **Waypoint Scope:** Audits road accessibility (paved vs. dirt), parking pull-offs, lighting/golden hour timing, and coordinate precision.
 * **Pluggable Adapter Seam:** The core road-trip domain prompt (`buildScoutDomainPrompt`) is kept strictly pure and harness-agnostic. All harness-specific tool permissions and execution rules live behind the `AiHarnessAdapter` lifecycle hooks:
+  * `AwsBedrockHarnessAdapter.generateStreamWithTools`: Executes multi-turn `ConverseStreamCommand` tool loops (`MAX_TOOL_ITERATIONS = 5`, parallel `Promise.all` tool dispatch) with `activity`, `thought`, and `delta` SSE streaming and `<thinking>`/`<think>` reasoning tag hygiene.
   * `decorateScoutPrompt?(domainPrompt)`: In `AgyHarnessAdapter`, grants research and calculation tools (`search_web`, `read_url_content`, and `run_command` for fast coordinate math/network checks); strictly forbids background tasks, subagents, interactive questions (`ask_question`), browser sessions, and modifications to workspace files.
-  * `sanitizeResponse?(rawText)`: In `AgyHarnessAdapter`, strips internal harness preambles (e.g. background task yields) and trailing meta-commentary from driver-facing prose.
-  * Cloud and future adapters (Claude Code, OpenAI, Codex) plug into this seam with their respective tool declarations and prompt decorations.
+  * `sanitizeResponse?(rawText)`: Strips internal harness preambles, `<thinking>`/`<think>` XML blocks, and trailing meta-commentary from driver-facing prose.
 * **Interactive Suggestion Cards & Human-in-the-Loop Verification:** Emits actionable candidate blocks (`json:suggestions`) allowing 1-click **Add Waypoint** or **Update Waypoint** with dynamic map preview pins before driver approval. Operates under the principle that AI assistants are valuable discovery advisors but require human verification for real-world geometry. The UI supports an in-app "Test on Google Maps" query link, `place_name` vs `name` decoupling, and automatic Place ID extraction from pasted Maps URLs to lock in verified locations.
-* **SSE Streaming:** Streams tokens over `/api/ai/scout/chat-stream` with collapsible reasoning/tool thought capture.
+* **SSE Streaming & Keep-Alive Heartbeats:** Streams tokens over `/api/ai/scout/chat/stream` with immediate `: ping\n\n` and periodic `: keep-alive\n\n` SSE comments to keep CloudFront and Lambda Function URL streams alive during multi-turn tool calls.
 
 ### F. Timeline Cascade, Navigation Links & Device Handoff
 * **Timeline Schedule Cascade:** Recalculates arrival/departure times across waypoints; modifying dwell time on stop $k$ ripples through stops $k+1 \dots n$. Supports backward scheduling from destination deadlines ("Catch-up" mode) and timezone border offset jumps.
@@ -85,10 +86,10 @@ route-builder/
 │   ├── routes/
 │   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
-│   │   ├── ai.ts               # /api/copilot/generate & /api/ai/status
+│   │   ├── ai.ts               # /api/copilot/generate, /api/copilot/day-title & /api/ai/status
 │   │   ├── device.ts           # /api/device (network-info, staging, download)
 │   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
-│   │   └── scout.ts            # /api/ai/scout (conversational assistant & quick prompts)
+│   │   └── scout.ts            # /api/ai/scout (conversational assistant, SSE stream & quick prompts)
 │   ├── services/
 │   │   ├── authService.ts      # Google OIDC token verification, PKCE, HS256 JWT signing & SSM secret loader
 │   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
@@ -96,9 +97,10 @@ route-builder/
 │   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
 │   │   ├── promptBuilder.ts    # Prompt contract generator
 │   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
-│   │   ├── aiService.ts        # Pluggable AI adapters (Agy, Gemini API) & availability status
+│   │   ├── bedrockService.ts   # Amazon Bedrock Converse / ConverseStream adapter & model catalog
+│   │   ├── aiService.ts        # Pluggable AI adapters (Bedrock, Agy, Gemini API) & availability status
 │   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
-│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
+│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk/S3 storage
 │   │   └── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
 │   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
 ├── src/

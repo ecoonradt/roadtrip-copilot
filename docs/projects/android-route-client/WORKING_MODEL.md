@@ -63,16 +63,16 @@ The project has three foundational decisions pre-recorded:
 
 ## 4. Quota-Optimized Orchestrator-Worker Model
 
-As with the cloud project, execution in Phase 2 adheres to the orchestrator-worker delegation hierarchy:
+As with the cloud project, execution in Phase 2 adheres to the orchestrator-worker delegation hierarchy and the **Two-Gate Quality Protocol** defined in [`route-scout-cloud/WORKING_MODEL.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/WORKING_MODEL.md#two-gate-quality-protocol-preventing-review-churn):
 * **Frontier Orchestrator (Primary Agent):**
-  * Authors Tier 2 and Tier 3 plans.
+  * Authors Tier 2 and Tier 3 plans with Gate 1 Contract-First specifications (exact Kotlin interfaces, coroutine dispatcher & cancellation invariants, and negative constraints).
   * Formulates precise interface contracts and Kotlin math algorithms.
   * Ensures Android Auto distraction compliance (Rule 6) and background service battery discipline.
-  * Audits code changes and executes Android unit & Robolectric tests (`./gradlew testDebugUnitTest`).
+  * Performs Gate 2 Adversarial Diff Audits and executes Android unit & Robolectric tests (`./gradlew testDebugUnitTest`).
 * **Subagent Workers (Delegated per active harness adapter):**
-  * Porting mathematical engines (`cascade.ts` $\to$ `OfflineCascadeEngine.kt`, `googleMapsUrl.ts` $\to$ `GoogleMapsUrlGenerator.kt`).
+  * Porting mathematical engines (`cascade.ts` $\to$ `OfflineCascadeEngine.kt`, `googleMapsUrl.ts` $\to$ `GoogleMapsUrlGenerator.kt`) from explicit orchestrator specifications.
   * Scaffolding XML layouts and ViewBindings (`item_waypoint_row.xml`, `bottom_sheet_scout.xml`).
-  * Writing unit test fixtures and mock responses.
+  * Writing unit and unhappy-path test fixtures and mock responses.
 
 ---
 

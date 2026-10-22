@@ -8,8 +8,19 @@ import type {
   BatchAlertResult,
   DayTitleContext,
   DayTitleResult,
+  AiModelOption,
+  ToolDeclaration,
+  GenerateOptions,
+  GenerateStreamWithToolsResult,
+  AiStatusResult,
+  AiEngineType,
 } from '../types/ai.js';
-import type { ScoutActivity } from '../types/scout.js';
+import type { ScoutActivity, ScoutStreamEvent } from '../types/scout.js';
+import {
+  AwsBedrockHarnessAdapter,
+  InvalidModelError,
+  BEDROCK_MODEL_CATALOG,
+} from './bedrockService.js';
 
 import {
   buildSingleWaypointPrompt,
@@ -23,27 +34,39 @@ import {
   parseModelOutput,
 } from './schemaParser.js';
 
+export type { AiStatusResult };
+export { InvalidModelError, BEDROCK_MODEL_CATALOG };
+
 const execFileAsync = promisify(execFile);
 
 /**
  * Pluggable AI Harness Adapter interface for LLM generation engines.
  */
 export interface AiHarnessAdapter {
-  readonly id: 'agy' | 'cloud' | 'template' | string;
+  readonly id: 'bedrock' | 'agy' | 'cloud' | 'template' | string;
   readonly name: string;
   isAvailable(apiKey?: string): Promise<boolean>;
-  generate(prompt: string, apiKey?: string): Promise<string>;
+  generate(prompt: string, apiKeyOrOptions?: string | GenerateOptions): Promise<string>;
   decorateScoutPrompt?(domainPrompt: string): string;
   sanitizeResponse?(rawText: string): string;
-}
-
-export interface AiStatusResult {
-  available: boolean;
-  message?: string;
+  validateModelId?(modelId: string): string;
+  getModelCatalog?(): {
+    models: AiModelOption[];
+    defaultScoutModelId: string;
+    defaultCopywriterModelId: string;
+  };
+  generateStreamWithTools?(
+    prompt: string,
+    tools: ToolDeclaration[],
+    dispatcher: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+    onChunk: (event: ScoutStreamEvent) => void,
+    options?: GenerateOptions
+  ): Promise<GenerateStreamWithToolsResult>;
 }
 
 export interface AiServiceOptions {
   adapters?: AiHarnessAdapter[];
+  bedrockAdapter?: AwsBedrockHarnessAdapter;
   execAgyFn?: (prompt: string) => Promise<string>;
   fetchCloudFn?: (prompt: string, apiKey: string) => Promise<string>;
   defaultApiKey?: string;
@@ -52,7 +75,9 @@ export interface AiServiceOptions {
 
 export interface GenerationOptions {
   apiKey?: string;
-  preferredEngine?: 'agy' | 'cloud' | 'template' | 'auto';
+  modelId?: string;
+  abortSignal?: AbortSignal;
+  preferredEngine?: AiEngineType | 'auto';
 }
 
 let cachedAgyFlashModel: string | null = null;
@@ -486,6 +511,11 @@ export class AiService {
         this.registerAdapter(adapter);
       }
     } else {
+      if (options.bedrockAdapter) {
+        this.registerAdapter(options.bedrockAdapter);
+      } else if (!options.execAgyFn && !options.fetchCloudFn) {
+        this.registerAdapter(new AwsBedrockHarnessAdapter());
+      }
       const agyAdapter = new AgyHarnessAdapter(options.execAgyFn || defaultExecAgy);
       const cloudAdapter = new GeminiStudioHarnessAdapter(
         options.fetchCloudFn ||
@@ -504,6 +534,17 @@ export class AiService {
 
   getAdapter(id: string): AiHarnessAdapter | undefined {
     return this.adapters.get(id);
+  }
+
+  validateModelId(modelId?: string): string | undefined {
+    if (modelId === undefined || modelId === null) {
+      return undefined;
+    }
+    const bedrock = this.adapters.get('bedrock');
+    if (bedrock && typeof bedrock.validateModelId === 'function') {
+      return bedrock.validateModelId(modelId);
+    }
+    return new AwsBedrockHarnessAdapter({ available: false }).validateModelId(modelId);
   }
 
   /**
@@ -528,10 +569,31 @@ export class AiService {
    * Returns a generic status object for AI feature readiness.
    */
   async getStatus(apiKey?: string): Promise<AiStatusResult> {
-    const available = await this.checkAvailability(apiKey);
+    const effectiveApiKey = apiKey || this.defaultApiKey;
+    let activeAdapter: AiHarnessAdapter | undefined;
+
+    for (const adapter of this.adapters.values()) {
+      try {
+        if (await adapter.isAvailable(effectiveApiKey)) {
+          activeAdapter = adapter;
+          break;
+        }
+      } catch {
+        // Ignore adapter check error and check remaining adapters
+      }
+    }
+
+    const bedrock = this.adapters.get('bedrock') as AwsBedrockHarnessAdapter | undefined;
+    const catalog =
+      bedrock && typeof bedrock.getModelCatalog === 'function'
+        ? bedrock.getModelCatalog()
+        : undefined;
+
     return {
-      available,
-      message: available
+      available: Boolean(activeAdapter),
+      engine: activeAdapter ? (activeAdapter.id as AiEngineType) : undefined,
+      ...(catalog ? catalog : {}),
+      message: activeAdapter
         ? undefined
         : 'AI features are currently unavailable. An active AI engine or API key is required.',
     };
@@ -544,6 +606,7 @@ export class AiService {
     waypoint: WaypointContext,
     options: GenerationOptions = {}
   ): Promise<GenerateAlertResult> {
+    const validatedModelId = this.validateModelId(options.modelId);
     const apiKey = options.apiKey || this.defaultApiKey;
     const prompt = buildSingleWaypointPrompt(waypoint);
     const preferredEngine = options.preferredEngine || 'auto';
@@ -560,8 +623,37 @@ export class AiService {
       };
     }
 
-    // 1. Try Primary: agy harness adapter
-    if (preferredEngine !== 'cloud') {
+    // 1. Try Bedrock adapter if preferred or available
+    const bedrock = this.adapters.get('bedrock');
+    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
+      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable(apiKey));
+      if (isAvail) {
+        try {
+          const rawOutput = await bedrock.generate(prompt, {
+            modelId: validatedModelId,
+            abortSignal: options.abortSignal,
+          });
+          const parsed = parseModelOutput(rawOutput);
+          const alert = parseCopilotAlert(parsed, waypoint);
+          return {
+            alert,
+            title: alert.title,
+            message: alert.message,
+            speech: alert.speech,
+            recommended_trigger_radius_miles: alert.recommended_trigger_radius_miles,
+            engine: 'bedrock',
+          };
+        } catch (err: unknown) {
+          if (preferredEngine === 'bedrock') {
+            throw err;
+          }
+          // Fall through to agy -> cloud -> template
+        }
+      }
+    }
+
+    // 2. Try Primary: agy harness adapter
+    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
       const agy = this.adapters.get('agy');
       if (agy) {
         try {
@@ -582,8 +674,8 @@ export class AiService {
       }
     }
 
-    // 2. Try Cloud Fallback if apiKey is available
-    if (apiKey) {
+    // 3. Try Cloud Fallback if apiKey is available
+    if (apiKey && preferredEngine !== 'bedrock') {
       const cloud = this.adapters.get('cloud');
       if (cloud) {
         try {
@@ -604,7 +696,7 @@ export class AiService {
       }
     }
 
-    // 3. Deterministic Template Fallback (offline resilience)
+    // 4. Deterministic Template Fallback (offline resilience)
     const templateAlert = generateTemplateAlert(waypoint);
     return {
       alert: templateAlert,
@@ -617,21 +709,20 @@ export class AiService {
   }
 
   /**
-   * Suggests a day title from the actual stops (agy -> cloud -> deterministic template).
+   * Suggests a day title from the actual stops (bedrock -> agy -> cloud -> deterministic template).
    */
   async generateDayTitle(
     ctx: DayTitleContext,
     options: GenerationOptions = {}
   ): Promise<DayTitleResult> {
+    const validatedModelId = this.validateModelId(options.modelId);
     const apiKey = options.apiKey || this.defaultApiKey;
     const preferredEngine = options.preferredEngine || 'auto';
     const prompt = buildDayTitlePrompt(ctx);
 
-    const attempt = async (id: 'agy' | 'cloud', key?: string): Promise<DayTitleResult | null> => {
-      const adapter = this.adapters.get(id);
-      if (!adapter) return null;
+    const parseTitle = (rawOutput: string, id: AiEngineType): DayTitleResult | null => {
       try {
-        const parsed = parseModelOutput(await adapter.generate(prompt, key));
+        const parsed = parseModelOutput(rawOutput);
         const raw = parsed && typeof parsed === 'object' ? (parsed as { title?: unknown }).title : parsed;
         const title = typeof raw === 'string' ? raw.replace(/^day\s*\d+\s*[:\-–]\s*/i, '').trim() : '';
         return title ? { title: title.slice(0, 60), engine: id } : null;
@@ -640,14 +731,60 @@ export class AiService {
       }
     };
 
-    if (preferredEngine !== 'template' && preferredEngine !== 'cloud') {
-      const r = await attempt('agy');
-      if (r) return r;
+    if (preferredEngine === 'template') {
+      const first = ctx.stops[0]?.name.split(',')[0] || 'Start';
+      const last = ctx.stops[ctx.stops.length - 1]?.name.split(',')[0] || 'End';
+      return { title: `${first} to ${last}`.slice(0, 60), engine: 'template' };
     }
-    if (preferredEngine !== 'template' && apiKey) {
-      const r = await attempt('cloud', apiKey);
-      if (r) return r;
+
+    // 1. Try Bedrock
+    const bedrock = this.adapters.get('bedrock');
+    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
+      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable(apiKey));
+      if (isAvail) {
+        try {
+          const rawOutput = await bedrock.generate(prompt, {
+            modelId: validatedModelId,
+            abortSignal: options.abortSignal,
+          });
+          const r = parseTitle(rawOutput, 'bedrock');
+          if (r) return r;
+        } catch (err: unknown) {
+          if (preferredEngine === 'bedrock') {
+            throw err;
+          }
+        }
+      }
     }
+
+    // 2. Try Agy
+    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
+      const agy = this.adapters.get('agy');
+      if (agy) {
+        try {
+          const rawOutput = await agy.generate(prompt);
+          const r = parseTitle(rawOutput, 'agy');
+          if (r) return r;
+        } catch {
+          // Fall through
+        }
+      }
+    }
+
+    // 3. Try Cloud
+    if (apiKey && preferredEngine !== 'bedrock') {
+      const cloud = this.adapters.get('cloud');
+      if (cloud) {
+        try {
+          const rawOutput = await cloud.generate(prompt, apiKey);
+          const r = parseTitle(rawOutput, 'cloud');
+          if (r) return r;
+        } catch {
+          // Fall through
+        }
+      }
+    }
+
     const first = ctx.stops[0]?.name.split(',')[0] || 'Start';
     const last = ctx.stops[ctx.stops.length - 1]?.name.split(',')[0] || 'End';
     return { title: `${first} to ${last}`.slice(0, 60), engine: 'template' };
@@ -660,6 +797,7 @@ export class AiService {
     waypoints: WaypointContext[],
     options: GenerationOptions = {}
   ): Promise<BatchAlertResult> {
+    const validatedModelId = this.validateModelId(options.modelId);
     if (waypoints.length === 0) {
       return { alerts: {}, results: [], engine: 'template' };
     }
@@ -672,8 +810,34 @@ export class AiService {
       return this.generateBatchTemplate(waypoints);
     }
 
-    // 1. Try Primary: agy harness adapter
-    if (preferredEngine !== 'cloud') {
+    // 1. Try Bedrock adapter if preferred or available
+    const bedrock = this.adapters.get('bedrock');
+    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
+      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable(apiKey));
+      if (isAvail) {
+        try {
+          const rawOutput = await bedrock.generate(prompt, {
+            modelId: validatedModelId,
+            abortSignal: options.abortSignal,
+          });
+          const parsed = parseModelOutput(rawOutput);
+          const alerts = parseBatchCopilotAlerts(parsed, waypoints);
+          const results = waypoints.map((wp) => ({
+            id: wp.id,
+            alert: alerts[wp.id],
+          }));
+          return { alerts, results, engine: 'bedrock' };
+        } catch (err: unknown) {
+          if (preferredEngine === 'bedrock') {
+            throw err;
+          }
+          // Fall through
+        }
+      }
+    }
+
+    // 2. Try Primary: agy harness adapter
+    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
       const agy = this.adapters.get('agy');
       if (agy) {
         try {
@@ -691,8 +855,8 @@ export class AiService {
       }
     }
 
-    // 2. Try Cloud Fallback if apiKey is available
-    if (apiKey) {
+    // 3. Try Cloud Fallback if apiKey is available
+    if (apiKey && preferredEngine !== 'bedrock') {
       const cloud = this.adapters.get('cloud');
       if (cloud) {
         try {
@@ -710,7 +874,7 @@ export class AiService {
       }
     }
 
-    // 3. Deterministic Template Fallback
+    // 4. Deterministic Template Fallback
     return this.generateBatchTemplate(waypoints);
   }
 

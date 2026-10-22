@@ -1,12 +1,12 @@
 # WP-02: Amazon S3 Atomic Itinerary Storage Service
 
 * **Milestone:** Milestone 2 (M2) — Amazon S3 Atomic Itinerary Storage Service
-* **Status:** In Progress
+* **Status:** Completed
 * **Branch:** `feat/m2-s3-itinerary-storage`
 * **Governing Documents:**
   * Architecture Blueprint: [`route_scout_cloud_architecture.md`](../../route_scout_cloud_architecture.md)
   * Phase Roadmap: [`plan/ROADMAP.md`](../ROADMAP.md)
-  * Architecture Decisions: [`DECISIONS.md`](../../DECISIONS.md), [`ADR-0003`](../../decisions/0003-s3-atomic-json-persistence.md), [`ADR-0004`](../../decisions/0004-hybrid-local-dev-mode.md), [`ADR-0005`](../../decisions/0005-cdk-iac-and-github-actions-cicd.md)
+  * Architecture Decisions: [`DECISIONS.md`](../../DECISIONS.md), [`ADR-0003`](../../decisions/0003-s3-atomic-json-persistence.md), [`ADR-0004`](../../decisions/0004-hybrid-local-dev-mode.md), [`ADR-0005`](../../decisions/0005-cdk-iac-and-github-actions-cicd.md), [`ADR-0008`](../../decisions/0008-local-storage-in-process-lock.md), [`ADR-0009`](../../decisions/0009-ecr-public-authenticated-pulls.md)
 
 ---
 
@@ -141,5 +141,5 @@ Implement cloud-native itinerary persistence backed by Amazon S3 (`users/{email}
 
 ## 6. Next Session Handoff
 
-* **Where We Stopped:** Milestone 2 implementation, the in-code sample-route refactor (no storage special cases), startup/retry loading guard, independent review fixes, comprehensive regression tests, CDK assertions, browser geometry tests, and living documentation are complete and verified green locally (`./scripts/ci_check.sh` and `npm run test:browser`). The loading guard was also verified in Chromium with a deferred retry and a fresh-visit chooser.
-* **Next Step:** Push branch `feat/m2-s3-itinerary-storage` to GitHub and open pull request targeting `main`. Cloud deployment will be performed upon user instruction or CI merge.
+* **Where We Stopped:** Milestone 2 is complete, merged to `main` (PR #4), and deployed to AWS (with ECR Public auth fix in PR #5 / ADR-0009).
+* **Next Step:** Archive `WP-02` and initiate Milestone 3 (`WP-03-bedrock-adapter-and-model-selection.md`).

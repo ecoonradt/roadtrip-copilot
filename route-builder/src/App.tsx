@@ -21,6 +21,7 @@ import {
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
 import type { AuthStatusResponse } from './types/auth';
 import type { ScoutScope, ScoutSuggestion } from './types/scout';
+import type { AiModelOption } from './types/ai';
 import {
   calculateTimelineCascade,
   calculateBackwardSchedule,
@@ -111,7 +112,28 @@ export function App() {
 
   // AI availability readiness state
   const [aiAvailable, setAiAvailable] = useState<boolean>(true);
+  const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
+  const [selectedScoutModelId, setSelectedScoutModelId] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('copilot_scout_model_id') || '' : ''
+  );
+  const [selectedCopywriterModelId, setSelectedCopywriterModelId] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('copilot_copywriter_model_id') || '' : ''
+  );
   const aiSeqRef = useRef<number>(0);
+
+  const handleSelectScoutModel = useCallback((modelId: string) => {
+    setSelectedScoutModelId(modelId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('copilot_scout_model_id', modelId);
+    }
+  }, []);
+
+  const handleSelectCopywriterModel = useCallback((modelId: string) => {
+    setSelectedCopywriterModelId(modelId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('copilot_copywriter_model_id', modelId);
+    }
+  }, []);
 
   const checkAiAvailability = useCallback(async () => {
     const seq = ++aiSeqRef.current;
@@ -119,6 +141,44 @@ export function App() {
       const status = await fetchAiStatus();
       if (seq === aiSeqRef.current) {
         setAiAvailable(status.available);
+        const models = status.models ?? [];
+        setAiModels(models);
+        if (models.length > 0) {
+          const scoutEligible = models.filter((m) => m.role === 'scout' || m.role === 'both');
+          const copywriterEligible = models.filter((m) => m.role === 'copywriter' || m.role === 'both');
+
+          if (scoutEligible.length > 0) {
+            setSelectedScoutModelId((prev) => {
+              if (prev && scoutEligible.some((m) => m.id === prev)) {
+                return prev;
+              }
+              const fallback =
+                (status.defaultScoutModelId && scoutEligible.some((m) => m.id === status.defaultScoutModelId)
+                  ? status.defaultScoutModelId
+                  : undefined) || scoutEligible[0].id;
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('copilot_scout_model_id', fallback);
+              }
+              return fallback;
+            });
+          }
+
+          if (copywriterEligible.length > 0) {
+            setSelectedCopywriterModelId((prev) => {
+              if (prev && copywriterEligible.some((m) => m.id === prev)) {
+                return prev;
+              }
+              const fallback =
+                (status.defaultCopywriterModelId && copywriterEligible.some((m) => m.id === status.defaultCopywriterModelId)
+                  ? status.defaultCopywriterModelId
+                  : undefined) || copywriterEligible[0].id;
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('copilot_copywriter_model_id', fallback);
+              }
+              return fallback;
+            });
+          }
+        }
       }
     } catch {
       if (seq === aiSeqRef.current) {
@@ -852,12 +912,15 @@ export function App() {
   const handleSuggestDayTitle = useCallback(async (index: number) => {
     const day = trip.days[index];
     if (!day || day.waypoints.length === 0) return;
+    const startedRevision = tripRevisionRef.current;
     const { title } = await generateDayTitle(
       day.dayNumber,
-      day.waypoints.map((w) => ({ name: w.name, type: w.type }))
+      day.waypoints.map((w) => ({ name: w.name, type: w.type })),
+      { modelId: selectedCopywriterModelId || undefined }
     );
+    if (startedRevision !== tripRevisionRef.current) return;
     handleRenameDay(index, title);
-  }, [trip.days, handleRenameDay]);
+  }, [trip.days, handleRenameDay, selectedCopywriterModelId]);
 
   const handleSetBaseDate = useCallback((newDate: string) => {
     invalidatePendingInitialLoad();
@@ -1329,6 +1392,9 @@ export function App() {
           selectedWaypointId={selectedWaypointId}
           onSelectWaypoint={setSelectedWaypointId}
           aiAvailable={aiAvailable}
+          aiModels={aiModels}
+          selectedModelId={selectedCopywriterModelId}
+          onSelectModel={handleSelectCopywriterModel}
         />
 
         {/* Interactive Map Area */}
@@ -1374,6 +1440,9 @@ export function App() {
           onPreviewCoordinate={setScoutPreviewPin}
           activePreviewPin={scoutPreviewPin}
           aiAvailable={aiAvailable}
+          aiModels={aiModels}
+          selectedModelId={selectedScoutModelId}
+          onSelectModel={handleSelectScoutModel}
         />
       </div>
 

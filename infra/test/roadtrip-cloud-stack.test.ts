@@ -1,7 +1,12 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
-import { RoadtripCopilotCloudStack, RoadtripCopilotCloudStackProps } from '../lib/roadtrip-cloud-stack.js';
+import {
+  DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+  DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+  RoadtripCopilotCloudStack,
+  RoadtripCopilotCloudStackProps,
+} from '../lib/roadtrip-cloud-stack.js';
 
 describe('RoadtripCopilotCloudStack', () => {
   const createStack = (props?: Partial<RoadtripCopilotCloudStackProps>) => {
@@ -104,6 +109,8 @@ describe('RoadtripCopilotCloudStack', () => {
           ALLOWED_EMAILS_SSM_PARAM: '/roadtrip-copilot/allowed-emails',
           ORIGIN_VERIFY_SECRET_SSM_PARAM: '/roadtrip-copilot/origin-verify-secret',
           ALLOWED_HOSTS: '',
+          BEDROCK_SCOUT_MODEL_ID: 'us.moonshotai.kimi-k3',
+          BEDROCK_COPYWRITER_MODEL_ID: 'us.amazon.nova-2-lite-v1:0',
         }),
       },
     });
@@ -122,6 +129,8 @@ describe('RoadtripCopilotCloudStack', () => {
       originVerifySecretSsmParam: '/roadtrip-copilot/custom-origin-verify-secret',
       allowedHosts: 'custom.roadtrip.com',
       originVerifySecret: 'custom-secret-key',
+      bedrockScoutModelId: 'custom.scout-model',
+      bedrockCopywriterModelId: 'custom.copywriter-model',
     });
     const template = Template.fromStack(stack);
 
@@ -139,6 +148,8 @@ describe('RoadtripCopilotCloudStack', () => {
           ORIGIN_VERIFY_SECRET_SSM_PARAM: '/roadtrip-copilot/custom-origin-verify-secret',
           ALLOWED_HOSTS: 'custom.roadtrip.com',
           ORIGIN_VERIFY_SECRET: 'custom-secret-key',
+          BEDROCK_SCOUT_MODEL_ID: 'custom.scout-model',
+          BEDROCK_COPYWRITER_MODEL_ID: 'custom.copywriter-model',
         }),
       },
     });
@@ -182,6 +193,52 @@ describe('RoadtripCopilotCloudStack', () => {
                 'kms:ViaService': 'ssm.us-east-2.amazonaws.com',
               },
             },
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('exports default Bedrock model ID constants', () => {
+    expect(DEFAULT_BEDROCK_SCOUT_MODEL_ID).toBe('us.moonshotai.kimi-k3');
+    expect(DEFAULT_BEDROCK_COPYWRITER_MODEL_ID).toBe('us.amazon.nova-2-lite-v1:0');
+  });
+
+  it('grants FastifyApiFunction IAM execution role permissions for Bedrock models and inference profiles', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: [
+              'bedrock:InvokeModel',
+              'bedrock:InvokeModelWithResponseStream',
+            ],
+            Effect: 'Allow',
+            Resource: [
+              {
+                'Fn::Join': [
+                  '',
+                  [
+                    'arn:',
+                    { Ref: 'AWS::Partition' },
+                    ':bedrock:*::foundation-model/*',
+                  ],
+                ],
+              },
+              {
+                'Fn::Join': [
+                  '',
+                  [
+                    'arn:',
+                    { Ref: 'AWS::Partition' },
+                    ':bedrock:*:123456789012:inference-profile/*',
+                  ],
+                ],
+              },
+            ],
           }),
         ]),
       },

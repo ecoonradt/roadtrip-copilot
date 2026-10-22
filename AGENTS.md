@@ -14,7 +14,7 @@
 * **C. Android Auto Heads-Up Notifications:** Dispatches high-priority `NotificationCompat.MessagingStyle` heads-up cards over Google Maps using a stable notification ID (`2000`) and conversation identity (`setShortcutId("copilot_alerts")`). Alerts auto-dismiss via speech completion grace period, car session open, or driver action. (See [`docs/reference/android_auto_multitasking_architecture.md`](docs/reference/android_auto_multitasking_architecture.md)).
 * **D. Pace & Schedule Telemetry Engine:** Calculates dynamic ahead/behind schedule deltas relative to planned waypoint milestones, supporting both fixed ISO-dated itineraries and relative ad-hoc routes. Locks in-transit telemetry to confirmed milestones to eliminate parked departure errors.
 * **E. 100% Offline Resilience:** Operates with zero network dependency during drives. GPS satellite reception, local Haversine proximity calculations, on-device JSON itineraries, and local offline TextToSpeech run completely offline.
-* **F. Route Builder Web Studio (`route-builder/`):** Full-stack authoring studio (Fastify backend on `:3001`, React frontend on `:5173`). Features OSRM routing proxies, timeline schedule cascading, multi-stop Google Maps chunking, AI alert generation, Route Scout co-pilot, stateless dual-mode Google OIDC authentication (`HTTP-Only` web cookies + Android Bearer JWTs with `ALLOWED_EMAILS` allowlist gating and local dev bypass), and atomic Amazon S3 / local filesystem itinerary persistence with ETag concurrency safety. Governed by [`route-builder/AGENTS.md`](route-builder/AGENTS.md).
+* **F. Route Builder Web Studio (`route-builder/`):** Full-stack authoring studio (Fastify backend on `:3001`, React frontend on `:5173`). Features OSRM routing proxies, timeline schedule cascading, multi-stop Google Maps chunking, AI alert generation, Route Scout co-pilot powered by Amazon Bedrock `Converse`/`ConverseStream` with configurable multi-vendor model selection (`us.moonshotai.kimi-k3` & `us.amazon.nova-2-lite-v1:0` defaults), stateless dual-mode Google OIDC authentication (`HTTP-Only` web cookies + Android Bearer JWTs with `ALLOWED_EMAILS` allowlist gating and local dev bypass), and atomic Amazon S3 / local filesystem itinerary persistence with ETag concurrency safety. Governed by [`route-builder/AGENTS.md`](route-builder/AGENTS.md).
 
 ---
 
@@ -144,15 +144,13 @@ The role split is fixed and harness-independent:
 
 Non-negotiable properties:
 
-1. **Fresh context.** Every worker starts with no memory. The orchestrator must pass all required
-   context — file paths, interfaces, acceptance criteria, relevant ADR excerpts — in the task prompt.
+1. **Fresh context & Contract-First prompts.** Every worker starts with no memory. The orchestrator must pass all required context — exact file paths, literal TypeScript/Kotlin interfaces, HTTP status codes, concurrency/cleanup invariants (`AbortController`, revision refs, `clearInterval`), negative constraints (no hardcoded `'us-east-1'` region fallbacks, no `any`, no unmocked browser `/api/*` calls), and relevant ADR excerpts — in the task prompt.
 2. **Single level only.** Workers cannot spawn further workers in any harness. The orchestrator owns
    all fan-out and parallelism.
 3. **Bounded tasks only.** Never dispatch open-ended or ambiguous requests to a worker.
 4. **Surprises escalate.** If an unexpected constraint appears, stop and record an ADR (Section 3)
    before writing any speculative workaround.
-5. **Verification is never delegated.** The orchestrator re-runs the suites and reviews the diff. A
-   worker's own report of success is not evidence.
+5. **Adversarial verification is never delegated.** The orchestrator personally audits the full `git diff` against the 7-point Adversarial Review Checklist in `WORKING_MODEL.md` (region/IAM accuracy, async race/abort safety, timer/stream leak cleanup, input allowlist validation, output/reasoning tag hygiene, unhappy-path test coverage, and UI layout geometry) and runs both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`. A worker's own report of success is not evidence.
 
 **Harness-specific mechanics are deliberately NOT defined here.** Which delegation tool to call,
 which worker types exist, and how models are bound belong to the harness in use. Consult your
@@ -163,10 +161,9 @@ harness adapter before delegating:
 
 ### D. Session Lifecycle
 1. **Kickoff:** read `DECISIONS.md` and the active Work Package. If `plan/active/` is empty, author
-   `ROADMAP.md` and the next WP before touching code. State scope to the user, then begin.
-2. **In-flight:** delegate bounded implementation; log ADRs on surprises.
-3. **Wrap-up:** run the verification suites, sync living docs, update the WP handoff log, archive the
-   WP once its Definition of Done is verified.
+   `ROADMAP.md` and the next WP (with Gate 1 Contract-First specifications) before touching code. Verify live cloud/SDK assumptions with read-only checks. State scope to the user, then begin.
+2. **In-flight:** delegate bounded implementation using Contract-First prompts; log ADRs on surprises.
+3. **Wrap-up:** perform the Gate 2 Adversarial Diff Audit, run `./scripts/ci_check.sh` and `npm run test:browser`, sync living docs, update the WP handoff log, archive the WP once its Definition of Done is verified.
 
 ### E. Project Sequencing & Dependencies
 1. **Phase 1 [ACTIVE]:** `docs/projects/route-scout-cloud/`.

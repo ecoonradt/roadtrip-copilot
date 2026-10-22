@@ -31,6 +31,7 @@ import type {
   ScoutTripContext,
   ScoutChatRequest,
 } from '../types/scout';
+import type { AiModelOption } from '../types/ai';
 import type { ParsedTrip, ParsedDay } from '../engine/itineraryParser';
 import type { Waypoint, WaypointType } from '../types/routing';
 import type { ScheduledStop } from '../engine/types';
@@ -52,6 +53,9 @@ export interface RouteScoutDrawerProps {
   onPreviewCoordinate: (pin: ScoutPreviewPin | null) => void;
   activePreviewPin?: ScoutPreviewPin | null;
   aiAvailable?: boolean;
+  aiModels?: AiModelOption[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
 }
 
 const DEFAULT_DRAWER_WIDTH = 400;
@@ -66,7 +70,13 @@ function getScopeKey(scope: ScoutScope, activeDayIndex: number): string {
 }
 
 function cleanStreamingText(raw: string): { content: string; thought?: string } {
-  const withoutJson = raw.replace(/```(?:json:suggestions|json)?[\s\S]*?(?:```|$)/i, '').trim();
+  // Strip thinking/reasoning XML tags before stripping JSON blocks
+  const withoutThinking = raw
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<(?:thinking|think)>[\s\S]*$/gi, '');
+
+  const withoutJson = withoutThinking.replace(/```(?:json:suggestions|json)?[\s\S]*?(?:```|$)/i, '').trim();
 
   // Strip leading harness messages (e.g. "Wait for the background task to complete.")
   const leadingHarnessRegex = /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi;
@@ -267,6 +277,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   onPreviewCoordinate,
   activePreviewPin,
   aiAvailable = true,
+  aiModels = [],
+  selectedModelId,
+  onSelectModel,
 }) => {
   // Drawer width with localStorage persistence
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
@@ -285,6 +298,24 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const dragStartXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(DEFAULT_DRAWER_WIDTH);
+
+  // Stream sequence & abort controller refs for async race and cancel safety
+  const activeStreamAbortRef = useRef<AbortController | null>(null);
+  const streamSeqRef = useRef<number>(0);
+
+  // Unmount cleanup
+  useEffect(() => {
+    return () => {
+      streamSeqRef.current += 1;
+      activeStreamAbortRef.current?.abort();
+      activeStreamAbortRef.current = null;
+    };
+  }, []);
+
+  const scoutModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'scout' || m.role === 'both'),
+    [aiModels]
+  );
 
   // Multi-turn conversations keyed by scope (`day:N` or `wp:ID`)
   const [conversations, setConversations] = useState<Record<string, ScoutMessage[]>>({});
@@ -474,6 +505,11 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     setErrorMessage(null);
     setInputText('');
 
+    const seq = ++streamSeqRef.current;
+    activeStreamAbortRef.current?.abort();
+    const abortController = new AbortController();
+    activeStreamAbortRef.current = abortController;
+
     const userMessage: ScoutMessage = {
       id: `msg_u_${Date.now()}`,
       role: 'user',
@@ -642,14 +678,18 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         })),
         tripContext,
         sessionId: `scout_${currentScopeKey}`,
+        ...(selectedModelId ? { modelId: selectedModelId } : {}),
       };
 
       let accumulatedRaw = '';
       let currentThought: string | undefined = undefined;
       let accumulatedSuggestions: ScoutSuggestion[] = [];
 
-      await chatWithScoutStream(request, (event) => {
-        if (event.event === 'activity') {
+      await chatWithScoutStream(
+        request,
+        (event) => {
+          if (seq !== streamSeqRef.current) return;
+          if (event.event === 'activity') {
           const act = event.data;
           currentThought = act.label;
           setConversations((prev) => {
@@ -744,8 +784,12 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             };
           });
         }
-      });
+      },
+      abortController.signal
+    );
     } catch (err: unknown) {
+      if (seq !== streamSeqRef.current) return;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Route Scout request failed';
       setErrorMessage(msg);
       // Remove empty assistant message if it failed before receiving content
@@ -759,12 +803,21 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         };
       });
     } finally {
-      setIsLoading(false);
+      if (seq === streamSeqRef.current) {
+        setIsLoading(false);
+        if (activeStreamAbortRef.current === abortController) {
+          activeStreamAbortRef.current = null;
+        }
+      }
     }
   };
 
   // Clear conversation for current scope
   const handleClearChat = () => {
+    streamSeqRef.current += 1;
+    activeStreamAbortRef.current?.abort();
+    activeStreamAbortRef.current = null;
+    setIsLoading(false);
     setConversations((prev) => ({
       ...prev,
       [currentScopeKey]: [],
@@ -966,6 +1019,28 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             </div>
           )}
         </div>
+
+        {/* Model Selector UI in Drawer Header */}
+        {scoutModels.length > 0 && (
+          <div className="mt-2 flex items-center justify-between gap-2 px-2.5 py-1.5 bg-slate-800/60 border border-slate-700/60 rounded-xl text-xs">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 shrink-0">
+              Model
+            </span>
+            <select
+              aria-label="Route Scout AI Model"
+              value={selectedModelId || scoutModels[0]?.id || ''}
+              onChange={(e) => onSelectModel?.(e.target.value)}
+              disabled={isLoading}
+              className="bg-transparent text-xs font-medium text-cyan-300 focus:outline-none truncate cursor-pointer disabled:opacity-50"
+            >
+              {scoutModels.map((m) => (
+                <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
+                  {m.name} ({m.provider})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Messages Scroll Area */}
