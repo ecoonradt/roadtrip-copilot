@@ -151,6 +151,7 @@ export function App() {
 
   // Save states
   const [isSaving, setIsSaving] = useState(false);
+  const activeSaveCountRef = useRef<number>(0);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [lastSavedTripJson, setLastSavedTripJson] = useState<string>('');
 
@@ -302,6 +303,7 @@ export function App() {
       if (seq !== loadTripSeqRef.current) return;
       if (raw) {
         const parsed = parseItineraryJson(raw, file);
+        lastSaveConflictRef.current = false;
         tripRevisionRef.current += 1;
         setTripRevision(tripRevisionRef.current);
         setTrip(parsed);
@@ -329,6 +331,7 @@ export function App() {
           if (seq !== loadTripSeqRef.current) return;
           if (fallbackRaw) {
             const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
+            lastSaveConflictRef.current = false;
             tripRevisionRef.current += 1;
             setTripRevision(tripRevisionRef.current);
             setTrip(parsed);
@@ -353,6 +356,7 @@ export function App() {
       }
     }
     if (seq !== loadTripSeqRef.current) return;
+    lastSaveConflictRef.current = false;
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     setTrip(INITIAL_FALLBACK_TRIP);
@@ -1157,6 +1161,7 @@ export function App() {
 
   const handleSaveTrip = useCallback(async () => {
     setIsSaving(true);
+    activeSaveCountRef.current += 1;
     const savedRevision = tripRevisionRef.current;
     const tripWhenSaveStarted = trip;
     try {
@@ -1200,7 +1205,8 @@ export function App() {
         alert(`Save error: ${msg}`);
       }
     } finally {
-      if (savedRevision === tripRevisionRef.current) {
+      activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+      if (activeSaveCountRef.current === 0) {
         setIsSaving(false);
       }
     }

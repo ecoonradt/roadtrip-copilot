@@ -577,4 +577,77 @@ describe('Scheduling acceptance workflows', () => {
     expect(trip(app).fileName).toBe('renamed_fresh_target.json');
     expect(trip(app).etag).toBeUndefined();
   });
+
+  it('resets isSaving to false upon completion when saving a trip and changing revision while save is pending', async () => {
+    let finishSave!: (val: { success: boolean; fileName: string; etag: string }) => void;
+    api.saveItinerary.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+    const app = await mountApp();
+
+    expect(header(app).isSaving).toBe(false);
+
+    let saving!: Promise<void>;
+    await act(async () => {
+      saving = header(app).onSaveTrip();
+    });
+
+    expect(header(app).isSaving).toBe(true);
+
+    // Rename trip while save is in-flight, which bumps tripRevisionRef
+    await act(async () => {
+      header(app).onRenameTrip('Renamed During Save');
+    });
+
+    // In-flight save finishes
+    await act(async () => {
+      finishSave({ success: true, fileName: 'scheduling_tests.json', etag: '"new-etag"' });
+      await saving;
+    });
+
+    // isSaving must be reset to false so Save does not remain permanently disabled
+    expect(header(app).isSaving).toBe(false);
+  });
+
+  it('clears conflict state when initial load completes, preserving filename and etag on rename', async () => {
+    let resolveInitialTrip!: (val: unknown) => void;
+    api.fetchItinerary.mockReturnValue(new Promise((resolve) => { resolveInitialTrip = resolve; }));
+
+    // Mount app while initial trip fetch is pending (showing initial fallback)
+    const app = await mountApp();
+
+    // Attempt save on initial fallback, which fails with 412 Precondition Failed
+    api.saveItinerary.mockRejectedValueOnce(new api.ApiError('Precondition Failed', 412));
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Conflict detected'));
+
+    // Now initial load resolves with Itinerary B having an existing filename and valid ETag
+    const itineraryB = {
+      trip_name: 'Trip B Loaded',
+      date: '2026-10-15',
+      timezone: 'America/Phoenix',
+      checkpoints: [
+        { id: 'b1', name: 'Start', type: 'origin', lat: 34.0, lng: -111.0, target_time: '09:00:00' },
+      ],
+      _etag: '"etag-b-valid"',
+    };
+
+    await act(async () => {
+      resolveInitialTrip(itineraryB);
+    });
+
+    expect(trip(app).tripName).toBe('Trip B Loaded');
+    expect(trip(app).fileName).toBe('test.json');
+    expect(trip(app).etag).toBe('"etag-b-valid"');
+
+    // Renaming Itinerary B must NOT treat B as conflicted (must keep filename and etag)
+    await act(async () => {
+      header(app).onRenameTrip('Trip B Loaded Renamed');
+    });
+
+    expect(trip(app).tripName).toBe('Trip B Loaded Renamed');
+    expect(trip(app).fileName).toBe('test.json');
+    expect(trip(app).etag).toBe('"etag-b-valid"');
+  });
 });

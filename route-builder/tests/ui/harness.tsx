@@ -63,6 +63,8 @@ export interface HeaderProps {
   setTargetArrivalTime: (time: string) => void;
   onRenameTrip: (name: string) => void;
   currentTripName: string;
+  isSaving?: boolean;
+  saveSuccess?: boolean;
 }
 interface SidebarProps { onUpdateWaypoint: (id: string, update: Partial<Waypoint>) => void; onSelectLocation: (result: GeocodeResult) => void }
 interface DayProps { onSelectDay: (index: number) => void; onAddDay: () => void; onDeleteDay: (index: number) => void }

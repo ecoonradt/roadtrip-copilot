@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -406,6 +406,153 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect(stat).toBeDefined();
 
       await fs.unlink(lockFile);
+    });
+
+    it('concurrent stale lock recovery between two workers does not permit overlapping critical sections or deletion of successor lock', async () => {
+      const targetFile = path.join(tempDir, 'concurrent_stale_recovery.json');
+      const lockFile = `${targetFile}.lock`;
+
+      // Simulate an abandoned stale lock file from a dead process
+      await fs.writeFile(
+        lockFile,
+        JSON.stringify({ pid: 99999, token: 'abandoned-token', timestamp: Date.now() - 10000 }),
+        'utf-8'
+      );
+      const pastTime = new Date(Date.now() - 10000);
+      await fs.utimes(lockFile, pastTime, pastTime);
+
+      let worker1Active = false;
+      let worker2Active = false;
+      let overlapDetected = false;
+      const executionOrder: string[] = [];
+
+      const worker1 = CrossProcessFileLock.runExclusive(
+        targetFile,
+        async () => {
+          worker1Active = true;
+          if (worker2Active) overlapDetected = true;
+          executionOrder.push('w1-start');
+          await new Promise((r) => setTimeout(r, 60));
+          if (worker2Active) overlapDetected = true;
+          executionOrder.push('w1-end');
+          worker1Active = false;
+        },
+        { staleLockMs: 100, timeoutMs: 3000, retryDelayMs: 15, bypassInProcessQueue: true }
+      );
+
+      const worker2 = CrossProcessFileLock.runExclusive(
+        targetFile,
+        async () => {
+          worker2Active = true;
+          if (worker1Active) overlapDetected = true;
+          executionOrder.push('w2-start');
+          await new Promise((r) => setTimeout(r, 60));
+          if (worker1Active) overlapDetected = true;
+          executionOrder.push('w2-end');
+          worker2Active = false;
+        },
+        { staleLockMs: 100, timeoutMs: 3000, retryDelayMs: 15, bypassInProcessQueue: true }
+      );
+
+      await Promise.all([worker1, worker2]);
+
+      expect(overlapDetected).toBe(false);
+      expect(executionOrder).toHaveLength(4);
+      const isSequential =
+        (executionOrder[0] === 'w1-start' && executionOrder[1] === 'w1-end' && executionOrder[2] === 'w2-start' && executionOrder[3] === 'w2-end') ||
+        (executionOrder[0] === 'w2-start' && executionOrder[1] === 'w2-end' && executionOrder[2] === 'w1-start' && executionOrder[3] === 'w1-end');
+      expect(isSequential).toBe(true);
+
+      // Lock file must be cleanly unlinked after both workers complete
+      await expect(fs.stat(lockFile)).rejects.toThrow();
+    });
+
+    it('CrossProcessFileLock cleanly recovers from an empty (0-byte) lock file older than staleLockMs without timing out', async () => {
+      const targetFile = path.join(tempDir, 'empty_abandoned_lock.json');
+      const lockFile = `${targetFile}.lock`;
+
+      // Create an empty (0-byte) abandoned lock file
+      await fs.writeFile(lockFile, '', 'utf-8');
+      const pastTime = new Date(Date.now() - 10000);
+      await fs.utimes(lockFile, pastTime, pastTime);
+
+      let executed = false;
+      await CrossProcessFileLock.runExclusive(
+        targetFile,
+        async () => {
+          executed = true;
+        },
+        { staleLockMs: 100, timeoutMs: 2000, retryDelayMs: 20 }
+      );
+
+      expect(executed).toBe(true);
+      await expect(fs.stat(lockFile)).rejects.toThrow();
+    });
+
+    it('CrossProcessFileLock cleanly recovers from a truncated JSON lock file older than staleLockMs without timing out', async () => {
+      const targetFile = path.join(tempDir, 'truncated_abandoned_lock.json');
+      const lockFile = `${targetFile}.lock`;
+
+      // Create a truncated JSON lock file
+      await fs.writeFile(lockFile, '{"pid": 99999, "token": "ab', 'utf-8');
+      const pastTime = new Date(Date.now() - 10000);
+      await fs.utimes(lockFile, pastTime, pastTime);
+
+      let executed = false;
+      await CrossProcessFileLock.runExclusive(
+        targetFile,
+        async () => {
+          executed = true;
+        },
+        { staleLockMs: 100, timeoutMs: 2000, retryDelayMs: 20 }
+      );
+
+      expect(executed).toBe(true);
+      await expect(fs.stat(lockFile)).rejects.toThrow();
+    });
+
+    it('CrossProcessFileLock retries transient read failure during lock release and cleans up, preventing timeouts on subsequent acquisition', async () => {
+      const targetFile = path.join(tempDir, 'transient_read_failure_lock.json');
+      const lockFile = `${targetFile}.lock`;
+
+      let failuresInjected = 0;
+      const originalReadFile = CrossProcessFileLock.readFile;
+      const readSpy = vi.spyOn(CrossProcessFileLock, 'readFile').mockImplementation(async (filePath, options) => {
+        if (typeof filePath === 'string' && filePath === lockFile && failuresInjected === 0) {
+          failuresInjected += 1;
+          const transientErr = new Error('Simulated transient EIO device read error');
+          Object.assign(transientErr, { code: 'EIO' });
+          throw transientErr;
+        }
+        return originalReadFile(filePath, options);
+      });
+
+      try {
+        let firstRun = false;
+        await CrossProcessFileLock.runExclusive(targetFile, async () => {
+          firstRun = true;
+        });
+
+        expect(firstRun).toBe(true);
+        expect(failuresInjected).toBe(1);
+
+        // Lock file must have been cleanly removed by releaseLock despite transient first error
+        await expect(fs.stat(lockFile)).rejects.toThrow();
+
+        // Subsequent lock acquisition must succeed immediately without timing out
+        let secondRun = false;
+        await CrossProcessFileLock.runExclusive(
+          targetFile,
+          async () => {
+            secondRun = true;
+          },
+          { timeoutMs: 500, retryDelayMs: 20 }
+        );
+
+        expect(secondRun).toBe(true);
+      } finally {
+        readSpy.mockRestore();
+      }
     });
 
     it('normalizeEtag handles quotes and weak etags correctly', () => {

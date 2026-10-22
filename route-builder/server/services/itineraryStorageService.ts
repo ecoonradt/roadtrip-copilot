@@ -262,6 +262,7 @@ export interface CrossProcessFileLockOptions {
   retryDelayMs?: number;
   timeoutMs?: number;
   staleLockMs?: number;
+  bypassInProcessQueue?: boolean;
 }
 
 export class CrossProcessFileLock {
@@ -269,6 +270,204 @@ export class CrossProcessFileLock {
   static readonly DEFAULT_RETRY_DELAY_MS = 20;
   static readonly DEFAULT_LOCK_TIMEOUT_MS = 5000;
   static readonly DEFAULT_STALE_LOCK_MS = 5000;
+  static readFile = fs.readFile;
+  static unlink = fs.unlink;
+
+  static isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (killErr: unknown) {
+      const isEsrch = Boolean(
+        killErr && typeof killErr === 'object' && (killErr as { code?: string }).code === 'ESRCH'
+      );
+      return !isEsrch;
+    }
+  }
+
+  static async isLockStale(lockPath: string, staleLockMs: number): Promise<boolean> {
+    try {
+      const stat = await fs.stat(lockPath);
+      let raw = '';
+      try {
+        raw = await fs.readFile(lockPath, 'utf-8');
+      } catch (readErr: unknown) {
+        const isEnoent = Boolean(
+          readErr && typeof readErr === 'object' && (readErr as { code?: string }).code === 'ENOENT'
+        );
+        if (isEnoent) return false;
+        const age = Date.now() - stat.mtimeMs;
+        return age > staleLockMs;
+      }
+
+      let data: { pid?: unknown; timestamp?: unknown; token?: unknown } | null = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = null;
+      }
+
+      if (!data || typeof data !== 'object' || typeof data.pid !== 'number') {
+        const age = Date.now() - stat.mtimeMs;
+        return age > staleLockMs;
+      }
+
+      const pid = data.pid;
+      if (CrossProcessFileLock.isProcessAlive(pid)) {
+        return false;
+      }
+
+      const timestamp = typeof data.timestamp === 'number' ? data.timestamp : stat.mtimeMs;
+      const age = Date.now() - timestamp;
+      return age > staleLockMs;
+    } catch {
+      return false;
+    }
+  }
+
+  static async tryRecoverStaleLock(
+    lockPath: string,
+    staleLockMs: number,
+    lockToken: string
+  ): Promise<boolean> {
+    const recoveryPath = `${lockPath}.recovery`;
+    let recHandle: fs.FileHandle | null = null;
+    try {
+      recHandle = await fs.open(recoveryPath, 'wx');
+      const recInfo = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+      await recHandle.writeFile(recInfo, 'utf-8');
+      await recHandle.close();
+      recHandle = null;
+    } catch (err: unknown) {
+      if (recHandle) {
+        await recHandle.close().catch(() => {});
+        await fs.unlink(recoveryPath).catch(() => {});
+        recHandle = null;
+      }
+      const isEExist = Boolean(
+        err && typeof err === 'object' && (err as { code?: string }).code === 'EEXIST'
+      );
+      if (isEExist) {
+        try {
+          const recStat = await fs.stat(recoveryPath);
+          const recAge = Date.now() - recStat.mtimeMs;
+          let recOwnerDead = false;
+          try {
+            const recRaw = await fs.readFile(recoveryPath, 'utf-8');
+            const recData = JSON.parse(recRaw) as { pid?: unknown };
+            if (typeof recData.pid === 'number' && !CrossProcessFileLock.isProcessAlive(recData.pid)) {
+              recOwnerDead = true;
+            }
+          } catch {
+            // Unparseable recovery file
+          }
+          if (recOwnerDead || recAge > 2000) {
+            await fs.unlink(recoveryPath).catch(() => {});
+          }
+        } catch {
+          // File was unlinked concurrently
+        }
+        return false;
+      }
+      throw err;
+    }
+
+    try {
+      const stillStale = await CrossProcessFileLock.isLockStale(lockPath, staleLockMs);
+      if (!stillStale) {
+        return false;
+      }
+
+      await fs.unlink(lockPath).catch(() => {});
+
+      let lockHandle: fs.FileHandle | null = null;
+      try {
+        lockHandle = await fs.open(lockPath, 'wx');
+        const lockInfo = JSON.stringify({ pid: process.pid, token: lockToken, timestamp: Date.now() });
+        await lockHandle.writeFile(lockInfo, 'utf-8');
+        await lockHandle.close();
+        lockHandle = null;
+        return true;
+      } catch {
+        if (lockHandle) {
+          await lockHandle.close().catch(() => {});
+          await fs.unlink(lockPath).catch(() => {});
+          lockHandle = null;
+        }
+        return false;
+      }
+    } finally {
+      await fs.unlink(recoveryPath).catch(() => {});
+    }
+  }
+
+  static async releaseLock(lockPath: string, lockToken: string): Promise<void> {
+    const maxRetries = 5;
+    const retryDelayMs = 25;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        let raw = '';
+        try {
+          raw = (await CrossProcessFileLock.readFile(lockPath, 'utf-8')).toString();
+        } catch (readErr: unknown) {
+          const isEnoent = Boolean(
+            readErr && typeof readErr === 'object' && (readErr as { code?: string }).code === 'ENOENT'
+          );
+          if (isEnoent) {
+            return;
+          }
+          throw readErr;
+        }
+
+        let shouldUnlink = false;
+        try {
+          const currentData = JSON.parse(raw) as { token?: unknown };
+          if (currentData && typeof currentData === 'object' && currentData.token === lockToken) {
+            shouldUnlink = true;
+          }
+        } catch {
+          // Unparseable / corrupted content on disk where our lock should be
+          shouldUnlink = true;
+        }
+
+        if (shouldUnlink) {
+          await CrossProcessFileLock.unlink(lockPath).catch((unlinkErr: unknown) => {
+            const isEnoent = Boolean(
+              unlinkErr && typeof unlinkErr === 'object' && (unlinkErr as { code?: string }).code === 'ENOENT'
+            );
+            if (!isEnoent) throw unlinkErr;
+          });
+          return;
+        } else {
+          return;
+        }
+      } catch {
+        if (attempt < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
+      }
+    }
+
+    try {
+      const raw = (await CrossProcessFileLock.readFile(lockPath, 'utf-8')).toString();
+      try {
+        const currentData = JSON.parse(raw) as { token?: unknown };
+        if (currentData && typeof currentData === 'object' && currentData.token === lockToken) {
+          await CrossProcessFileLock.unlink(lockPath).catch(() => {});
+        }
+      } catch {
+        await CrossProcessFileLock.unlink(lockPath).catch(() => {});
+      }
+    } catch (err: unknown) {
+      const isEnoent = Boolean(
+        err && typeof err === 'object' && (err as { code?: string }).code === 'ENOENT'
+      );
+      if (!isEnoent) {
+        await CrossProcessFileLock.unlink(lockPath).catch(() => {});
+      }
+    }
+  }
 
   static async runExclusive<T>(
     filePath: string,
@@ -276,6 +475,10 @@ export class CrossProcessFileLock {
     options?: CrossProcessFileLockOptions
   ): Promise<T> {
     const canonicalPath = path.resolve(filePath);
+
+    if (options?.bypassInProcessQueue) {
+      return await CrossProcessFileLock.acquireLockAndRun(canonicalPath, fn, options);
+    }
 
     // In-process static queue per canonical path to line up concurrent requests cleanly without polling
     const prev = CrossProcessFileLock.inProcessQueues.get(canonicalPath) || Promise.resolve();
@@ -300,7 +503,7 @@ export class CrossProcessFileLock {
     }
   }
 
-  private static async acquireLockAndRun<T>(
+  static async acquireLockAndRun<T>(
     canonicalPath: string,
     fn: () => Promise<T>,
     options?: CrossProcessFileLockOptions
@@ -338,30 +541,13 @@ export class CrossProcessFileLock {
           throw err;
         }
 
-        // Stale lock detection: check age and process liveness before breaking lock
-        try {
-          const raw = await fs.readFile(lockPath, 'utf-8');
-          const data = JSON.parse(raw) as { pid?: number; timestamp?: number; token?: string };
-          const stat = await fs.stat(lockPath);
-          const age = Date.now() - (typeof data.timestamp === 'number' ? data.timestamp : stat.mtimeMs);
-          if (age > staleLockMs) {
-            let isAlive = false;
-            if (typeof data.pid === 'number') {
-              try {
-                process.kill(data.pid, 0);
-                isAlive = true;
-              } catch (killErr: unknown) {
-                const isEsrch = killErr && typeof killErr === 'object' && (killErr as { code?: string }).code === 'ESRCH';
-                isAlive = !isEsrch;
-              }
-            }
-            if (!isAlive) {
-              await fs.unlink(lockPath).catch(() => {});
-              continue;
-            }
+        // Stale lock detection & atomic recovery
+        const isStale = await CrossProcessFileLock.isLockStale(lockPath, staleLockMs);
+        if (isStale) {
+          const recovered = await CrossProcessFileLock.tryRecoverStaleLock(lockPath, staleLockMs, lockToken);
+          if (recovered) {
+            break; // Lock acquired via stale-lock recovery
           }
-        } catch {
-          // Lock may have been removed or updated concurrently; continue retry loop
         }
 
         if (Date.now() - startTime >= timeoutMs) {
@@ -375,15 +561,7 @@ export class CrossProcessFileLock {
     try {
       return await fn();
     } finally {
-      try {
-        const currentLockRaw = await fs.readFile(lockPath, 'utf-8');
-        const currentData = JSON.parse(currentLockRaw) as { token?: string };
-        if (currentData.token === lockToken) {
-          await fs.unlink(lockPath).catch(() => {});
-        }
-      } catch {
-        // Lockfile was already removed or replaced
-      }
+      await CrossProcessFileLock.releaseLock(lockPath, lockToken);
     }
   }
 
