@@ -448,6 +448,23 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
+  it('grants deployer IAM role and user permissions to authenticate to Amazon ECR Public', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['ecr-public:GetAuthorizationToken', 'sts:GetServiceBearerToken'],
+            Effect: 'Allow',
+            Resource: '*',
+          }),
+        ]),
+      },
+    });
+  });
+
   it('synthesizes all required CfnOutput keys', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
