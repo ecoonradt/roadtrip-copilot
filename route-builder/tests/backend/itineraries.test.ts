@@ -381,6 +381,33 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       await expect(fs.stat(lockFile)).rejects.toThrow();
     });
 
+    it('does not steal lock of a live process even if older than staleLockMs, and does not unlink successor lock', async () => {
+      const targetFile = path.join(tempDir, 'liveness_lock_test.json');
+      const lockFile = `${targetFile}.lock`;
+
+      // Lock file owned by this live process, but with timestamp 10s ago
+      await fs.writeFile(
+        lockFile,
+        JSON.stringify({ pid: process.pid, token: 'foreign-token-123', timestamp: Date.now() - 10000 }),
+        'utf-8'
+      );
+
+      // Attempting to acquire lock with short timeout must time out because process.pid is alive
+      await expect(
+        CrossProcessFileLock.runExclusive(
+          targetFile,
+          async () => 'acquired',
+          { timeoutMs: 100, staleLockMs: 50, retryDelayMs: 10 }
+        )
+      ).rejects.toThrow(/Timeout acquiring lock/);
+
+      // Verify foreign lock file was NOT deleted
+      const stat = await fs.stat(lockFile);
+      expect(stat).toBeDefined();
+
+      await fs.unlink(lockFile);
+    });
+
     it('normalizeEtag handles quotes and weak etags correctly', () => {
       expect(normalizeEtag('"abcdef"')).toBe('abcdef');
       expect(normalizeEtag("'abcdef'")).toBe('abcdef');

@@ -313,12 +313,13 @@ export class CrossProcessFileLock {
     await fs.mkdir(path.dirname(lockPath), { recursive: true }).catch(() => {});
 
     const startTime = Date.now();
+    const lockToken = crypto.randomUUID();
 
     while (true) {
       let handle: fs.FileHandle | null = null;
       try {
         handle = await fs.open(lockPath, 'wx');
-        const lockInfo = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+        const lockInfo = JSON.stringify({ pid: process.pid, token: lockToken, timestamp: Date.now() });
         await handle.writeFile(lockInfo, 'utf-8');
         await handle.close();
         handle = null;
@@ -337,16 +338,30 @@ export class CrossProcessFileLock {
           throw err;
         }
 
-        // Stale lock detection: if existing lockfile mtime is > 5000ms old, unlink and retry
+        // Stale lock detection: check age and process liveness before breaking lock
         try {
+          const raw = await fs.readFile(lockPath, 'utf-8');
+          const data = JSON.parse(raw) as { pid?: number; timestamp?: number; token?: string };
           const stat = await fs.stat(lockPath);
-          const age = Date.now() - stat.mtimeMs;
+          const age = Date.now() - (typeof data.timestamp === 'number' ? data.timestamp : stat.mtimeMs);
           if (age > staleLockMs) {
-            await fs.unlink(lockPath).catch(() => {});
-            continue;
+            let isAlive = false;
+            if (typeof data.pid === 'number') {
+              try {
+                process.kill(data.pid, 0);
+                isAlive = true;
+              } catch (killErr: unknown) {
+                const isEsrch = killErr && typeof killErr === 'object' && (killErr as { code?: string }).code === 'ESRCH';
+                isAlive = !isEsrch;
+              }
+            }
+            if (!isAlive) {
+              await fs.unlink(lockPath).catch(() => {});
+              continue;
+            }
           }
         } catch {
-          // Lock may have been removed concurrently; continue retry loop
+          // Lock may have been removed or updated concurrently; continue retry loop
         }
 
         if (Date.now() - startTime >= timeoutMs) {
@@ -360,7 +375,15 @@ export class CrossProcessFileLock {
     try {
       return await fn();
     } finally {
-      await fs.unlink(lockPath).catch(() => {});
+      try {
+        const currentLockRaw = await fs.readFile(lockPath, 'utf-8');
+        const currentData = JSON.parse(currentLockRaw) as { token?: string };
+        if (currentData.token === lockToken) {
+          await fs.unlink(lockPath).catch(() => {});
+        }
+      } catch {
+        // Lockfile was already removed or replaced
+      }
     }
   }
 

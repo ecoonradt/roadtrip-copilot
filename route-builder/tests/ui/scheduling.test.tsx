@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, saved, exportProps, exported, points } from './harness';
 import { calculateTimelineCascade, detectTimezone, parseLocalToUtcEpoch } from '../../src/engine/cascade';
 import { formatMultiDayItinerary, type SingleRouteItineraryV2 } from '../../src/engine/export';
-import { parseItineraryJson } from '../../src/engine/itineraryParser';
+import { parseItineraryJson, type ParsedTrip } from '../../src/engine/itineraryParser';
 import type { Waypoint, RouteResponse } from '../../src/types/routing';
 
 describe('Scheduling acceptance workflows', () => {
@@ -484,5 +484,97 @@ describe('Scheduling acceptance workflows', () => {
     expect(trip(app).tripName).toBe('Renamed Title Keep File');
     expect(trip(app).fileName).toBe('unique_route_name.json');
     expect(trip(app).etag).toBe('"etag-safe-new"');
+  });
+
+  it('does not flag replacement trip B as conflicted when a prior save of trip A fails with 412', async () => {
+    let failTripA!: (err: unknown) => void;
+    api.saveItinerary.mockReturnValue(new Promise((_resolve, reject) => { failTripA = reject; }));
+    const app = await mountApp();
+
+    let saving!: Promise<void>;
+    await act(async () => { saving = header(app).onSaveTrip(); });
+
+    // Switch to Trip B with valid ETag
+    const tripB: ParsedTrip = {
+      tripName: 'Trip B Clean',
+      fileName: 'trip_b.json',
+      etag: '"etag-b-valid"',
+      isMultiDay: false,
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-15',
+          title: 'Trip B Clean',
+          departureTime: '10:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: points(1),
+        },
+      ],
+    };
+    await act(async () => { selectTrip(app, tripB); });
+
+    // Trip A's save now fails with 412
+    await act(async () => {
+      failTripA(new api.ApiError('Precondition Failed', 412));
+      await saving;
+    });
+
+    // Alert should NOT be called for Trip B
+    expect(window.alert).not.toHaveBeenCalled();
+
+    // Renaming Trip B must NOT treat Trip B as conflicted (must keep trip_b.json and etag)
+    await act(async () => {
+      header(app).onRenameTrip('Trip B Renamed Clean');
+    });
+
+    expect(trip(app).tripName).toBe('Trip B Renamed Clean');
+    expect(trip(app).fileName).toBe('trip_b.json');
+    expect(trip(app).etag).toBe('"etag-b-valid"');
+  });
+
+  it('does not restore old filename when a new trip is renamed while its initial save is pending', async () => {
+    let finishSave!: (val: { success: boolean; fileName: string; etag: string }) => void;
+    api.saveItinerary.mockReturnValue(new Promise((resolve) => { finishSave = resolve; }));
+    const app = await mountApp();
+
+    const freshTrip: ParsedTrip = {
+      tripName: 'Initial Fresh Trip',
+      fileName: undefined,
+      etag: undefined,
+      isMultiDay: false,
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-10',
+          title: 'Initial Fresh Trip',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: points(1),
+        },
+      ],
+    };
+    await act(async () => { selectTrip(app, freshTrip); });
+
+    let saving!: Promise<void>;
+    await act(async () => { saving = header(app).onSaveTrip(); });
+
+    // While save of initial_fresh_trip.json is pending, user renames the trip
+    await act(async () => {
+      header(app).onRenameTrip('Renamed Fresh Target');
+    });
+
+    expect(trip(app).tripName).toBe('Renamed Fresh Target');
+    expect(trip(app).fileName).toBe('renamed_fresh_target.json');
+
+    // The initial save of initial_fresh_trip.json resolves
+    await act(async () => {
+      finishSave({ success: true, fileName: 'initial_fresh_trip.json', etag: '"etag-old-target"' });
+      await saving;
+    });
+
+    // The active trip must NOT have been restored to initial_fresh_trip.json
+    expect(trip(app).tripName).toBe('Renamed Fresh Target');
+    expect(trip(app).fileName).toBe('renamed_fresh_target.json');
+    expect(trip(app).etag).toBeUndefined();
   });
 });

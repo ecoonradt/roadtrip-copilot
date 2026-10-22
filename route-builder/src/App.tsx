@@ -852,24 +852,33 @@ export function App() {
     invalidatePendingInitialLoad();
     const trimmed = name.trim();
     if (!trimmed) return;
+
+    const hadConflict = lastSaveConflictRef.current;
+    if (hadConflict) {
+      lastSaveConflictRef.current = false;
+    }
+
     const nextFileName = `${trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
-    setTrip((prev) => {
-      if (!prev.fileName || lastSaveConflictRef.current) {
-        lastSaveConflictRef.current = false;
-        localStorage.setItem('copilot_active_file', nextFileName);
-        const url = new URL(window.location.href);
-        url.searchParams.set('route', nextFileName);
-        window.history.replaceState({}, '', url.toString());
-        return {
-          ...prev,
-          tripName: trimmed,
-          fileName: nextFileName,
-          etag: undefined,
-        };
-      }
-      return prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed };
-    });
-  }, [invalidatePendingInitialLoad]);
+    const isNewFileTarget = !trip.fileName || hadConflict;
+
+    if (isNewFileTarget) {
+      tripRevisionRef.current += 1;
+      setTripRevision(tripRevisionRef.current);
+      localStorage.setItem('copilot_active_file', nextFileName);
+      const url = new URL(window.location.href);
+      url.searchParams.set('route', nextFileName);
+      window.history.replaceState({}, '', url.toString());
+
+      setTrip((prev) => ({
+        ...prev,
+        tripName: trimmed,
+        fileName: nextFileName,
+        etag: undefined,
+      }));
+    } else {
+      setTrip((prev) => (prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed }));
+    }
+  }, [trip.fileName, invalidatePendingInitialLoad]);
 
   const handleRenameDay = useCallback((index: number, title: string) => {
     invalidatePendingInitialLoad();
@@ -1179,6 +1188,7 @@ export function App() {
       window.history.replaceState({}, '', url.toString());
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: unknown) {
+      if (savedRevision !== tripRevisionRef.current) return;
       const isConflict =
         (err instanceof ApiError && err.status === 412) ||
         (Boolean(err) && typeof err === 'object' && (err as { status?: number }).status === 412);
@@ -1190,7 +1200,9 @@ export function App() {
         alert(`Save error: ${msg}`);
       }
     } finally {
-      setIsSaving(false);
+      if (savedRevision === tripRevisionRef.current) {
+        setIsSaving(false);
+      }
     }
   }, [getSynchronizedTrip, trip]);
 
