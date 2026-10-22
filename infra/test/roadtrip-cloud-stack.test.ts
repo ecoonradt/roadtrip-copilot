@@ -58,6 +58,28 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
+  it('grants FastifyApiFunction read/write permissions on AppDataBucket', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith([
+              's3:GetObject*',
+              's3:GetBucket*',
+              's3:List*',
+              's3:DeleteObject*',
+              's3:PutObject',
+            ]),
+            Effect: 'Allow',
+          }),
+        ]),
+      },
+    });
+  });
+
   it('provisions FastifyApiFunction with correct memory, timeout, architecture, LWA and auth environment', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);

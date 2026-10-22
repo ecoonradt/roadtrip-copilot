@@ -1,11 +1,12 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import {
+  type IItineraryStorageService,
   ItineraryStorageService,
-  defaultItineraryStorageService,
+  PreconditionFailedError,
 } from '../services/itineraryStorageService.js';
 
 export interface ItineraryPluginOptions {
-  storageService?: ItineraryStorageService;
+  storageService?: IItineraryStorageService;
 }
 
 interface SaveItineraryBody {
@@ -16,12 +17,13 @@ export const itineraryRoutes: FastifyPluginAsync<ItineraryPluginOptions> = async
   fastify: FastifyInstance,
   options: ItineraryPluginOptions
 ) => {
-  const service = options.storageService || defaultItineraryStorageService;
+  const service = options.storageService || new ItineraryStorageService();
 
-  // GET /api/itineraries - List all itineraries available in workspace
-  fastify.get('/api/itineraries', async (_request, reply) => {
+  // GET /api/itineraries - List all itineraries available in workspace or user prefix
+  fastify.get('/api/itineraries', async (request, reply) => {
     try {
-      const items = await service.listItineraries();
+      const userEmail = request.authUser?.email;
+      const items = await service.listItineraries(userEmail);
       return reply.status(200).send({ itineraries: items });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to list itineraries';
@@ -34,12 +36,16 @@ export const itineraryRoutes: FastifyPluginAsync<ItineraryPluginOptions> = async
     '/api/itineraries/:filename',
     async (request, reply) => {
       const { filename } = request.params;
+      const userEmail = request.authUser?.email;
       try {
-        const itinerary = await service.getItinerary(filename);
+        const itinerary = await service.getItinerary(filename, userEmail);
         if (!itinerary) {
           return reply.status(404).send({
             error: `Itinerary "${filename}" not found`,
           });
+        }
+        if (itinerary._etag) {
+          reply.header('ETag', itinerary._etag);
         }
         return reply.status(200).send(itinerary);
       } catch (err: unknown) {
@@ -62,10 +68,30 @@ export const itineraryRoutes: FastifyPluginAsync<ItineraryPluginOptions> = async
         });
       }
 
+      const userEmail = request.authUser?.email;
+      const rawIfMatch = request.headers['if-match'];
+      const ifMatch = Array.isArray(rawIfMatch) ? rawIfMatch[0] : rawIfMatch;
+      const rawIfNoneMatch = request.headers['if-none-match'];
+      const ifNoneMatch = Array.isArray(rawIfNoneMatch) ? rawIfNoneMatch[0] : rawIfNoneMatch;
+
       try {
-        const result = await service.saveItinerary(filename, content);
+        const result = await service.saveItinerary(filename, content, {
+          userEmail,
+          ifMatch,
+          ifNoneMatch,
+        });
+        if (result.etag) {
+          reply.header('ETag', result.etag);
+        }
         return reply.status(200).send(result);
       } catch (err: unknown) {
+        if (
+          err instanceof PreconditionFailedError ||
+          (err && typeof err === 'object' && (err as { statusCode?: number }).statusCode === 412)
+        ) {
+          const msg = err instanceof Error ? err.message : 'Precondition Failed';
+          return reply.status(412).send({ error: msg });
+        }
         const msg = err instanceof Error ? err.message : 'Failed to save itinerary';
         return reply.status(500).send({ error: msg });
       }
@@ -77,10 +103,24 @@ export const itineraryRoutes: FastifyPluginAsync<ItineraryPluginOptions> = async
     '/api/itineraries/:filename',
     async (request, reply) => {
       const { filename } = request.params;
+      const userEmail = request.authUser?.email;
+      const rawIfMatch = request.headers['if-match'];
+      const ifMatch = Array.isArray(rawIfMatch) ? rawIfMatch[0] : rawIfMatch;
+
       try {
-        const result = await service.deleteItinerary(filename);
+        const result = await service.deleteItinerary(filename, {
+          userEmail,
+          ifMatch,
+        });
         return reply.status(200).send(result);
       } catch (err: unknown) {
+        if (
+          err instanceof PreconditionFailedError ||
+          (err && typeof err === 'object' && (err as { statusCode?: number }).statusCode === 412)
+        ) {
+          const msg = err instanceof Error ? err.message : 'Precondition Failed';
+          return reply.status(412).send({ error: msg });
+        }
         const msg = err instanceof Error ? err.message : 'Failed to delete itinerary';
         const isNotFound = msg.toLowerCase().includes('not found');
         const isProtected = msg.toLowerCase().includes('protected');

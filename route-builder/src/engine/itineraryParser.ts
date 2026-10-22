@@ -27,6 +27,7 @@ export interface ParsedTrip {
   google_maps_url?: string;
   days: ParsedDay[];
   isAdHoc?: boolean;
+  etag?: string;
 }
 
 function parseSchedulingMode(value: unknown): SchedulingMode | undefined {
@@ -82,10 +83,18 @@ export function inferWaypointType(name: string, id: string, index: number, total
   return 'scenic_pull_off';
 }
 
+export interface ParseItineraryOptions {
+  isImport?: boolean;
+}
+
 /**
  * Parses raw JSON (both V1 schema like itinerary.json and V2 schema) into a unified ParsedTrip.
  */
-export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip {
+export function parseItineraryJson(
+  raw: unknown,
+  fileName?: string,
+  options?: ParseItineraryOptions
+): ParsedTrip {
   if (!raw || typeof raw !== 'object') {
     throw new Error('Invalid itinerary: expected a JSON object');
   }
@@ -229,6 +238,11 @@ export function parseItineraryJson(raw: unknown, fileName?: string): ParsedTrip 
     google_maps_url: typeof data.google_maps_url === 'string' ? data.google_maps_url : parsedDays[0]?.google_maps_url,
     days: parsedDays,
     isAdHoc: isTripAdHoc,
+    etag: options?.isImport
+      ? undefined
+      : typeof data._etag === 'string'
+      ? data._etag
+      : undefined,
   };
 }
 

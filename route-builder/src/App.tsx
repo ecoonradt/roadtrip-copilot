@@ -16,6 +16,7 @@ import {
   generateDayTitle,
   fetchAuthStatus,
   logoutAuth,
+  ApiError,
 } from './services/api';
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
 import type { AuthStatusResponse } from './types/auth';
@@ -36,87 +37,38 @@ import {
   type ParsedDay,
 } from './engine/itineraryParser';
 
-// Fallback initial route from sample itinerary if offline or initial load
-const INITIAL_FALLBACK_TRIP: ParsedTrip = {
-  fileName: 'sample_itinerary.json',
-  tripName: 'Scenic Southwest: Phoenix to Flagstaff',
-  isMultiDay: true,
-  dates: { start: '2026-10-09', end: '2026-10-09' },
-  days: [
-    {
+function createPlaceholderTrip(): ParsedTrip {
+  return {
+    tripName: 'Untitled Road Trip',
+    isMultiDay: false,
+    days: [{
       dayNumber: 1,
-      date: '2026-10-09',
-      title: 'Red Rock Entry & Oak Creek Canyon Switchbacks',
-      departureTime: '14:30:00',
+      date: new Date().toISOString().slice(0, 10),
+      title: 'New Route',
+      departureTime: '09:00:00',
       timezone: 'America/Phoenix',
-      origin: 'Phoenix Sky Harbor International Airport (PHX)',
-      destination: 'Flagstaff, AZ',
-      waypoints: [
-        {
-          id: 'wp_phx_rental',
-          name: 'PHX Rental Car Facility',
-          type: 'origin',
-          lat: 33.4357,
-          lng: -112.0152,
-          target_time: '14:30:00',
-          dwell_minutes: 0,
-          trigger_radius_miles: 0.5,
-          notification: {
-            title: 'Road Trip Begins!',
-            message: 'Departing PHX via I-17 N towards Sedona.',
-            speech: 'Welcome to Arizona. We are departing Phoenix heading north on I-17 toward Sedona.',
-          },
-        },
-        {
-          id: 'wp_sedona_bell_rock',
-          name: 'Sedona Red Rock Vistas (Bell Rock)',
-          type: 'scenic_pull_off',
-          lat: 34.8010,
-          lng: -111.7645,
-          target_time: '16:30:00',
-          dwell_minutes: 30,
-          trigger_radius_miles: 3.0,
-          notification: {
-            title: 'Approaching Sedona Red Rocks',
-            message: 'Target arrival: 4:30 PM. Recommended 30-min stop for red rock vistas.',
-            speech: 'Approaching Sedona on Highway 179. Pull-offs for Bell Rock and Courthouse Butte coming up in two miles.',
-          },
-        },
-        {
-          id: 'wp_flagstaff_destination',
-          name: 'Flagstaff Historic Downtown & Visitor Center',
-          type: 'destination',
-          lat: 35.1982,
-          lng: -111.6465,
-          target_time: '18:15:00',
-          dwell_minutes: 0,
-          trigger_radius_miles: 1.0,
-          notification: {
-            title: 'Arrival in Flagstaff',
-            message: 'Arrived in historic Flagstaff. Explore downtown Route 66 and local dining.',
-            speech: 'Arriving in Flagstaff. Welcome to historic Route 66 and the downtown district.',
-          },
-        },
-      ],
-    },
-  ],
-};
+      waypoints: [],
+    }],
+  };
+}
 
-function getInitialRouteInfo(): { file: string; day: number } {
-  if (typeof window === 'undefined') return { file: 'sample_itinerary.json', day: 0 };
+function getInitialRouteInfo(): { file: string | null; day: number } {
+  if (typeof window === 'undefined') return { file: null, day: 0 };
   const params = new URLSearchParams(window.location.search);
   const routeParam = params.get('route');
   const dayParam = params.get('day');
   const savedRoute = localStorage.getItem('copilot_active_file');
   const savedDay = localStorage.getItem('copilot_active_day');
 
-  const file = routeParam || savedRoute || 'sample_itinerary.json';
+  const file = routeParam || savedRoute || null;
   const day = dayParam !== null ? parseInt(dayParam, 10) : savedDay !== null ? parseInt(savedDay, 10) : 0;
   return { file, day: isNaN(day) ? 0 : day };
 }
 
 export function App() {
-  const [trip, setTrip] = useState<ParsedTrip>(INITIAL_FALLBACK_TRIP);
+  const [trip, setTrip] = useState<ParsedTrip>(() => createPlaceholderTrip());
+  const [hasActiveTrip, setHasActiveTrip] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [activeDayIndex, setActiveDayIndex] = useState<number>(() => getInitialRouteInfo().day);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
 
@@ -124,6 +76,9 @@ export function App() {
   const [routeCoordKey, setRouteCoordKey] = useState('');
   const [tripRevision, setTripRevision] = useState(0);
   const tripRevisionRef = useRef(0);
+  const saveTargetEpochRef = useRef<number>(0);
+  const hasActiveTripRef = useRef<boolean>(false);
+  const lastSaveConflictRef = useRef<boolean>(false);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
 
@@ -133,7 +88,7 @@ export function App() {
 
   // Modal dialog states
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [isRouteSelectorOpen, setIsRouteSelectorOpen] = useState(false);
+  const [isRouteSelectorOpen, setIsRouteSelectorOpen] = useState(() => getInitialRouteInfo().file === null);
 
   // Route Scout conversational assistant states
   const [isScoutOpen, setIsScoutOpen] = useState(false);
@@ -149,8 +104,10 @@ export function App() {
 
   // Save states
   const [isSaving, setIsSaving] = useState(false);
+  const activeSaveCountRef = useRef<number>(0);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [lastSavedTripJson, setLastSavedTripJson] = useState<string>('');
+  const [isNeverSaved, setIsNeverSaved] = useState<boolean>(false);
 
   // AI availability readiness state
   const [aiAvailable, setAiAvailable] = useState<boolean>(true);
@@ -290,67 +247,85 @@ export function App() {
     setIsInitializing(false);
   }, []);
 
-  // Auto-load active itinerary on initial mount (from URL or localStorage, fallback to sample_itinerary.json)
+  // Helper to apply loaded trip state consistently across initial-load paths
+  const applyLoadedTrip = useCallback((parsed: ParsedTrip, file: string, day: number) => {
+    lastSaveConflictRef.current = false;
+    tripRevisionRef.current += 1;
+    setTripRevision(tripRevisionRef.current);
+    saveTargetEpochRef.current += 1;
+    setTrip(parsed);
+    setLastSavedTripJson(JSON.stringify(parsed));
+    const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
+    setActiveDayIndex(validDay);
+    setRoute(null);
+    const dayData = parsed.days[validDay];
+    setSchedulingMode(dayData ? getDaySchedulingMode(dayData, parsed.isAdHoc) : 'forward');
+    setTargetArrivalTime(dayData?.targetArrivalTime || '18:00:00');
+    localStorage.setItem('copilot_active_file', file);
+    localStorage.setItem('copilot_active_day', String(validDay));
+    const url = new URL(window.location.href);
+    url.searchParams.set('route', file);
+    url.searchParams.set('day', String(validDay));
+    window.history.replaceState({}, '', url.toString());
+    setIsNeverSaved(false);
+    setIsInitializing(false);
+    setHasActiveTrip(true);
+    hasActiveTripRef.current = true;
+  }, []);
+
+  const resetToNoActiveRoute = useCallback(() => {
+    loadTripSeqRef.current += 1;
+    tripRevisionRef.current += 1;
+    saveTargetEpochRef.current += 1;
+    hasActiveTripRef.current = false;
+    setHasActiveTrip(false);
+    setTrip(createPlaceholderTrip());
+    setTripRevision(tripRevisionRef.current);
+    setLastSavedTripJson('');
+    setIsNeverSaved(false);
+    lastSaveConflictRef.current = false;
+    setActiveDayIndex(0);
+    setSchedulingMode('forward');
+    setTargetArrivalTime('18:00:00');
+    setSelectedWaypointId(null);
+    setRoute(null);
+    setRouteError(null);
+    localStorage.removeItem('copilot_active_file');
+    localStorage.removeItem('copilot_active_day');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('route');
+    url.searchParams.delete('day');
+    window.history.replaceState({}, '', url.toString());
+    setIsRouteSelectorOpen(true);
+  }, []);
+
+  // Auto-load active itinerary on initial mount (from URL or localStorage)
   const loadInitialTrip = useCallback(async () => {
     const seq = ++loadTripSeqRef.current;
     setIsInitializing(true);
+    setInitialLoadError(null);
     const { file, day } = getInitialRouteInfo();
+    if (!file) {
+      setIsRouteSelectorOpen(true);
+      setIsInitializing(false);
+      return;
+    }
     try {
       const raw = await fetchItinerary(file);
       if (seq !== loadTripSeqRef.current) return;
-      if (raw) {
-        const parsed = parseItineraryJson(raw, file);
-        setTrip(parsed);
-        setLastSavedTripJson(JSON.stringify(parsed));
-        const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
-        setActiveDayIndex(validDay);
-        setRoute(null);
-        setSchedulingMode(getDaySchedulingMode(parsed.days[validDay], parsed.isAdHoc));
-        setTargetArrivalTime(parsed.days[validDay].targetArrivalTime || '18:00:00');
-        localStorage.setItem('copilot_active_file', file);
-        localStorage.setItem('copilot_active_day', String(validDay));
-        const url = new URL(window.location.href);
-        url.searchParams.set('route', file);
-        url.searchParams.set('day', String(validDay));
-        window.history.replaceState({}, '', url.toString());
+      applyLoadedTrip(parseItineraryJson(raw, file), file, day);
+    } catch (err: unknown) {
+      if (seq !== loadTripSeqRef.current) return;
+      if (hasActiveTripRef.current) { setIsInitializing(false); return; }
+      if (err instanceof ApiError && err.status === 404) {
+        resetToNoActiveRoute();
         setIsInitializing(false);
         return;
       }
-    } catch {
-      if (seq !== loadTripSeqRef.current) return;
-      // If specified file fails to load (e.g. was deleted), try fallback sample_itinerary.json
-      if (file !== 'sample_itinerary.json') {
-        try {
-          const fallbackRaw = await fetchItinerary('sample_itinerary.json');
-          if (seq !== loadTripSeqRef.current) return;
-          if (fallbackRaw) {
-            const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
-            setTrip(parsed);
-            setLastSavedTripJson(JSON.stringify(parsed));
-            setActiveDayIndex(0);
-            setRoute(null);
-            setSchedulingMode(getDaySchedulingMode(parsed.days[0], parsed.isAdHoc));
-            setTargetArrivalTime(parsed.days[0].targetArrivalTime || '18:00:00');
-            localStorage.setItem('copilot_active_file', 'sample_itinerary.json');
-            localStorage.setItem('copilot_active_day', '0');
-            const url = new URL(window.location.href);
-            url.searchParams.set('route', 'sample_itinerary.json');
-            url.searchParams.set('day', '0');
-            window.history.replaceState({}, '', url.toString());
-            setIsInitializing(false);
-            return;
-          }
-        } catch {
-          if (seq !== loadTripSeqRef.current) return;
-          // Fall back to INITIAL_FALLBACK_TRIP
-        }
-      }
+      setInitialLoadError(err instanceof Error ? err.message : 'Unable to load your routes.');
+      setIsInitializing(false);
     }
-    if (seq !== loadTripSeqRef.current) return;
-    setLastSavedTripJson(JSON.stringify(INITIAL_FALLBACK_TRIP));
-    setRoute(null);
-    setIsInitializing(false);
-  }, []);
+  }, [applyLoadedTrip, resetToNoActiveRoute]);
 
   useEffect(() => {
     loadInitialTrip();
@@ -731,10 +706,6 @@ export function App() {
     updateCurrentDayWaypoints(next);
   }, [updateCurrentDayWaypoints, waypoints]);
 
-  const handleResetSample = useCallback(() => {
-    updateCurrentDayWaypoints(INITIAL_FALLBACK_TRIP.days[0].waypoints);
-  }, [updateCurrentDayWaypoints]);
-
   const handleClearAll = useCallback(() => {
     updateCurrentDayWaypoints([]);
     setRoute(null);
@@ -843,8 +814,28 @@ export function App() {
     invalidatePendingInitialLoad();
     const trimmed = name.trim();
     if (!trimmed) return;
-    setTrip((prev) => (prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed }));
-  }, [invalidatePendingInitialLoad]);
+
+    const hadConflict = lastSaveConflictRef.current;
+    if (hadConflict) {
+      lastSaveConflictRef.current = false;
+    }
+
+    const nextFileName = `${trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
+    const isNewFileTarget = !trip.fileName || hadConflict;
+
+    if (isNewFileTarget) {
+      saveTargetEpochRef.current += 1;
+
+      setTrip((prev) => ({
+        ...prev,
+        tripName: trimmed,
+        fileName: nextFileName,
+        etag: undefined,
+      }));
+    } else {
+      setTrip((prev) => (prev.tripName === trimmed ? prev : { ...prev, tripName: trimmed }));
+    }
+  }, [trip.fileName, invalidatePendingInitialLoad]);
 
   const handleRenameDay = useCallback((index: number, title: string) => {
     invalidatePendingInitialLoad();
@@ -926,7 +917,7 @@ export function App() {
       };
       return { ...prev, days: nextDays };
     });
-  }, [activeDayIndex]);
+  }, [activeDayIndex, invalidatePendingInitialLoad]);
 
   // Helper to snapshot active day's live cascade and schedule into trip model
   const getSynchronizedTrip = useCallback((sourceTrip: ParsedTrip = trip): ParsedTrip => {
@@ -1085,52 +1076,72 @@ export function App() {
     window.history.replaceState({}, '', url.toString());
   }, [activeDayIndex, trip.days.length, trip.fileName, getSynchronizedTrip, invalidatePendingInitialLoad]);
 
-  const handleSelectTrip = useCallback((newTrip: ParsedTrip) => {
+  const handleSelectTrip = useCallback((newTrip: ParsedTrip, options?: { unsaved?: boolean }) => {
     invalidatePendingInitialLoad();
+    hasActiveTripRef.current = true;
+    setHasActiveTrip(true);
+    setInitialLoadError(null);
+    setIsNeverSaved(Boolean(options?.unsaved));
+    lastSaveConflictRef.current = false;
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
+    saveTargetEpochRef.current += 1;
     setTrip(newTrip);
     setLastSavedTripJson(JSON.stringify(newTrip));
     setActiveDayIndex(0);
     setRoute(null);
     setSchedulingMode(newTrip.days[0] ? getDaySchedulingMode(newTrip.days[0], newTrip.isAdHoc) : 'forward');
     setTargetArrivalTime(newTrip.days[0]?.targetArrivalTime || '18:00:00');
-    const fileName = newTrip.fileName || `${newTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
-    localStorage.setItem('copilot_active_file', fileName);
+    const persistPointer = !options?.unsaved && Boolean(newTrip.fileName);
     localStorage.setItem('copilot_active_day', '0');
     const url = new URL(window.location.href);
-    url.searchParams.set('route', fileName);
     url.searchParams.set('day', '0');
+    if (persistPointer && newTrip.fileName) {
+      localStorage.setItem('copilot_active_file', newTrip.fileName);
+      url.searchParams.set('route', newTrip.fileName);
+    } else {
+      localStorage.removeItem('copilot_active_file');
+      url.searchParams.delete('route');
+    }
     window.history.replaceState({}, '', url.toString());
   }, [invalidatePendingInitialLoad]);
 
   const handleDeleteTrip = useCallback(
-    async (deletedFile: string) => {
+    async (deletedFile: string, startedGeneration = loadTripSeqRef.current) => {
+      if (startedGeneration !== loadTripSeqRef.current) return;
       const activeFile = trip.fileName || localStorage.getItem('copilot_active_file');
-      if (activeFile === deletedFile) {
-        try {
-          const fallbackRaw = await fetchItinerary('sample_itinerary.json');
-          const parsed = parseItineraryJson(fallbackRaw, 'sample_itinerary.json');
-          handleSelectTrip(parsed);
-        } catch {
-          handleSelectTrip(INITIAL_FALLBACK_TRIP);
-        }
-      }
+      if (activeFile === deletedFile) resetToNoActiveRoute();
     },
-    [trip.fileName, handleSelectTrip]
+    [trip.fileName, resetToNoActiveRoute]
   );
 
   const handleSaveTrip = useCallback(async () => {
     setIsSaving(true);
-    const savedRevision = tripRevisionRef.current;
+    activeSaveCountRef.current += 1;
+    const savedEpoch = saveTargetEpochRef.current;
+    const tripWhenSaveStarted = trip;
     try {
       const updatedTrip = getSynchronizedTrip();
       const serialized = serializeTripToItineraryJson(updatedTrip, { preserveTargetTimes: true });
       const fileName = updatedTrip.fileName || `${updatedTrip.tripName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.json`;
-      const snapshot = { ...updatedTrip, fileName };
-      setTrip(snapshot);
-      await saveItinerary(fileName, serialized);
-      if (savedRevision !== tripRevisionRef.current) return;
+      const conditionalOptions = updatedTrip.etag
+        ? { ifMatch: updatedTrip.etag }
+        : { ifNoneMatch: '*' };
+      const saveRes = await saveItinerary(fileName, serialized, conditionalOptions);
+      if (savedEpoch !== saveTargetEpochRef.current) return;
+      lastSaveConflictRef.current = false;
+      setIsNeverSaved(false);
+      const snapshot: ParsedTrip = { ...updatedTrip, fileName, etag: saveRes.etag || updatedTrip.etag };
+      setTrip((prev) => {
+        if (prev === tripWhenSaveStarted || JSON.stringify(prev) === JSON.stringify(tripWhenSaveStarted)) {
+          return snapshot;
+        }
+        return {
+          ...prev,
+          fileName,
+          etag: saveRes.etag || prev.etag,
+        };
+      });
       setLastSavedTripJson(JSON.stringify(snapshot));
       setSaveSuccess(true);
       localStorage.setItem('copilot_active_file', fileName);
@@ -1139,15 +1150,28 @@ export function App() {
       window.history.replaceState({}, '', url.toString());
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: unknown) {
+      if (savedEpoch !== saveTargetEpochRef.current) return;
+      const isConflict =
+        (err instanceof ApiError && err.status === 412) ||
+        (Boolean(err) && typeof err === 'object' && (err as { status?: number }).status === 412);
       const msg = err instanceof Error ? err.message : 'Save failed';
-      alert(`Save error: ${msg}`);
+      if (isConflict || msg.includes('412') || msg.toLowerCase().includes('precondition')) {
+        lastSaveConflictRef.current = true;
+        alert('Conflict detected: This itinerary already exists or has been modified elsewhere. Please reload the itinerary or save under a new name to avoid overwriting changes.');
+      } else {
+        alert(`Save error: ${msg}`);
+      }
     } finally {
-      setIsSaving(false);
+      activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+      if (activeSaveCountRef.current === 0) {
+        setIsSaving(false);
+      }
     }
-  }, [getSynchronizedTrip]);
+  }, [getSynchronizedTrip, trip]);
 
   // Dirty state tracking (indicates unsaved changes)
   const isDirty = useMemo(() => {
+    if (isNeverSaved) return true;
     if (!lastSavedTripJson) return false;
     try {
       const parsedSaved = JSON.parse(lastSavedTripJson) as ParsedTrip;
@@ -1158,7 +1182,7 @@ export function App() {
       // ignore
     }
     return JSON.stringify(trip) !== lastSavedTripJson;
-  }, [trip, lastSavedTripJson, schedulingMode, activeDayIndex]);
+  }, [trip, lastSavedTripJson, schedulingMode, activeDayIndex, isNeverSaved]);
 
   // Warn user before closing/refreshing tab with unsaved changes
   useEffect(() => {
@@ -1191,6 +1215,33 @@ export function App() {
         onLogout={handleLogout}
         onRetry={retryInitialization}
       />
+    );
+  }
+
+  if (!hasActiveTrip && isInitializing && !isRouteSelectorOpen) {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 flex items-center justify-center">
+        <p role="status" className="text-sm text-slate-400">
+          Loading your route…
+        </p>
+      </div>
+    );
+  }
+
+  if (!hasActiveTrip && initialLoadError) {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 flex items-center justify-center px-4">
+        <div className="max-w-sm w-full text-center space-y-4">
+          <div className="space-y-1.5">
+            <p className="text-sm font-semibold text-slate-100">Unable to load your routes</p>
+            <p role="alert" className="text-xs text-slate-400 break-words">{initialLoadError}</p>
+          </div>
+          <div className="flex items-center justify-center gap-2">
+            <button type="button" onClick={() => void loadInitialTrip()} className="px-3.5 py-1.5 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-xl shadow-md transition-colors cursor-pointer">Retry</button>
+            <button type="button" onClick={() => { setInitialLoadError(null); setIsRouteSelectorOpen(true); }} className="px-3.5 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition-colors cursor-pointer">Start a new route</button>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -1236,7 +1287,7 @@ export function App() {
         currentTripName={trip.tripName}
         onRenameTrip={handleRenameTrip}
         onOpenRouteSelector={() => setIsRouteSelectorOpen(true)}
-        onSaveTrip={handleSaveTrip}
+        onSaveTrip={hasActiveTrip ? handleSaveTrip : undefined}
         isSaving={isSaving}
         saveSuccess={saveSuccess}
         isDirty={isDirty}
@@ -1271,7 +1322,6 @@ export function App() {
           onUpdateWaypoint={handleUpdateWaypoint}
           onBatchUpdateWaypoints={handleBatchUpdateWaypoints}
           onMoveWaypoint={handleMoveWaypoint}
-          onResetSample={handleResetSample}
           onClearAll={handleClearAll}
           onSelectLocation={handleSelectLocation}
           onOpenScoutForDay={handleOpenScoutForDay}
@@ -1334,6 +1384,8 @@ export function App() {
         onSelectTrip={handleSelectTrip}
         currentFileName={trip.fileName}
         onDeleteTrip={handleDeleteTrip}
+        getTripGeneration={() => loadTripSeqRef.current}
+        dismissible={hasActiveTrip}
       />
 
       {/* Export & Phone Handoff Modal */}

@@ -171,7 +171,7 @@ For complete documentation on route authoring, AI model configuration, test suit
 ### Cloud Deployment & CI/CD (AWS CDK)
 
 The Route Builder Web Studio can also be deployed to AWS as a serverless application using AWS CDK (`infra/`):
-* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming, protected by stateless dual-mode Google OIDC authentication (`ALLOWED_EMAILS` allowlist + SSM Parameter Store `SecureString` secrets).
+* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming, protected by stateless dual-mode Google OIDC authentication (`ALLOWED_EMAILS` allowlist + SSM Parameter Store `SecureString` secrets), with atomic user itinerary persistence in Amazon S3 (`users/{email}/itineraries/*.json`) and ETag concurrency safety.
 * **Verification Pipeline:**
   ```bash
   ./scripts/ci_check.sh
@@ -188,7 +188,7 @@ The Route Builder Web Studio can also be deployed to AWS as a serverless applica
 ## Android App Features & In-Car Controls
 
 * **Android Auto Dashboard:** Native car display dashboard built with Android for Cars App Library (`androidx.car.app`), featuring a live telemetry pane, chronological milestones view, dynamic route switcher, and audio settings.
-* **Dynamic Route Loading:** Import any custom itinerary from phone storage without rebuilding the APK. Bundled sample routes in `assets/` serve as built-in examples and offline fallbacks.
+* **Dynamic Route Loading:** Import any custom itinerary from phone storage without rebuilding the APK. Routes authored and exported from the Route Builder web studio load directly on the device.
 * **In-Car Route Switcher (`RouteListScreen`):** Conforms to Android Auto distraction guidelines by capping items at 6 per page with "Prev" and "Next" paging. Active routes display a `"✓ "` indicator.
 * **Audio Channel Routing:** Toggle between the vehicle's **Media Channel** (standard stereo volume knob) and **Navigation Channel** (dedicated car navigation guidance stream).
 * **Pause vs. Duck:** Cleanly pauses music during announcements by default, with an option for subtle -14 dB background ducking.

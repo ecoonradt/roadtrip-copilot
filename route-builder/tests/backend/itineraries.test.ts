@@ -1,8 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ItineraryStorageService } from '../../server/services/itineraryStorageService.js';
+import { S3Client } from '@aws-sdk/client-s3';
+import {
+  ItineraryStorageService,
+  PreconditionFailedError,
+  normalizeEtag,
+  KeyedMutex,
+  LockTimeoutError,
+} from '../../server/services/itineraryStorageService.js';
 import { createApp } from '../../server/app.js';
 
 describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
@@ -13,6 +20,8 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
+    delete process.env.S3_STORAGE_BUCKET;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -132,44 +141,72 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect((loaded as Record<string, unknown>).trip_name).toBe('Saved Trip');
     });
 
-    it('marks sample_itinerary.json as protected and allows deleting custom routes', async () => {
+    it('creates the primary write directory on first save', async () => {
+      const nestedWriteDir = path.join(tempDir, 'fresh', 'nested');
       const service = new ItineraryStorageService({
         storageDirectories: [tempDir],
-        primaryWriteDirectory: tempDir,
+        primaryWriteDirectory: nestedWriteDir,
       });
 
-      // Write a sample itinerary and a custom trip
-      await fs.writeFile(
-        path.join(tempDir, 'sample_itinerary.json'),
-        JSON.stringify({ trip_name: 'Sample Route', checkpoints: [] }),
-        'utf-8'
-      );
-      await fs.writeFile(
-        path.join(tempDir, 'deletable_trip.json'),
-        JSON.stringify({ trip_name: 'Deletable Trip', checkpoints: [] }),
-        'utf-8'
-      );
+      const saveResult = await service.saveItinerary('nested_trip.json', {
+        trip_name: 'Nested Trip',
+        checkpoints: [],
+      });
+      expect(saveResult.success).toBe(true);
 
-      const list = await service.listItineraries();
-      const sample = list.find((i) => i.fileName === 'sample_itinerary.json');
-      const custom = list.find((i) => i.fileName === 'deletable_trip.json');
+      const filePath = path.join(nestedWriteDir, 'nested_trip.json');
+      const stat = await fs.stat(filePath);
+      expect(stat.isFile()).toBe(true);
 
-      expect(sample?.isProtected).toBe(true);
-      expect(custom?.isProtected).toBe(false);
+      const raw = await fs.readFile(filePath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      expect(parsed.trip_name).toBe('Nested Trip');
+    });
 
-      // Attempting to delete sample_itinerary.json should throw
-      await expect(service.deleteItinerary('sample_itinerary.json')).rejects.toThrow(
-        /Cannot delete protected itinerary/
-      );
+    it('protects itineraries outside the primary write directory and allows deleting custom routes', async () => {
+      const secondaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-secondary-'));
+      try {
+        const service = new ItineraryStorageService({
+          storageDirectories: [tempDir, secondaryDir],
+          primaryWriteDirectory: tempDir,
+        });
 
-      // Deleting custom trip should succeed
-      const result = await service.deleteItinerary('deletable_trip.json');
-      expect(result.success).toBe(true);
-      expect(result.fileName).toBe('deletable_trip.json');
+        // A route that only exists in the secondary directory is read-only
+        await fs.writeFile(
+          path.join(secondaryDir, 'read_only_trip.json'),
+          JSON.stringify({ trip_name: 'Read Only Trip', checkpoints: [] }),
+          'utf-8'
+        );
+        // A custom route in the primary write directory is fully editable
+        await fs.writeFile(
+          path.join(tempDir, 'deletable_trip.json'),
+          JSON.stringify({ trip_name: 'Deletable Trip', checkpoints: [] }),
+          'utf-8'
+        );
 
-      // Verify file is gone
-      const deletedCheck = await service.getItinerary('deletable_trip.json');
-      expect(deletedCheck).toBeNull();
+        const list = await service.listItineraries();
+        const readOnly = list.find((i) => i.fileName === 'read_only_trip.json');
+        const custom = list.find((i) => i.fileName === 'deletable_trip.json');
+
+        expect(readOnly?.isProtected).toBe(true);
+        expect(readOnly?.etag).toBeUndefined();
+        expect(custom?.isProtected).toBe(false);
+
+        const loadedReadOnly = await service.getItinerary('read_only_trip.json');
+        expect(loadedReadOnly?._isProtected).toBe(true);
+        expect(loadedReadOnly?._etag).toBeUndefined();
+
+        // Deleting custom trip should succeed
+        const result = await service.deleteItinerary('deletable_trip.json');
+        expect(result.success).toBe(true);
+        expect(result.fileName).toBe('deletable_trip.json');
+
+        // Verify file is gone
+        const deletedCheck = await service.getItinerary('deletable_trip.json');
+        expect(deletedCheck).toBeNull();
+      } finally {
+        await fs.rm(secondaryDir, { recursive: true, force: true });
+      }
     });
 
     it('throws when trying to delete non-existent itinerary', async () => {
@@ -181,6 +218,344 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       await expect(service.deleteItinerary('does_not_exist.json')).rejects.toThrow(
         /not found/i
       );
+    });
+
+    it('computes and returns ETag on get and save', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saveRes = await service.saveItinerary('etag_test.json', { trip_name: 'ETag Route' });
+      expect(saveRes.etag).toBeDefined();
+      expect(saveRes.etag?.startsWith('"')).toBe(true);
+
+      const loaded = await service.getItinerary('etag_test.json');
+      expect(loaded?._etag).toBe(saveRes.etag);
+    });
+
+    it('enforces If-Match on saveItinerary: throws PreconditionFailedError on mismatch', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await service.saveItinerary('if_match_test.json', { trip_name: 'Initial' });
+
+      // Mismatched ETag should fail
+      await expect(
+        service.saveItinerary(
+          'if_match_test.json',
+          { trip_name: 'Updated' },
+          { ifMatch: '"wrong-etag"' }
+        )
+      ).rejects.toThrow(PreconditionFailedError);
+
+      // Correct ETag should succeed
+      const updated = await service.saveItinerary(
+        'if_match_test.json',
+        { trip_name: 'Updated' },
+        { ifMatch: initial.etag }
+      );
+      expect(updated.success).toBe(true);
+      expect(updated.etag).not.toBe(initial.etag);
+    });
+
+    it('enforces If-None-Match: * on saveItinerary: throws PreconditionFailedError if file already exists', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await service.saveItinerary('existing.json', { trip_name: 'Initial' });
+
+      await expect(
+        service.saveItinerary('existing.json', { trip_name: 'Overwritten' }, { ifNoneMatch: '*' })
+      ).rejects.toThrow(PreconditionFailedError);
+
+      // Should succeed on a brand new file
+      const newFileRes = await service.saveItinerary(
+        'brand_new.json',
+        { trip_name: 'New' },
+        { ifNoneMatch: '*' }
+      );
+      expect(newFileRes.success).toBe(true);
+    });
+
+    it('enforces If-Match on deleteItinerary: throws PreconditionFailedError on mismatch', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saved = await service.saveItinerary('delete_match.json', { trip_name: 'To Delete' });
+
+      await expect(
+        service.deleteItinerary('delete_match.json', { ifMatch: '"wrong-etag"' })
+      ).rejects.toThrow(PreconditionFailedError);
+
+      const delRes = await service.deleteItinerary('delete_match.json', { ifMatch: saved.etag });
+      expect(delRes.success).toBe(true);
+    });
+
+    it('guarantees cross-instance atomicity when saving concurrently with the same initial ETag', async () => {
+      const service1 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+      const service2 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      // Seed initial file
+      const initial = await service1.saveItinerary('concurrent_update.json', {
+        trip_name: 'Initial State',
+        checkpoints: [],
+      });
+      expect(initial.success).toBe(true);
+      const initialEtag = initial.etag;
+      expect(initialEtag).toBeDefined();
+
+      // Both instances attempt concurrent update with the same initial ETag
+      const [res1, res2] = await Promise.allSettled([
+        service1.saveItinerary(
+          'concurrent_update.json',
+          { trip_name: 'Update by Instance 1', checkpoints: [] },
+          { ifMatch: initialEtag }
+        ),
+        service2.saveItinerary(
+          'concurrent_update.json',
+          { trip_name: 'Update by Instance 2', checkpoints: [] },
+          { ifMatch: initialEtag }
+        ),
+      ]);
+
+      const fulfilled = [res1, res2].filter(
+        (r): r is PromiseFulfilledResult<{ success: boolean; etag?: string }> =>
+          r.status === 'fulfilled'
+      );
+      const rejected = [res1, res2].filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected'
+      );
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(fulfilled[0].value.success).toBe(true);
+      expect(rejected[0].reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('guarantees cross-instance atomicity for concurrent create-only writes (If-None-Match: *)', async () => {
+      const service1 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+      const service2 = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const [res1, res2] = await Promise.allSettled([
+        service1.saveItinerary(
+          'concurrent_create.json',
+          { trip_name: 'Created by Instance 1', checkpoints: [] },
+          { ifNoneMatch: '*' }
+        ),
+        service2.saveItinerary(
+          'concurrent_create.json',
+          { trip_name: 'Created by Instance 2', checkpoints: [] },
+          { ifNoneMatch: '*' }
+        ),
+      ]);
+
+      const fulfilled = [res1, res2].filter(
+        (r): r is PromiseFulfilledResult<{ success: boolean; etag?: string }> =>
+          r.status === 'fulfilled'
+      );
+      const rejected = [res1, res2].filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected'
+      );
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(fulfilled[0].value.success).toBe(true);
+      expect(rejected[0].reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('KeyedMutex enforces mutual exclusion and FIFO order for 3+ callers on the same key', async () => {
+      const key = path.join(tempDir, 'fifo_test.json');
+      const executionOrder: number[] = [];
+      let concurrentCount = 0;
+      let maxConcurrent = 0;
+
+      const makeWorker = (id: number, delayMs: number) => {
+        return KeyedMutex.runExclusive(key, async () => {
+          concurrentCount++;
+          if (concurrentCount > maxConcurrent) maxConcurrent = concurrentCount;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          executionOrder.push(id);
+          concurrentCount--;
+        });
+      };
+
+      const p1 = makeWorker(1, 40);
+      const p2 = makeWorker(2, 30);
+      const p3 = makeWorker(3, 20);
+
+      await Promise.all([p1, p2, p3]);
+
+      expect(maxConcurrent).toBe(1);
+      expect(executionOrder).toEqual([1, 2, 3]);
+    });
+
+    it('KeyedMutex ensures different keys do not block each other', async () => {
+      const key1 = path.join(tempDir, 'key1.json');
+      const key2 = path.join(tempDir, 'key2.json');
+
+      let key1Active = false;
+      let key2Active = false;
+      let overlapped = false;
+
+      const p1 = KeyedMutex.runExclusive(key1, async () => {
+        key1Active = true;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        if (key2Active) overlapped = true;
+        key1Active = false;
+      });
+
+      const p2 = KeyedMutex.runExclusive(key2, async () => {
+        key2Active = true;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        if (key1Active) overlapped = true;
+        key2Active = false;
+      });
+
+      await Promise.all([p1, p2]);
+      expect(overlapped).toBe(true);
+    });
+
+    it('KeyedMutex releases lock when fn throws and allows next caller to run', async () => {
+      const key = path.join(tempDir, 'throw_test.json');
+
+      await expect(
+        KeyedMutex.runExclusive(key, async () => {
+          throw new Error('boom');
+        })
+      ).rejects.toThrow('boom');
+
+      let ranNext = false;
+      await KeyedMutex.runExclusive(key, async () => {
+        ranNext = true;
+      });
+
+      expect(ranNext).toBe(true);
+    });
+
+    it('KeyedMutex bounds queued timeout: second caller rejects before holder finishes and fn never runs', async () => {
+      const key = path.join(tempDir, 'timeout_test.json');
+      let holderRan = false;
+      let secondRan = false;
+
+      const holderPromise = KeyedMutex.runExclusive(key, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        holderRan = true;
+      });
+
+      const startTime = Date.now();
+      let timedOut = false;
+      let elapsed = 0;
+
+      try {
+        await KeyedMutex.runExclusive(
+          key,
+          async () => {
+            secondRan = true;
+          },
+          { timeoutMs: 30 }
+        );
+      } catch (err: unknown) {
+        elapsed = Date.now() - startTime;
+        if (err instanceof LockTimeoutError) {
+          timedOut = true;
+          expect(err.message).toMatch(/Timeout acquiring lock/);
+        }
+      }
+
+      expect(timedOut).toBe(true);
+      expect(elapsed).toBeLessThan(200);
+      expect(holderRan).toBe(false);
+
+      await holderPromise;
+      expect(holderRan).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(secondRan).toBe(false);
+    });
+
+    it('KeyedMutex handles a timed-out waiter in middle of queue without breaking callers behind it', async () => {
+      const key = path.join(tempDir, 'queue_middle_test.json');
+      const executionOrder: string[] = [];
+
+      const holderPromise = KeyedMutex.runExclusive(key, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        executionOrder.push('holder');
+      });
+
+      let caller2Error: unknown = null;
+      const caller2Promise = KeyedMutex.runExclusive(
+        key,
+        async () => {
+          executionOrder.push('caller2');
+        },
+        { timeoutMs: 30 }
+      ).catch((err: unknown) => {
+        caller2Error = err;
+      });
+
+      const caller3Promise = KeyedMutex.runExclusive(
+        key,
+        async () => {
+          executionOrder.push('caller3');
+        },
+        { timeoutMs: 1000 }
+      );
+
+      await Promise.all([holderPromise, caller2Promise, caller3Promise]);
+
+      expect(caller2Error).toBeInstanceOf(LockTimeoutError);
+      expect(executionOrder).toEqual(['holder', 'caller3']);
+    });
+
+    it('no leftover .lock files are created in storage directory by save or delete', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saveRes = await service.saveItinerary('lock_free_trip.json', {
+        trip_name: 'Lock Free Trip',
+        checkpoints: [],
+      });
+      expect(saveRes.success).toBe(true);
+
+      let files = await fs.readdir(tempDir);
+      let lockFiles = files.filter((f) => f.endsWith('.lock'));
+      expect(lockFiles).toHaveLength(0);
+
+      const delRes = await service.deleteItinerary('lock_free_trip.json');
+      expect(delRes.success).toBe(true);
+
+      files = await fs.readdir(tempDir);
+      lockFiles = files.filter((f) => f.endsWith('.lock'));
+      expect(lockFiles).toHaveLength(0);
+    });
+
+    it('normalizeEtag handles quotes and weak etags correctly', () => {
+      expect(normalizeEtag('"abcdef"')).toBe('abcdef');
+      expect(normalizeEtag("'abcdef'")).toBe('abcdef');
+      expect(normalizeEtag('W/"abcdef"')).toBe('abcdef');
+      expect(normalizeEtag('abcdef')).toBe('abcdef');
+      expect(normalizeEtag('')).toBe('');
+      expect(normalizeEtag(undefined)).toBe('');
     });
   });
 
@@ -286,24 +661,6 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect(onDisk).toBeNull();
     });
 
-    it('DELETE /api/itineraries/sample_itinerary.json returns 403 Forbidden', async () => {
-      const storageService = new ItineraryStorageService({
-        storageDirectories: [tempDir],
-        primaryWriteDirectory: tempDir,
-      });
-
-      const app = createApp({ storageService });
-
-      const response = await app.inject({
-        method: 'DELETE',
-        url: '/api/itineraries/sample_itinerary.json',
-      });
-
-      expect(response.statusCode).toBe(403);
-      const body = JSON.parse(response.body) as { error: string };
-      expect(body.error).toMatch(/Cannot delete protected itinerary/);
-    });
-
     it('DELETE /api/itineraries/:filename returns 404 when file does not exist', async () => {
       const storageService = new ItineraryStorageService({
         storageDirectories: [tempDir],
@@ -321,5 +678,268 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       const body = JSON.parse(response.body) as { error: string };
       expect(body.error).toMatch(/not found/i);
     });
+
+    it('GET /api/itineraries/:filename returns 200 and sets ETag response header', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saved = await storageService.saveItinerary('api_etag.json', { trip_name: 'Header Test' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/itineraries/api_etag.json',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['etag']).toBe(saved.etag);
+      const body = JSON.parse(response.body) as { _etag: string; trip_name: string };
+      expect(body._etag).toBe(saved.etag);
+      expect(body.trip_name).toBe('Header Test');
+    });
+
+    it('POST /api/itineraries/:filename with mismatched If-Match returns 412 Precondition Failed', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await storageService.saveItinerary('concurrent.json', { trip_name: 'Original' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/itineraries/concurrent.json',
+        headers: {
+          'if-match': '"stale-etag-123"',
+        },
+        payload: {
+          content: { trip_name: 'Conflicting Edit' },
+        },
+      });
+
+      expect(response.statusCode).toBe(412);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/ETag mismatch/i);
+    });
+
+    it('POST /api/itineraries/:filename with valid If-Match returns 200 and updated ETag header', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await storageService.saveItinerary('concurrent_ok.json', {
+        trip_name: 'Original',
+      });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/itineraries/concurrent_ok.json',
+        headers: {
+          'if-match': initial.etag!,
+        },
+        payload: {
+          content: { trip_name: 'Updated Edit' },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['etag']).toBeDefined();
+      expect(response.headers['etag']).not.toBe(initial.etag);
+    });
+
+    it('POST /api/itineraries/:filename with If-None-Match: * returns 412 if already exists', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await storageService.saveItinerary('existing_create.json', { trip_name: 'Original' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/itineraries/existing_create.json',
+        headers: {
+          'if-none-match': '*',
+        },
+        payload: {
+          content: { trip_name: 'Should Fail' },
+        },
+      });
+
+      expect(response.statusCode).toBe(412);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/already exists/i);
+    });
+
+    it('DELETE /api/itineraries/:filename with mismatched If-Match returns 412', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      await storageService.saveItinerary('delete_etag_fail.json', { trip_name: 'Delete Guard' });
+
+      const app = createApp({ storageService });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/itineraries/delete_etag_fail.json',
+        headers: {
+          'if-match': '"obsolete-etag"',
+        },
+      });
+
+      expect(response.statusCode).toBe(412);
+      const body = JSON.parse(response.body) as { error: string };
+      expect(body.error).toMatch(/precondition failed/i);
+      expect(body.error).toMatch(/ETag mismatch/i);
+    });
+
+    it('enforces atomic concurrent conditional writes with same ETag (exactly one succeeds)', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await storageService.saveItinerary('race_condition.json', { trip_name: 'Initial State' });
+      const initialEtag = initial.etag;
+
+      // Two concurrent saves with the same original ETag
+      const results = await Promise.allSettled([
+        storageService.saveItinerary('race_condition.json', { trip_name: 'Update A' }, { ifMatch: initialEtag }),
+        storageService.saveItinerary('race_condition.json', { trip_name: 'Update B' }, { ifMatch: initialEtag }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('enforces atomic concurrent create-only writes (If-None-Match: *) (exactly one succeeds)', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      // Two concurrent creates with If-None-Match: * for the same non-existent file
+      const results = await Promise.allSettled([
+        storageService.saveItinerary('concurrent_create.json', { trip_name: 'Create A' }, { ifNoneMatch: '*' }),
+        storageService.saveItinerary('concurrent_create.json', { trip_name: 'Create B' }, { ifNoneMatch: '*' }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(PreconditionFailedError);
+    });
+
+    it('enforces atomic concurrent conditional deletes with same ETag (exactly one succeeds)', async () => {
+      const storageService = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const initial = await storageService.saveItinerary('concurrent_delete.json', { trip_name: 'To Delete' });
+      const etag = initial.etag;
+
+      const results = await Promise.allSettled([
+        storageService.deleteItinerary('concurrent_delete.json', { ifMatch: etag }),
+        storageService.deleteItinerary('concurrent_delete.json', { ifMatch: etag }),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+    });
+
+    it('returns _etag undefined when loaded from secondary directory, allowing first save with If-None-Match: *', async () => {
+      const secondaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'copilot-secondary-'));
+      try {
+        await fs.writeFile(
+          path.join(secondaryDir, 'secondary_sample.json'),
+          JSON.stringify({ trip_name: 'Secondary Sample', checkpoints: [] }, null, 2),
+          'utf-8'
+        );
+
+        const storageService = new ItineraryStorageService({
+          storageDirectories: [tempDir, secondaryDir],
+          primaryWriteDirectory: tempDir,
+        });
+
+        // Loaded from secondary directory: _etag must be undefined because it doesn't exist in primaryWriteDirectory
+        const loaded = await storageService.getItinerary('secondary_sample.json');
+        expect(loaded).toBeDefined();
+        expect(loaded?._isProtected).toBe(true);
+        expect(loaded?._etag).toBeUndefined();
+
+        // Saving to primary directory with If-None-Match: * succeeds
+        const saved = await storageService.saveItinerary(
+          'secondary_sample.json',
+          { trip_name: 'Secondary Sample Promoted', checkpoints: [] },
+          { ifNoneMatch: '*' }
+        );
+        expect(saved.success).toBe(true);
+        expect(saved.etag).toBeDefined();
+
+        // Now it exists in primary directory, so getItinerary returns the primary etag
+        const loadedPrimary = await storageService.getItinerary('secondary_sample.json');
+        expect(loadedPrimary?._etag).toBe(saved.etag);
+      } finally {
+        await fs.rm(secondaryDir, { recursive: true, force: true });
+      }
+    });
+
+    it('selects S3ItineraryStorageService lazily when S3_STORAGE_BUCKET is set before createApp()', async () => {
+      process.env.S3_STORAGE_BUCKET = 'test-bucket';
+
+      const sendSpy = vi.spyOn(S3Client.prototype, 'send').mockImplementation(async (command: unknown) => {
+        const cmd = command as { constructor: { name: string }; input: { Bucket?: string } };
+        if (cmd.constructor.name === 'ListObjectsV2Command') {
+          return {
+            Contents: [],
+            IsTruncated: false,
+          } as never;
+        }
+        return {} as never;
+      });
+
+      const app = createApp();
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/itineraries',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(sendSpy).toHaveBeenCalled();
+      const listCall = sendSpy.mock.calls.find((call) => {
+        const cmd = call[0] as { constructor: { name: string }; input: { Bucket?: string } };
+        return cmd.constructor.name === 'ListObjectsV2Command';
+      });
+      expect(listCall).toBeDefined();
+      const input = (listCall![0] as { input: { Bucket?: string } }).input;
+      expect(input.Bucket).toBe('test-bucket');
+    });
+
+    it('server/loadEnv.ts loads without throwing', async () => {
+      await expect(import('../../server/loadEnv.js')).resolves.toBeDefined();
+    });
   });
 });
+

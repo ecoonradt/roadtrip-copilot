@@ -419,4 +419,20 @@ describe('Itinerary Parser & Multi-Day Engine (itineraryParser.ts)', () => {
     expect(cps[2].target_time).toBeUndefined();
     expect((cps[2] as { offset_minutes_from_start?: number }).offset_minutes_from_start).toBeUndefined();
   });
+
+  it('strips foreign etag when options.isImport is true', () => {
+    const rawWithEtag = {
+      trip_name: 'Raw API Route',
+      _etag: '"foreign-resource-etag-12345"',
+      checkpoints: [
+        { id: '1', name: 'Start', lat: 34.0, lng: -111.0 },
+      ],
+    };
+
+    const regularParsed = parseItineraryJson(rawWithEtag, 'imported.json');
+    expect(regularParsed.etag).toBe('"foreign-resource-etag-12345"');
+
+    const importedParsed = parseItineraryJson(rawWithEtag, 'imported.json', { isImport: true });
+    expect(importedParsed.etag).toBeUndefined();
+  });
 });

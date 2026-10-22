@@ -31,7 +31,10 @@ describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)'
 
     it('protected endpoints (/api/itineraries and /api/ai/status) allow access without credentials', async () => {
       const authService = new AuthService({ authEnabled: false });
-      const app = createApp({ authService });
+      const app = createApp({
+        authService,
+        aiService: { getStatus: async () => ({ available: true }) } as never,
+      });
 
       const itinsRes = await app.inject({
         method: 'GET',

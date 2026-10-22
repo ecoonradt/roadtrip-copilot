@@ -5,7 +5,6 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
-  RotateCcw,
   Sparkles,
   Loader2,
   Plus,
@@ -33,7 +32,6 @@ interface TimelineSidebarProps {
   onUpdateWaypoint: (id: string, updates: Partial<Waypoint>) => void;
   onBatchUpdateWaypoints?: (updates: Record<string, Partial<Waypoint>>) => void;
   onMoveWaypoint: (index: number, direction: 'up' | 'down') => void;
-  onResetSample: () => void;
   onClearAll: () => void;
   onSelectLocation: (result: GeocodeResult) => void;
   onOpenScoutForDay?: () => void;
@@ -66,7 +64,6 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   onUpdateWaypoint,
   onBatchUpdateWaypoints,
   onMoveWaypoint,
-  onResetSample,
   onClearAll,
   onSelectLocation,
   onOpenScoutForDay,
@@ -297,14 +294,6 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={onResetSample}
-              className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-              title="Reset to sample route"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
-
             {waypoints.length > 0 && (
               <button
                 onClick={onClearAll}
@@ -439,7 +428,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
             <MapPin className="w-10 h-10 mx-auto text-slate-600 mb-3" />
             <h3 className="text-sm font-semibold text-slate-200">No stops added yet</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
-              Click Add Stop above, click anywhere on the map, or load the sample itinerary to get started.
+              Click Add Stop above, or click anywhere on the map to drop your first stop.
             </p>
             <div className="mt-5 flex items-center justify-center gap-2">
               <button
@@ -448,12 +437,6 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add First Stop</span>
-              </button>
-              <button
-                onClick={onResetSample}
-                className="px-3.5 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition-colors cursor-pointer"
-              >
-                Load Sample Route
               </button>
             </div>
           </div>

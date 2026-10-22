@@ -500,7 +500,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
               className="bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-sky-500 flex-1 max-w-xs"
-              placeholder="sample_itinerary.json"
+              placeholder="my_road_trip.json"
             />
             <button
               onClick={handleDownloadFile}

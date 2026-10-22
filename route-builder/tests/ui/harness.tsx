@@ -8,8 +8,27 @@ import type { Waypoint, RouteResponse, GeocodeResult } from '../../src/types/rou
 import type { TimelineCascadeResult } from '../../src/engine/types';
 import type { ParsedTrip } from '../../src/engine/itineraryParser';
 
+class ApiErrorMock extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 const mockedApi = vi.hoisted(() => ({
+  ApiError: class ApiError extends Error {
+    readonly status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+    }
+  },
   fetchItinerary: vi.fn(),
+  fetchItineraryList: vi.fn(),
+  deleteItinerary: vi.fn(),
   fetchRoute: vi.fn(),
   fetchAiStatus: vi.fn(),
   saveItinerary: vi.fn(),
@@ -32,7 +51,7 @@ import { App } from '../../src/App';
 import { DayTabBar } from '../../src/components/DayTabBar';
 
 export interface HeaderProps {
-  onSaveTrip: () => Promise<void>;
+  onSaveTrip?: () => Promise<void> | void;
   cascadeResult: TimelineCascadeResult;
   isLoadingRoute: boolean;
   routeError: string | null;
@@ -44,6 +63,10 @@ export interface HeaderProps {
   setBaseDate: (date: string) => void;
   setSchedulingMode: (mode: 'forward' | 'backward' | 'adhoc') => void;
   setTargetArrivalTime: (time: string) => void;
+  onRenameTrip: (name: string) => void;
+  currentTripName: string;
+  isSaving?: boolean;
+  saveSuccess?: boolean;
 }
 interface SidebarProps { onUpdateWaypoint: (id: string, update: Partial<Waypoint>) => void; onSelectLocation: (result: GeocodeResult) => void }
 interface DayProps { onSelectDay: (index: number) => void; onAddDay: () => void; onDeleteDay: (index: number) => void }
@@ -71,8 +94,19 @@ export function sidebar(app: ReactTestRenderer): SidebarProps { return app.root.
 export function tabs(app: ReactTestRenderer): DayProps { return app.root.findByType(DayTabBar).props as DayProps }
 export function exportProps(app: ReactTestRenderer): ModalProps { return app.root.findByType('test-export').props as ModalProps }
 export function trip(app: ReactTestRenderer): ParsedTrip { return exportProps(app).trip! }
-export function selectTrip(app: ReactTestRenderer, next: ParsedTrip): void {
-  (app.root.findByType('test-selector').props as { onSelectTrip: (value: ParsedTrip) => void }).onSelectTrip(next);
+export function selectTrip(app: ReactTestRenderer, next: ParsedTrip, options?: { unsaved?: boolean }): void {
+  (app.root.findByType('test-selector').props as { onSelectTrip: (value: ParsedTrip, options?: { unsaved?: boolean }) => void }).onSelectTrip(next, options);
+}
+export function selectorProps(app: ReactTestRenderer) {
+  return app.root.findByType('test-selector').props as {
+    isOpen: boolean;
+    dismissible?: boolean;
+    onClose: () => void;
+    onSelectTrip: (trip: ParsedTrip, options?: { unsaved?: boolean }) => void;
+    currentFileName?: string;
+    onDeleteTrip?: (fileName: string, startedGeneration?: number) => void;
+    getTripGeneration?: () => number;
+  };
 }
 export function mapClick(app: ReactTestRenderer, lat = 33.4, lng = -112): void {
   (app.root.findByType('test-map').props as { onMapClick: (lat: number, lng: number) => void }).onMapClick(lat, lng);
@@ -99,20 +133,47 @@ export async function exported<T extends ItineraryExportModel = MultiDayItinerar
   await act(async () => { (button.props as { onClick: () => void }).onClick() });
   return JSON.parse(text(modal.root.findByType('pre'))) as T;
 }
+const entries = new Map<string, string>();
+
+export function seedStorage(values: Record<string, string>): void {
+  for (const [key, value] of Object.entries(values)) entries.set(key, value);
+}
+
+export function clearStorage(): void {
+  entries.clear();
+}
+
+export function stubWindowLocation(search: string): void {
+  const alertMock = vi.fn();
+  vi.stubGlobal('alert', alertMock);
+  const location = { href: `http://localhost:5173/${search}`, search };
+  vi.stubGlobal('window', {
+    location,
+    alert: alertMock,
+    history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search } },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks();
   api.fetchItinerary.mockResolvedValue(fixture());
+  api.fetchItineraryList.mockResolvedValue({ itineraries: [] });
+  api.deleteItinerary.mockResolvedValue({ success: true, fileName: 'test.json' });
   api.fetchRoute.mockImplementation((coords: Array<{ lat: number; lng: number }>) => Promise.resolve(roadResponse(coords.length === 4 ? [3600, 1800, 1200] : [3600, 1800])));
   api.fetchAiStatus.mockResolvedValue({ available: false });
   api.fetchAuthStatus.mockResolvedValue({ authEnabled: false, authenticated: true, authorized: true, user: null });
   api.logoutAuth.mockResolvedValue(undefined);
   api.saveItinerary.mockResolvedValue({ success: true, fileName: 'test.json' });
   api.stageItinerary.mockResolvedValue({ downloadUrl: 'http://localhost:3001/test.json' });
-  const entries = new Map<string, string>();
-  vi.stubGlobal('localStorage', { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => entries.set(key, value) });
-  const location = { href: 'http://localhost:5173/?route=test.json&day=0', search: '?route=test.json&day=0' };
-  vi.stubGlobal('window', { location, history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search } }, addEventListener: () => {}, removeEventListener: () => {} });
-  vi.stubGlobal('alert', vi.fn());
+  clearStorage();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => entries.set(key, value),
+    removeItem: (key: string) => { entries.delete(key); },
+  });
+  stubWindowLocation('?route=test.json&day=0');
 });
 afterEach(async () => {
   for (const app of mounted) await act(async () => app.unmount());

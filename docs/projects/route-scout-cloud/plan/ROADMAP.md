@@ -17,8 +17,8 @@ This document is the **Tier 2 Phase Roadmap** for the **Route Scout Cloud Archit
 | Milestone | Title | Phase | ADRs | Work Package | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **M0** | AWS CDK Foundation, Unified Deploy Scripts & GitHub Actions CI/CD | Phase 1 | [ADR-0003](../decisions/0003-s3-atomic-json-persistence.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md), [ADR-0006](../decisions/0006-aws-project-scp-iam-ci-deployer.md) | [`WP-00-cdk-and-cicd-foundation.md`](archive/WP-00-cdk-and-cicd-foundation.md) | **Completed** |
-| **M1** | Stateless Dual-Mode Google OIDC Auth & Allowlist Gating | Phase 1 | [ADR-0002](../decisions/0002-stateless-dual-mode-oidc-auth.md), [ADR-0004](../decisions/0004-hybrid-local-dev-mode.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md), [ADR-0007](../decisions/0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md) | [`WP-01-dual-mode-oidc-auth.md`](active/WP-01-dual-mode-oidc-auth.md) | **In Progress** |
-| **M2** | Amazon S3 Atomic Itinerary Storage Service | Phase 1 | [ADR-0003](../decisions/0003-s3-atomic-json-persistence.md), [ADR-0004](../decisions/0004-hybrid-local-dev-mode.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md) | *Queued after M1* | Planned |
+| **M1** | Stateless Dual-Mode Google OIDC Auth & Allowlist Gating | Phase 1 | [ADR-0002](../decisions/0002-stateless-dual-mode-oidc-auth.md), [ADR-0004](../decisions/0004-hybrid-local-dev-mode.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md), [ADR-0007](../decisions/0007-ssm-secure-runtime-config-and-cloudfront-forwarded-host.md) | [`WP-01-dual-mode-oidc-auth.md`](archive/WP-01-dual-mode-oidc-auth.md) | **Completed** |
+| **M2** | Amazon S3 Atomic Itinerary Storage Service | Phase 1 | [ADR-0003](../decisions/0003-s3-atomic-json-persistence.md), [ADR-0004](../decisions/0004-hybrid-local-dev-mode.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md) | [`WP-02-s3-itinerary-storage.md`](active/WP-02-s3-itinerary-storage.md) | **In Progress** |
 | **M3** | Amazon Bedrock Adapter & Configurable Model Selection | Phase 1 | [ADR-0001](../decisions/0001-amazon-bedrock-single-bill-ai.md), [ADR-0004](../decisions/0004-hybrid-local-dev-mode.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md) | *Queued after M2* | Planned |
 | **M4** | Discovery + Deterministic Domain Grounding Tool Library | Phase 1 | [ADR-0001](../decisions/0001-amazon-bedrock-single-bill-ai.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md) | *Queued after M3* | Planned |
 | **M5** | Stripe Prepaid Checkout & S3 Atomic Wallet Ledger | Phase 2 | [ADR-0003](../decisions/0003-s3-atomic-json-persistence.md), [ADR-0005](../decisions/0005-cdk-iac-and-github-actions-cicd.md) | *Deferred to Phase 2* | Deferred (Phase 2) |
@@ -70,14 +70,16 @@ This document is the **Tier 2 Phase Roadmap** for the **Route Scout Cloud Archit
 ### Milestone 2 (M2): Amazon S3 Atomic Itinerary Storage Service
 * **Objective:** Extend `ItineraryStorageService` to persist and retrieve user itineraries in Amazon S3 (`s3://<data-bucket>/users/{email}/itineraries/{slug}.json`) with conditional write safety (`If-Match` / `ETag`) when `S3_STORAGE_BUCKET` is configured, while keeping local filesystem storage (`itineraries/*.json`) strictly isolated for `npm run dev` per ADR-0003 and ADR-0004.
 * **Definition of Done (DoD):**
-  1. S3 storage adapter implemented using `@aws-sdk/client-s3` scoped to `request.authUser.email` (`users/{email}/itineraries/`), with bundled `sample_itinerary.json` fallback visibility.
-  2. Conditional write support (`ETag` / `If-Match`) prevents concurrent overwrite race conditions (`HTTP 412 Precondition Failed` handling).
-  3. Local filesystem storage remains the default when `S3_STORAGE_BUCKET` is unset, guaranteeing zero cross-contamination between `npm run dev` and production S3.
-  4. **CDK & Infrastructure Update:** `infra/` wires `S3_STORAGE_BUCKET` environment variable into the Fastify Lambda function and grants least-privilege IAM `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket` permissions on the App Data Bucket.
-  5. **Automated & Live Cloud Verification:**
+  1. S3 storage adapter implemented using `@aws-sdk/client-s3` scoped to `request.authUser.email` (`users/{email}/itineraries/`). The bundled sample file is gone: `src/engine/sampleTrip.ts` is the single source of truth and the sample is offered only when starting a new route, never as a storage fallback.
+  2. First-run and empty-workspace flows are explicit: "no active route" opens a non-dismissible route chooser, "Start from Sample Route" loads an unsaved in-code ad-hoc trip, and deleting the active route returns to the chooser without any sample fetch or fallback.
+  3. Conditional write support (`ETag` / `If-Match`) prevents concurrent overwrite race conditions (`HTTP 412 Precondition Failed` handling).
+  4. Local filesystem storage remains the default when `S3_STORAGE_BUCKET` is unset, guaranteeing zero cross-contamination between `npm run dev` and production S3.
+  5. **CDK & Infrastructure Update:** `infra/` wires `S3_STORAGE_BUCKET` environment variable into the Fastify Lambda function and grants least-privilege IAM `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, and `s3:ListBucket` permissions on the App Data Bucket.
+  6. **Automated & Live Cloud Verification:**
      * `scripts/ci_check.sh` passes with mocked S3 unit tests and `cdk synth`.
      * Deployed to AWS via `./scripts/deploy_cloud.sh`.
      * **Manual Verification:** Log into the live CloudFront Web Studio, create/edit and save a multi-day itinerary, refresh the browser, verify the itinerary persists across Lambda cold starts, and inspect the resulting `users/{email}/itineraries/*.json` object in the AWS S3 Console.
+     * **Manual Verification (first-run):** In a fresh browser profile, confirm the route chooser opens automatically, start from the sample, save it under a new name, reload directly into that route, then delete it and confirm the chooser returns with no sample loaded.
 
 ---
 

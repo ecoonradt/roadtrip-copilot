@@ -172,6 +172,7 @@ export interface ItineraryMetadataSummary {
   dates?: { start: string; end: string };
   lastModified?: string;
   isProtected?: boolean;
+  etag?: string;
 }
 
 export async function fetchItineraryList(): Promise<{ itineraries: ItineraryMetadataSummary[] }> {
@@ -180,7 +181,10 @@ export async function fetchItineraryList(): Promise<{ itineraries: ItineraryMeta
     const errorData = (await res.json().catch(() => ({ error: 'Failed to list itineraries' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to list itineraries with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to list itineraries with HTTP ${res.status}`,
+      res.status
+    );
   }
   return (await res.json()) as { itineraries: ItineraryMetadataSummary[] };
 }
@@ -191,18 +195,49 @@ export async function fetchItinerary(fileName: string): Promise<Record<string, u
     const errorData = (await res.json().catch(() => ({ error: 'Failed to load itinerary' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to load itinerary with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to load itinerary with HTTP ${res.status}`,
+      res.status
+    );
   }
-  return (await res.json()) as Record<string, unknown>;
+  const data = (await res.json()) as Record<string, unknown>;
+  const etag = res.headers.get('ETag');
+  if (etag && !data._etag) {
+    data._etag = etag;
+  }
+  return data;
+}
+
+export interface SaveItineraryApiOptions {
+  ifMatch?: string;
+  ifNoneMatch?: string;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
 }
 
 export async function saveItinerary(
   fileName: string,
-  content: unknown
-): Promise<{ success: boolean; fileName: string; filePath: string }> {
+  content: unknown,
+  options?: SaveItineraryApiOptions
+): Promise<{ success: boolean; fileName: string; filePath: string; etag?: string }> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (options?.ifMatch) {
+    headers['If-Match'] = options.ifMatch;
+  }
+  if (options?.ifNoneMatch) {
+    headers['If-None-Match'] = options.ifNoneMatch;
+  }
+
   const res = await fetch(`/api/itineraries/${encodeURIComponent(fileName)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ content }),
   });
 
@@ -210,24 +245,42 @@ export async function saveItinerary(
     const errorData = (await res.json().catch(() => ({ error: 'Failed to save itinerary' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to save itinerary with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to save itinerary with HTTP ${res.status}`,
+      res.status
+    );
   }
 
-  return (await res.json()) as { success: boolean; fileName: string; filePath: string };
+  const data = (await res.json()) as { success: boolean; fileName: string; filePath: string; etag?: string };
+  const etag = res.headers.get('ETag');
+  if (etag && !data.etag) {
+    data.etag = etag;
+  }
+  return data;
 }
 
 export async function deleteItinerary(
-  fileName: string
+  fileName: string,
+  options?: { ifMatch?: string }
 ): Promise<{ success: boolean; fileName: string }> {
+  const headers: Record<string, string> = {};
+  if (options?.ifMatch) {
+    headers['If-Match'] = options.ifMatch;
+  }
+
   const res = await fetch(`/api/itineraries/${encodeURIComponent(fileName)}`, {
     method: 'DELETE',
+    headers,
   });
 
   if (!res.ok) {
     const errorData = (await res.json().catch(() => ({ error: 'Failed to delete itinerary' }))) as {
       error?: string;
     };
-    throw new Error(errorData.error || `Failed to delete itinerary with HTTP ${res.status}`);
+    throw new ApiError(
+      errorData.error || `Failed to delete itinerary with HTTP ${res.status}`,
+      res.status
+    );
   }
 
   return (await res.json()) as { success: boolean; fileName: string };

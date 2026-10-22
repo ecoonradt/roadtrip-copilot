@@ -346,7 +346,6 @@ describe('Frontend Auth UI & Gating', () => {
     api.fetchAuthStatus.mockRejectedValueOnce(new Error('Network offline'));
     api.fetchAiStatus.mockRejectedValueOnce(new Error('Network offline'));
     api.fetchItinerary
-      .mockRejectedValueOnce(new Error('Network offline'))
       .mockRejectedValueOnce(new Error('Network offline'));
 
     const app = await mountApp();
@@ -383,7 +382,7 @@ describe('Frontend Auth UI & Gating', () => {
     // Verifies all three services were re-queried
     expect(api.fetchAuthStatus).toHaveBeenCalledTimes(2);
     expect(api.fetchAiStatus).toHaveBeenCalledTimes(2);
-    expect(api.fetchItinerary).toHaveBeenCalledTimes(3);
+    expect(api.fetchItinerary).toHaveBeenCalledTimes(2);
 
     // Transitions to the studio with loaded trip and AI readiness restored
     const headerEl = app.root.findByType('test-header');
@@ -451,12 +450,12 @@ describe('Frontend Auth UI & Gating', () => {
       await Promise.resolve();
     });
 
-    // The recovered trip was NOT overwritten by late failure fallback
+    // The recovered trip was NOT overwritten by the late failure
     expect(headerEl.props.currentTripName).toBe('Recovered Trip Name');
   });
 
   it('does not overwrite newly selected or imported trip when pending retry itinerary request resolves late', async () => {
-    // Initial mount: auth fails, and itinerary request hangs
+    // Initial mount: auth fails, but the initial trip loads behind the auth gate
     api.fetchAuthStatus.mockResolvedValue({
       authEnabled: true,
       authenticated: false,
@@ -470,7 +469,7 @@ describe('Frontend Auth UI & Gating', () => {
       resolvePendingItinerary = resolve;
     });
 
-    api.fetchItinerary.mockReturnValue(pendingItineraryPromise as Promise<never>);
+    api.fetchItinerary.mockResolvedValueOnce(fixture()).mockReturnValue(pendingItineraryPromise as Promise<never>);
 
     const app = await mountApp();
     await act(async () => {
@@ -497,7 +496,7 @@ describe('Frontend Auth UI & Gating', () => {
       await Promise.resolve();
     });
 
-    // Studio is rendered while the initial itinerary request is still pending
+    // Studio is available because a trip is already active while the retry request is pending
     expect(app.root.findAllByType('test-header')).toHaveLength(1);
 
     // User deliberately imports / selects another trip
@@ -710,7 +709,6 @@ describe('Frontend Auth UI & Gating', () => {
       api.fetchAiStatus.mockRejectedValueOnce(new Error('Offline')).mockResolvedValue({ available: true });
       api.fetchItinerary
         .mockRejectedValueOnce(new Error('Offline'))
-        .mockRejectedValueOnce(new Error('Offline'))
         .mockResolvedValue(fixture());
       const app = await mountApp();
       await advanceTime(15_000);
@@ -738,7 +736,7 @@ describe('Frontend Auth UI & Gating', () => {
         expect(allText(app.root.findByProps({ role: 'status' }))).toBe('Connecting to Roadtrip Co-Pilot…');
         expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
         expect(app.root.findAllByType('test-header')).toHaveLength(0);
-        expect(api.fetchItinerary).toHaveBeenCalledTimes(2);
+        expect(api.fetchItinerary).toHaveBeenCalledTimes(1);
         expect(api.fetchAiStatus).toHaveBeenCalledTimes(1);
       }
 
@@ -747,12 +745,12 @@ describe('Frontend Auth UI & Gating', () => {
       expect(header.props.authUser).toEqual(signedInStatus.user);
       expect(header.props.currentTripName).toBe('Scheduling tests');
       expect(header.props.aiAvailable).toBe(true);
-      expect(api.fetchItinerary).toHaveBeenCalledTimes(3);
+      expect(api.fetchItinerary).toHaveBeenCalledTimes(2);
       expect(api.fetchAiStatus).toHaveBeenCalledTimes(2);
       expect(vi.getTimerCount()).toBe(0);
       await advanceTime(15_000);
       expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
-      expect(api.fetchItinerary).toHaveBeenCalledTimes(3);
+      expect(api.fetchItinerary).toHaveBeenCalledTimes(2);
       expect(api.fetchAiStatus).toHaveBeenCalledTimes(2);
     });
   }
