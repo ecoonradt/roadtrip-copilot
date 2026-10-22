@@ -57,13 +57,13 @@ The core Route Builder (map planning, OSRM routing, timeline cascade calculation
 
 To use the **AI Heads-Up Alert Copywriter** or the **Route Scout Conversational Co-Pilot**, configure an AI engine using one of the following methods:
 
-* **Local Zero-Config (Recommended):** If the Antigravity CLI (`agy`) is in your PATH (e.g. `~/.local/bin/agy`), the Route Builder automatically detects and invokes the active Gemini Flash model (e.g. `gemini-3.8-flash-high`) using your active session. **Zero API keys required.** Grounded web searches verify real-world coordinates and operating hours without headless lockups. (Optional model override: `export AGY_MODEL="model-name"`).
-* **Cloud API Fallback:** Supply a Google AI Studio developer API key in the UI settings modal or via environment variable:
+* **Amazon Bedrock (Cloud & AWS Credentials):** Uses Amazon Bedrock's unified Converse / ConverseStream API (`@aws-sdk/client-bedrock-runtime`) with configurable multi-vendor model selection in the Route Scout drawer and Edit Waypoint modal. Defaults to **Moonshot Kimi K3** (`us.moonshotai.kimi-k3`) for Route Scout and **Amazon Nova 2 Lite** (`us.amazon.nova-2-lite-v1:0`) for alert copywriting, with support for Amazon Nova Pro, OpenAI GPT-OSS 120B/20B, DeepSeek V3.2, Mistral Large 3, and Moonshot Kimi K2.5.
+* **Local Zero-Config (`agy`):** If the Antigravity CLI (`agy`) is in your PATH (e.g. `~/.local/bin/agy`), the Route Builder automatically detects and invokes the active Gemini Flash model (e.g. `gemini-3.8-flash-high`) using your active session. **Zero API keys required.** Grounded web searches verify real-world coordinates and operating hours without headless lockups. (Optional model override: `export AGY_MODEL="model-name"`).
+* **Google AI Studio Fallback:** Supply a Google AI Studio developer API key in the UI settings modal or via environment variable:
   ```bash
   export GEMINI_API_KEY="your-google-ai-studio-api-key"
   ```
   *(Defaults to `gemini-3.8-flash`; override via `export GEMINI_MODEL="model-name"`).*
-* **Future Adapters:** Pluggable adapter architecture ready for Anthropic Claude, OpenAI, and local offline models (Ollama). See [docs/IDEAS.md](../docs/IDEAS.md).
 
 ---
 
@@ -106,7 +106,7 @@ Once your itinerary is ready, transfer it to your Android device using any of th
 
 ## Environment Variables & Configuration
 
-The application works with zero configuration by default in an Antigravity environment. You can customize behavior using the following environment variables:
+The application works with zero configuration by default in an AWS or Antigravity environment. You can customize behavior using the following environment variables:
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -116,6 +116,8 @@ The application works with zero configuration by default in an Antigravity envir
 | `GOOGLE_CLIENT_ID` | *(None)* | Google OAuth 2.0 Web Client ID (or resolved from SSM `/roadtrip-copilot/google-client-id`). |
 | `GOOGLE_CLIENT_SECRET` | *(None)* | Google OAuth 2.0 Web Client Secret (or resolved at runtime from SSM SecureString `/roadtrip-copilot/google-client-secret`). |
 | `JWT_SECRET` | *(None)* | Server HMAC-SHA256 secret for signing session cookies and Bearer JWTs (or resolved at runtime from SSM SecureString `/roadtrip-copilot/jwt-secret`). |
+| `BEDROCK_SCOUT_MODEL_ID` | `us.moonshotai.kimi-k3` | Default Amazon Bedrock model or inference profile ID for the Route Scout co-pilot. |
+| `BEDROCK_COPYWRITER_MODEL_ID` | `us.amazon.nova-2-lite-v1:0` | Default Amazon Bedrock model or inference profile ID for waypoint alert & day-title copywriting. |
 | `GEMINI_API_KEY` | *(None)* | Optional Google AI Studio developer API key. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Explicit Gemini model ID for Google AI Studio cloud calls. |
 | `AGY_MODEL` | *(Auto-detected)* | Override the model passed to `agy` (by default auto-resolves the newest Flash model from `agy models`). |

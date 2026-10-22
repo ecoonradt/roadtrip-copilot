@@ -15,7 +15,24 @@ export interface CopilotAlert {
   recommended_trigger_radius_miles: number;
 }
 
-export type AiEngineType = 'agy' | 'cloud' | 'template';
+export type AiEngineType = 'bedrock' | 'agy' | 'cloud' | 'template';
+
+export interface AiModelOption {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  role: 'scout' | 'copywriter' | 'both';
+}
+
+export interface AiStatusResult {
+  available: boolean;
+  engine?: AiEngineType;
+  models?: AiModelOption[];
+  defaultScoutModelId?: string;
+  defaultCopywriterModelId?: string;
+  message?: string;
+}
 
 export interface GenerateAlertResult {
   alert: CopilotAlert;

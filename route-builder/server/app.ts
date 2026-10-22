@@ -89,6 +89,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   // Register Route Scout conversational routes
   app.register(scoutRoutes, {
     scoutService: options.scoutService,
+    keepAliveIntervalMs: options.keepAliveIntervalMs,
   });
 
   // Register device and handoff routes

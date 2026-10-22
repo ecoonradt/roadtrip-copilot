@@ -4,6 +4,7 @@ import type {
   GenerateAlertResult,
   BatchAlertResult,
   AiEngineType,
+  AiStatusResult,
 } from '../types/ai';
 import type {
   ScoutChatRequest,
@@ -13,14 +14,12 @@ import type {
 } from '../types/scout';
 import type { AuthStatusResponse } from '../types/auth';
 
+export type { AiStatusResult, AiModelOption } from '../types/ai';
+
 export interface GenerateAlertRequestOptions {
   apiKey?: string;
   preferredEngine?: AiEngineType | 'auto';
-}
-
-export interface AiStatusResult {
-  available: boolean;
-  message?: string;
+  modelId?: string;
 }
 
 export async function fetchAiStatus(apiKey?: string): Promise<AiStatusResult> {
@@ -85,6 +84,7 @@ export async function generateCopilotAlert(
       waypoint,
       apiKey: options.apiKey,
       preferredEngine: options.preferredEngine,
+      ...(options.modelId ? { modelId: options.modelId } : {}),
     }),
   });
 
@@ -109,6 +109,7 @@ export async function generateBatchCopilotAlerts(
       waypoints,
       apiKey: options.apiKey,
       preferredEngine: options.preferredEngine,
+      ...(options.modelId ? { modelId: options.modelId } : {}),
     }),
   });
 
@@ -305,12 +306,14 @@ export async function chatWithScout(request: ScoutChatRequest): Promise<ScoutCha
 
 export async function chatWithScoutStream(
   request: ScoutChatRequest,
-  onEvent: (event: ScoutStreamEvent) => void
+  onEvent: (event: ScoutStreamEvent) => void,
+  signal?: AbortSignal
 ): Promise<ScoutChatResponse> {
   const res = await fetch('/api/ai/scout/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+    signal,
   });
 
   if (!res.ok) {
@@ -333,7 +336,9 @@ export async function chatWithScoutStream(
     let eventType = 'message';
     let dataStr = '';
 
-    for (const line of frame.split('\n')) {
+    for (const rawLine of frame.split('\n')) {
+      const line = rawLine.trimEnd();
+      if (!line || line.startsWith(':')) continue;
       if (line.startsWith('event:')) {
         eventType = line.replace(/^event:\s*/, '').trim();
       } else if (line.startsWith('data:')) {
@@ -419,7 +424,13 @@ export async function generateDayTitle(
   const res = await fetch('/api/copilot/day-title', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dayNumber, stops, ...options }),
+    body: JSON.stringify({
+      dayNumber,
+      stops,
+      apiKey: options.apiKey,
+      preferredEngine: options.preferredEngine,
+      ...(options.modelId ? { modelId: options.modelId } : {}),
+    }),
   });
   if (!res.ok) {
     const errorData = (await res.json().catch(() => ({ error: 'Day title generation failed' }))) as { error?: string };

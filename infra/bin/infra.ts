@@ -72,6 +72,14 @@ const originVerifySecretSsmParam =
   process.env.ORIGIN_VERIFY_SECRET_SSM_PARAM ||
   (app.node.tryGetContext('originVerifySecretSsmParam') as string | undefined);
 
+const bedrockScoutModelId =
+  process.env.BEDROCK_SCOUT_MODEL_ID ||
+  (app.node.tryGetContext('bedrockScoutModelId') as string | undefined);
+
+const bedrockCopywriterModelId =
+  process.env.BEDROCK_COPYWRITER_MODEL_ID ||
+  (app.node.tryGetContext('bedrockCopywriterModelId') as string | undefined);
+
 new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   env: { account, region: selectedRegion },
   githubRepo,
@@ -88,5 +96,7 @@ new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   allowedHosts,
   publicBaseUrl,
   originVerifySecret,
+  bedrockScoutModelId,
+  bedrockCopywriterModelId,
 });
 

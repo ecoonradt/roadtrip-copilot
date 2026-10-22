@@ -106,6 +106,7 @@ export interface ScoutChatRequest {
   sessionId?: string;
   apiKey?: string;
   preferredEngine?: AiEngineType | 'auto';
+  modelId?: string;
 }
 
 export interface ScoutChatResponse {
@@ -115,6 +116,9 @@ export interface ScoutChatResponse {
   engine: AiEngineType;
   thought?: string;
   activities?: ScoutActivity[];
+  modelId?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export type ScoutStreamEvent =

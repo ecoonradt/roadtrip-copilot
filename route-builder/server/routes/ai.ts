@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { AiService, defaultAiService } from '../services/aiService.js';
+import { InvalidModelError } from '../services/bedrockService.js';
 import type { WaypointContext, AiEngineType, DayTitleContext } from '../types/ai.js';
 
 export interface AiPluginOptions {
@@ -11,6 +12,7 @@ interface GenerateBody {
   waypoints?: WaypointContext[];
   apiKey?: string;
   preferredEngine?: AiEngineType | 'auto';
+  modelId?: string;
 }
 
 export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
@@ -23,7 +25,18 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
   fastify.post<{ Body: GenerateBody }>(
     '/api/copilot/generate',
     async (request, reply) => {
-      const { waypoint, waypoints, apiKey, preferredEngine } = request.body || {};
+      const { waypoint, waypoints, apiKey, preferredEngine, modelId } = request.body || {};
+
+      if (modelId !== undefined && modelId !== null) {
+        try {
+          aiService.validateModelId(modelId);
+        } catch (err: unknown) {
+          if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+            return reply.status(400).send({ error: (err as Error).message });
+          }
+          throw err;
+        }
+      }
 
       // Validate that at least one of waypoint or waypoints is provided
       if (!waypoint && (!waypoints || !Array.isArray(waypoints) || waypoints.length === 0)) {
@@ -38,6 +51,7 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
           const batchResult = await aiService.generateBatchAlerts(waypoints, {
             apiKey,
             preferredEngine,
+            modelId,
           });
           return reply.status(200).send(batchResult);
         }
@@ -47,10 +61,14 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
           const singleResult = await aiService.generateAlert(waypoint, {
             apiKey,
             preferredEngine,
+            modelId,
           });
           return reply.status(200).send(singleResult);
         }
       } catch (err: unknown) {
+        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+          return reply.status(400).send({ error: (err as Error).message });
+        }
         const message = err instanceof Error ? err.message : 'AI generation error';
         fastify.log.error({ err }, `AI alert generation failed: ${message}`);
         return reply.status(500).send({ error: message });
@@ -59,20 +77,41 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
   );
 
   // POST /api/copilot/day-title
-  fastify.post<{ Body: Partial<DayTitleContext> & { apiKey?: string; preferredEngine?: AiEngineType | 'auto' } }>(
+  fastify.post<{
+    Body: Partial<DayTitleContext> & {
+      apiKey?: string;
+      preferredEngine?: AiEngineType | 'auto';
+      modelId?: string;
+    };
+  }>(
     '/api/copilot/day-title',
     async (request, reply) => {
-      const { dayNumber, stops, apiKey, preferredEngine } = request.body || {};
+      const { dayNumber, stops, apiKey, preferredEngine, modelId } = request.body || {};
+
+      if (modelId !== undefined && modelId !== null) {
+        try {
+          aiService.validateModelId(modelId);
+        } catch (err: unknown) {
+          if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+            return reply.status(400).send({ error: (err as Error).message });
+          }
+          throw err;
+        }
+      }
+
       if (!Array.isArray(stops) || stops.length === 0) {
         return reply.status(400).send({ error: 'Request body must contain a non-empty "stops" array' });
       }
       try {
         const result = await aiService.generateDayTitle(
           { dayNumber: dayNumber ?? 1, stops },
-          { apiKey, preferredEngine }
+          { apiKey, preferredEngine, modelId }
         );
         return reply.status(200).send(result);
       } catch (err: unknown) {
+        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+          return reply.status(400).send({ error: (err as Error).message });
+        }
         const message = err instanceof Error ? err.message : 'Day title generation error';
         return reply.status(500).send({ error: message });
       }

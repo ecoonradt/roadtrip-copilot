@@ -6,8 +6,10 @@ import type {
   ScoutStreamEvent,
   ScoutActivity,
 } from '../types/scout.js';
+import type { ToolDeclaration } from '../types/ai.js';
 import type { GenerationOptions, AiHarnessAdapter } from './aiService.js';
 import { AiService, AgyHarnessAdapter } from './aiService.js';
+import { AwsBedrockHarnessAdapter } from './bedrockService.js';
 
 /**
  * Builds the comprehensive domain prompt for Route Scout (pure road-trip domain, harness-agnostic).
@@ -743,20 +745,47 @@ export function getQuickPrompts(scope: ScoutScope): string[] {
   ];
 }
 
+export interface ScoutServiceOptions {
+  aiService?: AiService;
+  tools?: ToolDeclaration[];
+  toolDispatcher?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+}
+
 /**
  * Route Scout Service Coordinator.
  */
 export class ScoutService {
-  private aiService: AiService;
+  public readonly aiService: AiService;
+  private tools: ToolDeclaration[];
+  private toolDispatcher: (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
-  constructor(aiService?: AiService) {
-    this.aiService = aiService || new AiService();
+  constructor(aiServiceOrOptions?: AiService | ScoutServiceOptions) {
+    if (aiServiceOrOptions instanceof AiService) {
+      this.aiService = aiServiceOrOptions;
+      this.tools = [];
+      this.toolDispatcher = async () => ({});
+    } else if (aiServiceOrOptions && typeof aiServiceOrOptions === 'object') {
+      this.aiService = aiServiceOrOptions.aiService || new AiService();
+      this.tools = aiServiceOrOptions.tools || [];
+      this.toolDispatcher = aiServiceOrOptions.toolDispatcher || (async () => ({}));
+    } else {
+      this.aiService = new AiService();
+      this.tools = [];
+      this.toolDispatcher = async () => ({});
+    }
+  }
+
+  validateModelId(modelId?: string): string | undefined {
+    return this.aiService.validateModelId(modelId);
   }
 
   /**
    * Executes a multi-turn chat interaction with Route Scout.
    */
   async chat(request: ScoutChatRequest, options: GenerationOptions = {}): Promise<ScoutChatResponse> {
+    const effectiveModelId = options.modelId !== undefined ? options.modelId : request.modelId;
+    const validatedModelId = this.aiService.validateModelId(effectiveModelId);
+
     const sessionId = request.sessionId || `scout_${Date.now()}`;
     const preferredEngine = options.preferredEngine || 'auto';
 
@@ -774,8 +803,63 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    // 1. Try Primary: agy adapter
-    if (preferredEngine !== 'cloud') {
+    // 1. Try Bedrock adapter first if preferred or in auto mode
+    const bedrock = this.aiService.getAdapter('bedrock') as AwsBedrockHarnessAdapter | undefined;
+    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
+      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable());
+      if (isAvail) {
+        try {
+          const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
+          if (typeof bedrock.generateStreamWithTools === 'function') {
+            const streamRes = await bedrock.generateStreamWithTools(
+              domainPrompt,
+              this.tools,
+              this.toolDispatcher,
+              () => {},
+              { modelId: validatedModelId, abortSignal: options.abortSignal }
+            );
+            const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
+            const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+            return {
+              reply,
+              suggestions,
+              sessionId,
+              engine: 'bedrock',
+              thought,
+              modelId: activeModelId,
+              inputTokens: streamRes.inputTokens,
+              outputTokens: streamRes.outputTokens,
+            };
+          } else {
+            const prompt = bedrock.decorateScoutPrompt ? bedrock.decorateScoutPrompt(domainPrompt) : domainPrompt;
+            const rawOutput = await bedrock.generate(prompt, {
+              modelId: validatedModelId,
+              abortSignal: options.abortSignal,
+            });
+            const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(rawOutput) : rawOutput;
+            const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+            return {
+              reply,
+              suggestions,
+              sessionId,
+              engine: 'bedrock',
+              thought,
+              modelId: activeModelId,
+            };
+          }
+        } catch (err: unknown) {
+          if (preferredEngine === 'bedrock') {
+            throw err;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          lastError = msg;
+          console.warn(`[RouteScout] bedrock adapter generation failed (${msg})`);
+        }
+      }
+    }
+
+    // 2. Try Primary: agy adapter
+    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
       const agy = this.aiService.getAdapter('agy');
       if (agy) {
         try {
@@ -792,22 +876,24 @@ export class ScoutService {
       }
     }
 
-    // 2. Try Cloud Gemini API
-    const cloud = this.aiService.getAdapter('cloud');
-    if (cloud) {
-      try {
-        const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-        if (apiKey && (await cloud.isAvailable(apiKey))) {
-          const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
-          const rawOutput = await cloud.generate(prompt, apiKey);
-          const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-          return { reply, suggestions, sessionId, engine: 'cloud', thought };
+    // 3. Try Cloud Gemini API
+    if (preferredEngine !== 'bedrock') {
+      const cloud = this.aiService.getAdapter('cloud');
+      if (cloud) {
+        try {
+          const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+          if (apiKey && (await cloud.isAvailable(apiKey))) {
+            const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
+            const rawOutput = await cloud.generate(prompt, apiKey);
+            const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
+            const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+            return { reply, suggestions, sessionId, engine: 'cloud', thought };
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          lastError = msg;
+          console.warn(`[RouteScout] cloud adapter generation failed (${msg})`);
         }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        lastError = msg;
-        console.warn(`[RouteScout] cloud adapter generation failed (${msg})`);
       }
     }
 
@@ -826,6 +912,9 @@ export class ScoutService {
     onEvent: (event: ScoutStreamEvent) => void,
     options: GenerationOptions = {}
   ): Promise<ScoutChatResponse> {
+    const effectiveModelId = options.modelId !== undefined ? options.modelId : request.modelId;
+    const validatedModelId = this.aiService.validateModelId(effectiveModelId);
+
     const sessionId = request.sessionId || `scout_${Date.now()}`;
     const preferredEngine = options.preferredEngine || 'auto';
 
@@ -849,8 +938,67 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    // 1. Try Primary: agy adapter streaming
-    if (preferredEngine !== 'cloud') {
+    // 1. Try Bedrock adapter streaming first if preferred or auto
+    const bedrock = this.aiService.getAdapter('bedrock') as AwsBedrockHarnessAdapter | undefined;
+    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
+      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable());
+      if (isAvail) {
+        try {
+          const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
+          const activities: ScoutActivity[] = [];
+          const streamRes = await bedrock.generateStreamWithTools(
+            domainPrompt,
+            this.tools,
+            this.toolDispatcher,
+            (streamEvt) => {
+              if (streamEvt.event === 'activity') {
+                const existingIdx = activities.findIndex((a) => a.id === streamEvt.data.id);
+                if (existingIdx >= 0) {
+                  activities[existingIdx] = streamEvt.data;
+                } else {
+                  activities.push(streamEvt.data);
+                }
+                onEvent(streamEvt);
+              } else if (streamEvt.event === 'thought' || streamEvt.event === 'delta') {
+                onEvent(streamEvt);
+              }
+            },
+            { modelId: validatedModelId, abortSignal: options.abortSignal }
+          );
+
+          const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+          if (suggestions.length > 0) {
+            onEvent({ event: 'suggestions', data: { suggestions } });
+          }
+          const doneResponse: ScoutChatResponse = {
+            reply,
+            suggestions,
+            sessionId,
+            engine: 'bedrock',
+            thought,
+            activities: activities.length > 0 ? activities : undefined,
+            modelId: activeModelId,
+            inputTokens: streamRes.inputTokens,
+            outputTokens: streamRes.outputTokens,
+          };
+          onEvent({ event: 'done', data: doneResponse });
+          return doneResponse;
+        } catch (err: unknown) {
+          if (preferredEngine === 'bedrock') {
+            const msg = err instanceof Error ? err.message : String(err);
+            onEvent({ event: 'error', data: { error: msg } });
+            throw err;
+          }
+          const msg = err instanceof Error ? err.message : String(err);
+          lastError = msg;
+          console.warn(`[RouteScout] bedrock adapter streaming failed (${msg})`);
+        }
+      }
+    }
+
+    // 2. Try Primary: agy adapter streaming
+    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
       const agy = this.aiService.getAdapter('agy') as (AgyHarnessAdapter | undefined);
       if (agy && typeof agy.generateStream === 'function') {
         try {
@@ -895,26 +1043,28 @@ export class ScoutService {
       }
     }
 
-    // 2. Try Cloud Gemini API
-    const cloud = this.aiService.getAdapter('cloud');
-    const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-    if (cloud && apiKey) {
-      try {
-        const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
-        const rawOutput = await cloud.generate(prompt, apiKey);
-        const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
-        const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-        onEvent({ event: 'delta', data: { text: reply } });
-        if (suggestions.length > 0) {
-          onEvent({ event: 'suggestions', data: { suggestions } });
+    // 3. Try Cloud Gemini API
+    if (preferredEngine !== 'bedrock') {
+      const cloud = this.aiService.getAdapter('cloud');
+      const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+      if (cloud && apiKey) {
+        try {
+          const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
+          const rawOutput = await cloud.generate(prompt, apiKey);
+          const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
+          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+          onEvent({ event: 'delta', data: { text: reply } });
+          if (suggestions.length > 0) {
+            onEvent({ event: 'suggestions', data: { suggestions } });
+          }
+          const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'cloud', thought };
+          onEvent({ event: 'done', data: doneResponse });
+          return doneResponse;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          lastError = msg;
+          console.warn(`[RouteScout] cloud adapter fallback failed (${msg})`);
         }
-        const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'cloud', thought };
-        onEvent({ event: 'done', data: doneResponse });
-        return doneResponse;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        lastError = msg;
-        console.warn(`[RouteScout] cloud adapter fallback failed (${msg})`);
       }
     }
 

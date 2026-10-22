@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -17,7 +17,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Waypoint, WaypointType } from '../types/routing';
-import type { WaypointContext, CopilotAlert } from '../types/ai';
+import type { WaypointContext, CopilotAlert, AiModelOption } from '../types/ai';
 import { generateCopilotAlert } from '../services/api';
 import { defaultAiQueue } from '../services/aiQueue';
 
@@ -45,6 +45,9 @@ export interface EditWaypointModalProps {
   onSave: (waypointId: string, updates: Partial<Waypoint>) => void;
   onApply?: (waypointId: string, alert: CopilotAlert) => void;
   aiAvailable?: boolean;
+  aiModels?: AiModelOption[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
 }
 
 /**
@@ -112,8 +115,14 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   onSave,
   onApply,
   aiAvailable = true,
+  aiModels = [],
+  selectedModelId,
+  onSelectModel,
 }) => {
   const [activeTab, setActiveTab] = useState<'details' | 'alert'>(initialTab);
+
+  // Request sequence guard to prevent stale responses overwriting newer state/stops
+  const genSeqRef = useRef<number>(0);
 
   // Stop Details State
   const [name, setName] = useState('');
@@ -133,8 +142,14 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
+  const copywriterModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'copywriter' || m.role === 'both'),
+    [aiModels]
+  );
+
   // Synchronize state when modal opens with a new waypoint
   useEffect(() => {
+    genSeqRef.current += 1;
     if (!waypoint || !isOpen) return;
 
     setActiveTab(initialTab);
@@ -211,6 +226,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   const handleGenerateAlert = async () => {
     if (!waypoint) return;
 
+    const seq = ++genSeqRef.current;
     setIsLoading(true);
     setError(null);
 
@@ -225,16 +241,22 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
     };
 
     try {
-      const result = await defaultAiQueue.enqueue(() => generateCopilotAlert(context));
+      const result = await defaultAiQueue.enqueue(() =>
+        generateCopilotAlert(context, { modelId: selectedModelId || undefined })
+      );
+      if (seq !== genSeqRef.current) return;
       setTitle(result.title);
       setMessage(result.message);
       setSpeech(result.speech);
       setRadius(result.recommended_trigger_radius_miles);
     } catch (err: unknown) {
+      if (seq !== genSeqRef.current) return;
       const msg = err instanceof Error ? err.message : 'Generation failed';
       setError(msg);
     } finally {
-      setIsLoading(false);
+      if (seq === genSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -688,7 +710,23 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {copywriterModels.length > 0 && (
+                      <select
+                        aria-label="Copywriter AI Model"
+                        value={selectedModelId || copywriterModels[0]?.id || ''}
+                        onChange={(e) => onSelectModel?.(e.target.value)}
+                        disabled={isLoading}
+                        className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-sky-400 focus:outline-none cursor-pointer disabled:opacity-50"
+                      >
+                        {copywriterModels.map((m) => (
+                          <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
+                            {m.name} ({m.provider})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
                     {(title || message || speech) && (
                       <button
                         type="button"

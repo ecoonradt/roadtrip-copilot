@@ -104,6 +104,7 @@ export interface ScoutChatRequest {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   tripContext: ScoutTripContext;
   sessionId?: string;
+  modelId?: string;
 }
 
 export interface ScoutChatResponse {
@@ -113,6 +114,9 @@ export interface ScoutChatResponse {
   engine: AiEngineType;
   thought?: string;
   activities?: ScoutActivity[];
+  modelId?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export type ScoutStreamEvent =
