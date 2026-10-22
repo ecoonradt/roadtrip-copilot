@@ -877,4 +877,50 @@ describe('Scheduling acceptance workflows', () => {
     // The trip should still be 'Keep This Edit', NOT replaced by Sample Itinerary
     expect(trip(app).tripName).toBe('Keep This Edit');
   });
+
+  it('Defect 2: does not overwrite trip B when active trip A is deleted with deferred DELETE response and trip B is selected and edited in-flight', async () => {
+    const app = await mountApp();
+
+    expect(trip(app).tripName).toBe('Scheduling tests');
+
+    // Capture onDeleteTrip and starting generation at initiation of delete (as RouteSelectorModal does)
+    const onDeleteTrip = selectorProps(app).onDeleteTrip!;
+    const startedGen = selectorProps(app).getTripGeneration ? selectorProps(app).getTripGeneration() : undefined;
+
+    // While DELETE is in flight, user selects trip B and edits it
+    const tripB: ParsedTrip = {
+      tripName: 'Trip B Original',
+      fileName: 'trip_b.json',
+      isMultiDay: false,
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-10',
+          title: 'Day 1',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: [],
+        },
+      ],
+    };
+
+    await act(async () => {
+      selectTrip(app, tripB);
+    });
+
+    await act(async () => {
+      header(app).onRenameTrip('Trip B Edited During Delete');
+    });
+
+    expect(trip(app).tripName).toBe('Trip B Edited During Delete');
+
+    // DELETE finishes and calls onDeleteTrip with the generation captured at start
+    await act(async () => {
+      await onDeleteTrip('test.json', startedGen);
+    });
+
+    // Trip B and its edit MUST be retained!
+    expect(trip(app).tripName).toBe('Trip B Edited During Delete');
+    expect(trip(app).fileName).toBe('trip_b.json');
+  });
 });

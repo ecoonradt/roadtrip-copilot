@@ -103,7 +103,8 @@ export function selectorProps(app: ReactTestRenderer) {
     onClose: () => void;
     onSelectTrip: (trip: ParsedTrip, options?: { unsaved?: boolean }) => void;
     currentFileName?: string;
-    onDeleteTrip?: (fileName: string) => void;
+    onDeleteTrip?: (fileName: string, startedGeneration?: number) => void;
+    getTripGeneration?: () => number;
   };
 }
 export function mapClick(app: ReactTestRenderer, lat = 33.4, lng = -112): void {

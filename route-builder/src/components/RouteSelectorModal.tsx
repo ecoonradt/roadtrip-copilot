@@ -25,7 +25,8 @@ interface RouteSelectorModalProps {
   onClose: () => void;
   onSelectTrip: (trip: ParsedTrip, options?: { unsaved?: boolean }) => void;
   currentFileName?: string;
-  onDeleteTrip?: (fileName: string) => void;
+  onDeleteTrip?: (fileName: string, startedGeneration?: number) => void;
+  getTripGeneration?: () => number;
 }
 
 export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
@@ -34,6 +35,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   onSelectTrip,
   currentFileName,
   onDeleteTrip,
+  getTripGeneration,
 }) => {
   const [activeTab, setActiveTab] = useState<'workspace' | 'import' | 'new'>('workspace');
   const [workspaceRoutes, setWorkspaceRoutes] = useState<ItineraryMetadataSummary[]>([]);
@@ -92,6 +94,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   // (keyed on isOpen only: onClose is an inline callback and changes identity every render)
   useEffect(() => {
     selectSeqRef.current += 1;
+    setLoadingRouteName(null);
   }, [isOpen]);
 
   // Close on Escape key
@@ -134,6 +137,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   };
 
   const handleDeleteRoute = async (fileName: string) => {
+    const startedGeneration = getTripGeneration?.();
     setIsDeletingFile(fileName);
     setError(null);
     try {
@@ -142,7 +146,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
       setWorkspaceRoutes((prev) => prev.filter((r) => r.fileName !== fileName));
       setConfirmDeleteFile(null);
       if (onDeleteTrip) {
-        onDeleteTrip(fileName);
+        onDeleteTrip(fileName, startedGeneration);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete route file';

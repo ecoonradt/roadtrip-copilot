@@ -1147,10 +1147,11 @@ export function App() {
   }, [invalidatePendingInitialLoad]);
 
   const handleDeleteTrip = useCallback(
-    async (deletedFile: string) => {
+    async (deletedFile: string, startedGeneration = loadTripSeqRef.current) => {
+      if (startedGeneration !== loadTripSeqRef.current) return;
       const activeFile = trip.fileName || localStorage.getItem('copilot_active_file');
       if (activeFile === deletedFile) {
-        const seq = loadTripSeqRef.current;
+        const seq = startedGeneration;
         try {
           const fallbackRaw = await fetchItinerary('sample_itinerary.json');
           if (seq !== loadTripSeqRef.current) return;
@@ -1408,6 +1409,7 @@ export function App() {
         onSelectTrip={handleSelectTrip}
         currentFileName={trip.fileName}
         onDeleteTrip={handleDeleteTrip}
+        getTripGeneration={() => loadTripSeqRef.current}
       />
 
       {/* Export & Phone Handoff Modal */}

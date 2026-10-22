@@ -301,4 +301,162 @@ describe('RouteSelectorModal regression tests', () => {
       { unsaved: true }
     );
   });
+
+  it('Defect 1: cancelling workspace load by closing modal clears loading indicator on reopen', async () => {
+    let resolveItinerary!: (val: unknown) => void;
+    vi.mocked(fetchItinerary).mockReturnValue(
+      new Promise((resolve) => {
+        resolveItinerary = resolve;
+      })
+    );
+
+    const onSelectTrip = vi.fn();
+    const onClose = vi.fn();
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={onSelectTrip}
+          currentFileName="current.json"
+        />
+      );
+    });
+    mounted.push(root);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const buttons = root.root.findAllByType('button');
+    const loadButton = buttons.find((b) =>
+      b.props.onClick?.toString().includes('handleSelectWorkspaceRoute')
+    );
+    expect(loadButton).toBeDefined();
+
+    // Trigger load of route (deferred)
+    await act(async () => {
+      loadButton!.props.onClick();
+    });
+
+    // Close modal while fetch is pending
+    await act(async () => {
+      root.update(
+        <RouteSelectorModal
+          isOpen={false}
+          onClose={onClose}
+          onSelectTrip={onSelectTrip}
+          currentFileName="current.json"
+        />
+      );
+    });
+
+    // The slow fetch completes while modal is closed
+    await act(async () => {
+      resolveItinerary(sampleWorkspaceRaw);
+      await Promise.resolve();
+    });
+
+    // Reopen modal
+    await act(async () => {
+      root.update(
+        <RouteSelectorModal
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={onSelectTrip}
+          currentFileName="current.json"
+        />
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Find the button for workspace route again
+    const reopenedButtons = root.root.findAllByType('button');
+    const reopenedLoadBtn = reopenedButtons.find((b) =>
+      b.props.onClick?.toString().includes('handleSelectWorkspaceRoute')
+    );
+
+    expect(reopenedLoadBtn).toBeDefined();
+    expect(reopenedLoadBtn!.props.disabled).toBe(false);
+  });
+
+  it('Defect 2: captures generation before DELETE request resolves and passes it to onDeleteTrip', async () => {
+    let resolveDelete!: (val: { success: boolean; fileName: string }) => void;
+    vi.mocked(deleteItinerary).mockReturnValue(
+      new Promise((resolve) => {
+        resolveDelete = resolve;
+      })
+    );
+
+    const onSelectTrip = vi.fn();
+    const onClose = vi.fn();
+    const onDeleteTrip = vi.fn();
+    let currentGen = 42;
+    const getTripGeneration = vi.fn(() => currentGen);
+
+    const ModalComponent = RouteSelectorModal as React.ComponentType<{
+      isOpen: boolean;
+      onClose: () => void;
+      onSelectTrip: (trip: unknown) => void;
+      onDeleteTrip?: (fileName: string, startedGeneration?: number) => void;
+      getTripGeneration?: () => number;
+      currentFileName?: string;
+    }>;
+
+    let root!: ReactTestRenderer;
+    await act(async () => {
+      root = create(
+        <ModalComponent
+          isOpen={true}
+          onClose={onClose}
+          onSelectTrip={onSelectTrip}
+          onDeleteTrip={onDeleteTrip}
+          getTripGeneration={getTripGeneration}
+          currentFileName="current.json"
+        />
+      );
+    });
+    mounted.push(root);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Click trash button to show confirm
+    const buttons = root.root.findAllByType('button');
+    const deleteBtn = buttons.find((b) => b.props.title?.includes('Delete Workspace Trip'));
+    expect(deleteBtn).toBeDefined();
+
+    await act(async () => {
+      deleteBtn!.props.onClick();
+    });
+
+    // Click confirm delete button ("Delete?")
+    const confirmButtons = root.root.findAllByType('button');
+    const confirmBtn = confirmButtons.find((b) =>
+      b.props.title === 'Confirm permanently deleting this itinerary'
+    );
+    expect(confirmBtn).toBeDefined();
+
+    await act(async () => {
+      confirmBtn!.props.onClick();
+    });
+
+    // Generation is bumped while delete is in-flight
+    currentGen = 43;
+
+    // Resolve delete
+    await act(async () => {
+      resolveDelete({ success: true, fileName: 'workspace_trip.json' });
+      await Promise.resolve();
+    });
+
+    // onDeleteTrip should have received generation 42 (captured when delete was initiated)
+    expect(onDeleteTrip).toHaveBeenCalledWith('workspace_trip.json', 42);
+  });
 });
