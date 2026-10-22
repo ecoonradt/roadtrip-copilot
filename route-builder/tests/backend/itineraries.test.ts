@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { S3Client } from '@aws-sdk/client-s3';
 import {
   ItineraryStorageService,
   PreconditionFailedError,
   normalizeEtag,
-  CrossProcessFileLock,
+  KeyedMutex,
+  LockTimeoutError,
 } from '../../server/services/itineraryStorageService.js';
 import { createApp } from '../../server/app.js';
 
@@ -18,6 +20,8 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
+    delete process.env.S3_STORAGE_BUCKET;
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -350,209 +354,171 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       expect(rejected[0].reason).toBeInstanceOf(PreconditionFailedError);
     });
 
-    it('CrossProcessFileLock recovers from stale lockfiles and cleans up on completion or error', async () => {
-      const targetFile = path.join(tempDir, 'lock_test.json');
-      const lockFile = `${targetFile}.lock`;
+    it('KeyedMutex enforces mutual exclusion and FIFO order for 3+ callers on the same key', async () => {
+      const key = path.join(tempDir, 'fifo_test.json');
+      const executionOrder: number[] = [];
+      let concurrentCount = 0;
+      let maxConcurrent = 0;
 
-      // Create a simulated stale lockfile (> 5000ms old)
-      await fs.writeFile(
-        lockFile,
-        JSON.stringify({ pid: 99999, timestamp: Date.now() - 10000 }),
-        'utf-8'
-      );
-      const pastTime = new Date(Date.now() - 10000);
-      await fs.utimes(lockFile, pastTime, pastTime);
+      const makeWorker = (id: number, delayMs: number) => {
+        return KeyedMutex.runExclusive(key, async () => {
+          concurrentCount++;
+          if (concurrentCount > maxConcurrent) maxConcurrent = concurrentCount;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          executionOrder.push(id);
+          concurrentCount--;
+        });
+      };
 
-      let executed = false;
-      await CrossProcessFileLock.runExclusive(targetFile, async () => {
-        executed = true;
+      const p1 = makeWorker(1, 40);
+      const p2 = makeWorker(2, 30);
+      const p3 = makeWorker(3, 20);
+
+      await Promise.all([p1, p2, p3]);
+
+      expect(maxConcurrent).toBe(1);
+      expect(executionOrder).toEqual([1, 2, 3]);
+    });
+
+    it('KeyedMutex ensures different keys do not block each other', async () => {
+      const key1 = path.join(tempDir, 'key1.json');
+      const key2 = path.join(tempDir, 'key2.json');
+
+      let key1Active = false;
+      let key2Active = false;
+      let overlapped = false;
+
+      const p1 = KeyedMutex.runExclusive(key1, async () => {
+        key1Active = true;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        if (key2Active) overlapped = true;
+        key1Active = false;
       });
 
-      expect(executed).toBe(true);
-      // Lock file must be cleanly removed
-      await expect(fs.stat(lockFile)).rejects.toThrow();
+      const p2 = KeyedMutex.runExclusive(key2, async () => {
+        key2Active = true;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        if (key1Active) overlapped = true;
+        key2Active = false;
+      });
 
-      // Clean removal on error
+      await Promise.all([p1, p2]);
+      expect(overlapped).toBe(true);
+    });
+
+    it('KeyedMutex releases lock when fn throws and allows next caller to run', async () => {
+      const key = path.join(tempDir, 'throw_test.json');
+
       await expect(
-        CrossProcessFileLock.runExclusive(targetFile, async () => {
+        KeyedMutex.runExclusive(key, async () => {
           throw new Error('boom');
         })
       ).rejects.toThrow('boom');
-      await expect(fs.stat(lockFile)).rejects.toThrow();
-    });
 
-    it('does not steal lock of a live process even if older than staleLockMs, and does not unlink successor lock', async () => {
-      const targetFile = path.join(tempDir, 'liveness_lock_test.json');
-      const lockFile = `${targetFile}.lock`;
-
-      // Lock file owned by this live process, but with timestamp 10s ago
-      await fs.writeFile(
-        lockFile,
-        JSON.stringify({ pid: process.pid, token: 'foreign-token-123', timestamp: Date.now() - 10000 }),
-        'utf-8'
-      );
-
-      // Attempting to acquire lock with short timeout must time out because process.pid is alive
-      await expect(
-        CrossProcessFileLock.runExclusive(
-          targetFile,
-          async () => 'acquired',
-          { timeoutMs: 100, staleLockMs: 50, retryDelayMs: 10 }
-        )
-      ).rejects.toThrow(/Timeout acquiring lock/);
-
-      // Verify foreign lock file was NOT deleted
-      const stat = await fs.stat(lockFile);
-      expect(stat).toBeDefined();
-
-      await fs.unlink(lockFile);
-    });
-
-    it('concurrent stale lock recovery between two workers does not permit overlapping critical sections or deletion of successor lock', async () => {
-      const targetFile = path.join(tempDir, 'concurrent_stale_recovery.json');
-      const lockFile = `${targetFile}.lock`;
-
-      // Simulate an abandoned stale lock file from a dead process
-      await fs.writeFile(
-        lockFile,
-        JSON.stringify({ pid: 99999, token: 'abandoned-token', timestamp: Date.now() - 10000 }),
-        'utf-8'
-      );
-      const pastTime = new Date(Date.now() - 10000);
-      await fs.utimes(lockFile, pastTime, pastTime);
-
-      let worker1Active = false;
-      let worker2Active = false;
-      let overlapDetected = false;
-      const executionOrder: string[] = [];
-
-      const worker1 = CrossProcessFileLock.runExclusive(
-        targetFile,
-        async () => {
-          worker1Active = true;
-          if (worker2Active) overlapDetected = true;
-          executionOrder.push('w1-start');
-          await new Promise((r) => setTimeout(r, 60));
-          if (worker2Active) overlapDetected = true;
-          executionOrder.push('w1-end');
-          worker1Active = false;
-        },
-        { staleLockMs: 100, timeoutMs: 3000, retryDelayMs: 15, bypassInProcessQueue: true }
-      );
-
-      const worker2 = CrossProcessFileLock.runExclusive(
-        targetFile,
-        async () => {
-          worker2Active = true;
-          if (worker1Active) overlapDetected = true;
-          executionOrder.push('w2-start');
-          await new Promise((r) => setTimeout(r, 60));
-          if (worker1Active) overlapDetected = true;
-          executionOrder.push('w2-end');
-          worker2Active = false;
-        },
-        { staleLockMs: 100, timeoutMs: 3000, retryDelayMs: 15, bypassInProcessQueue: true }
-      );
-
-      await Promise.all([worker1, worker2]);
-
-      expect(overlapDetected).toBe(false);
-      expect(executionOrder).toHaveLength(4);
-      const isSequential =
-        (executionOrder[0] === 'w1-start' && executionOrder[1] === 'w1-end' && executionOrder[2] === 'w2-start' && executionOrder[3] === 'w2-end') ||
-        (executionOrder[0] === 'w2-start' && executionOrder[1] === 'w2-end' && executionOrder[2] === 'w1-start' && executionOrder[3] === 'w1-end');
-      expect(isSequential).toBe(true);
-
-      // Lock file must be cleanly unlinked after both workers complete
-      await expect(fs.stat(lockFile)).rejects.toThrow();
-    });
-
-    it('CrossProcessFileLock cleanly recovers from an empty (0-byte) lock file older than staleLockMs without timing out', async () => {
-      const targetFile = path.join(tempDir, 'empty_abandoned_lock.json');
-      const lockFile = `${targetFile}.lock`;
-
-      // Create an empty (0-byte) abandoned lock file
-      await fs.writeFile(lockFile, '', 'utf-8');
-      const pastTime = new Date(Date.now() - 10000);
-      await fs.utimes(lockFile, pastTime, pastTime);
-
-      let executed = false;
-      await CrossProcessFileLock.runExclusive(
-        targetFile,
-        async () => {
-          executed = true;
-        },
-        { staleLockMs: 100, timeoutMs: 2000, retryDelayMs: 20 }
-      );
-
-      expect(executed).toBe(true);
-      await expect(fs.stat(lockFile)).rejects.toThrow();
-    });
-
-    it('CrossProcessFileLock cleanly recovers from a truncated JSON lock file older than staleLockMs without timing out', async () => {
-      const targetFile = path.join(tempDir, 'truncated_abandoned_lock.json');
-      const lockFile = `${targetFile}.lock`;
-
-      // Create a truncated JSON lock file
-      await fs.writeFile(lockFile, '{"pid": 99999, "token": "ab', 'utf-8');
-      const pastTime = new Date(Date.now() - 10000);
-      await fs.utimes(lockFile, pastTime, pastTime);
-
-      let executed = false;
-      await CrossProcessFileLock.runExclusive(
-        targetFile,
-        async () => {
-          executed = true;
-        },
-        { staleLockMs: 100, timeoutMs: 2000, retryDelayMs: 20 }
-      );
-
-      expect(executed).toBe(true);
-      await expect(fs.stat(lockFile)).rejects.toThrow();
-    });
-
-    it('CrossProcessFileLock retries transient read failure during lock release and cleans up, preventing timeouts on subsequent acquisition', async () => {
-      const targetFile = path.join(tempDir, 'transient_read_failure_lock.json');
-      const lockFile = `${targetFile}.lock`;
-
-      let failuresInjected = 0;
-      const originalReadFile = CrossProcessFileLock.readFile;
-      const readSpy = vi.spyOn(CrossProcessFileLock, 'readFile').mockImplementation(async (filePath, options) => {
-        if (typeof filePath === 'string' && filePath === lockFile && failuresInjected === 0) {
-          failuresInjected += 1;
-          const transientErr = new Error('Simulated transient EIO device read error');
-          Object.assign(transientErr, { code: 'EIO' });
-          throw transientErr;
-        }
-        return originalReadFile(filePath, options);
+      let ranNext = false;
+      await KeyedMutex.runExclusive(key, async () => {
+        ranNext = true;
       });
 
+      expect(ranNext).toBe(true);
+    });
+
+    it('KeyedMutex bounds queued timeout: second caller rejects before holder finishes and fn never runs', async () => {
+      const key = path.join(tempDir, 'timeout_test.json');
+      let holderRan = false;
+      let secondRan = false;
+
+      const holderPromise = KeyedMutex.runExclusive(key, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        holderRan = true;
+      });
+
+      const startTime = Date.now();
+      let timedOut = false;
+      let elapsed = 0;
+
       try {
-        let firstRun = false;
-        await CrossProcessFileLock.runExclusive(targetFile, async () => {
-          firstRun = true;
-        });
-
-        expect(firstRun).toBe(true);
-        expect(failuresInjected).toBe(1);
-
-        // Lock file must have been cleanly removed by releaseLock despite transient first error
-        await expect(fs.stat(lockFile)).rejects.toThrow();
-
-        // Subsequent lock acquisition must succeed immediately without timing out
-        let secondRun = false;
-        await CrossProcessFileLock.runExclusive(
-          targetFile,
+        await KeyedMutex.runExclusive(
+          key,
           async () => {
-            secondRun = true;
+            secondRan = true;
           },
-          { timeoutMs: 500, retryDelayMs: 20 }
+          { timeoutMs: 30 }
         );
-
-        expect(secondRun).toBe(true);
-      } finally {
-        readSpy.mockRestore();
+      } catch (err: unknown) {
+        elapsed = Date.now() - startTime;
+        if (err instanceof LockTimeoutError) {
+          timedOut = true;
+          expect(err.message).toMatch(/Timeout acquiring lock/);
+        }
       }
+
+      expect(timedOut).toBe(true);
+      expect(elapsed).toBeLessThan(200);
+      expect(holderRan).toBe(false);
+
+      await holderPromise;
+      expect(holderRan).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(secondRan).toBe(false);
+    });
+
+    it('KeyedMutex handles a timed-out waiter in middle of queue without breaking callers behind it', async () => {
+      const key = path.join(tempDir, 'queue_middle_test.json');
+      const executionOrder: string[] = [];
+
+      const holderPromise = KeyedMutex.runExclusive(key, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        executionOrder.push('holder');
+      });
+
+      let caller2Error: unknown = null;
+      const caller2Promise = KeyedMutex.runExclusive(
+        key,
+        async () => {
+          executionOrder.push('caller2');
+        },
+        { timeoutMs: 30 }
+      ).catch((err: unknown) => {
+        caller2Error = err;
+      });
+
+      const caller3Promise = KeyedMutex.runExclusive(
+        key,
+        async () => {
+          executionOrder.push('caller3');
+        },
+        { timeoutMs: 1000 }
+      );
+
+      await Promise.all([holderPromise, caller2Promise, caller3Promise]);
+
+      expect(caller2Error).toBeInstanceOf(LockTimeoutError);
+      expect(executionOrder).toEqual(['holder', 'caller3']);
+    });
+
+    it('no leftover .lock files are created in storage directory by save or delete', async () => {
+      const service = new ItineraryStorageService({
+        storageDirectories: [tempDir],
+        primaryWriteDirectory: tempDir,
+      });
+
+      const saveRes = await service.saveItinerary('lock_free_trip.json', {
+        trip_name: 'Lock Free Trip',
+        checkpoints: [],
+      });
+      expect(saveRes.success).toBe(true);
+
+      let files = await fs.readdir(tempDir);
+      let lockFiles = files.filter((f) => f.endsWith('.lock'));
+      expect(lockFiles).toHaveLength(0);
+
+      const delRes = await service.deleteItinerary('lock_free_trip.json');
+      expect(delRes.success).toBe(true);
+
+      files = await fs.readdir(tempDir);
+      lockFiles = files.filter((f) => f.endsWith('.lock'));
+      expect(lockFiles).toHaveLength(0);
     });
 
     it('normalizeEtag handles quotes and weak etags correctly', () => {
@@ -929,5 +895,41 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
         await fs.rm(secondaryDir, { recursive: true, force: true });
       }
     });
+
+    it('selects S3ItineraryStorageService lazily when S3_STORAGE_BUCKET is set before createApp()', async () => {
+      process.env.S3_STORAGE_BUCKET = 'test-bucket';
+
+      const sendSpy = vi.spyOn(S3Client.prototype, 'send').mockImplementation(async (command: unknown) => {
+        const cmd = command as { constructor: { name: string }; input: { Bucket?: string } };
+        if (cmd.constructor.name === 'ListObjectsV2Command') {
+          return {
+            Contents: [],
+            IsTruncated: false,
+          } as never;
+        }
+        return {} as never;
+      });
+
+      const app = createApp();
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/itineraries',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(sendSpy).toHaveBeenCalled();
+      const listCall = sendSpy.mock.calls.find((call) => {
+        const cmd = call[0] as { constructor: { name: string }; input: { Bucket?: string } };
+        return cmd.constructor.name === 'ListObjectsV2Command';
+      });
+      expect(listCall).toBeDefined();
+      const input = (listCall![0] as { input: { Bucket?: string } }).input;
+      expect(input.Bucket).toBe('test-bucket');
+    });
+
+    it('server/loadEnv.ts loads without throwing', async () => {
+      await expect(import('../../server/loadEnv.js')).resolves.toBeDefined();
+    });
   });
 });
+

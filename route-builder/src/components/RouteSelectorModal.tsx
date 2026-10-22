@@ -23,7 +23,7 @@ import { DEFAULT_TIMEZONE } from '../engine/cascade';
 interface RouteSelectorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectTrip: (trip: ParsedTrip) => void;
+  onSelectTrip: (trip: ParsedTrip, options?: { unsaved?: boolean }) => void;
   currentFileName?: string;
   onDeleteTrip?: (fileName: string) => void;
 }
@@ -42,6 +42,9 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   const [confirmDeleteFile, setConfirmDeleteFile] = useState<string | null>(null);
   const [isDeletingFile, setIsDeletingFile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Generation counter to guard against superseded workspace route selections
+  const selectSeqRef = useRef<number>(0);
 
   // Import state
   const [importedJson, setImportedJson] = useState<string | null>(null);
@@ -85,6 +88,12 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
     };
   }, [isOpen]);
 
+  // Invalidate in-flight workspace selections whenever the modal opens or closes
+  // (keyed on isOpen only: onClose is an inline callback and changes identity every render)
+  useEffect(() => {
+    selectSeqRef.current += 1;
+  }, [isOpen]);
+
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) {
@@ -104,18 +113,23 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
   if (!isOpen) return null;
 
   const handleSelectWorkspaceRoute = async (summary: ItineraryMetadataSummary) => {
+    const seq = ++selectSeqRef.current;
     setLoadingRouteName(summary.fileName);
     setError(null);
     try {
       const raw = await fetchItinerary(summary.fileName);
+      if (seq !== selectSeqRef.current) return;
       const parsed = parseItineraryJson(raw, summary.fileName);
       onSelectTrip(parsed);
       onClose();
     } catch (err: unknown) {
+      if (seq !== selectSeqRef.current) return;
       const msg = err instanceof Error ? err.message : 'Failed to load route file';
       setError(msg);
     } finally {
-      setLoadingRouteName(null);
+      if (seq === selectSeqRef.current) {
+        setLoadingRouteName(null);
+      }
     }
   };
 
@@ -164,7 +178,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
     try {
       const raw = JSON.parse(importedJson) as unknown;
       const parsed = parseItineraryJson(raw, importFileName, { isImport: true });
-      onSelectTrip(parsed);
+      onSelectTrip(parsed, { unsaved: true });
       onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Invalid JSON itinerary structure';
@@ -188,7 +202,7 @@ export const RouteSelectorModal: React.FC<RouteSelectorModalProps> = ({
         },
       ],
     };
-    onSelectTrip(freshTrip);
+    onSelectTrip(freshTrip, { unsaved: true });
     onClose();
   };
 

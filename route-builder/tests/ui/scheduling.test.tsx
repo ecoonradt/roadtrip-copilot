@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, saved, exportProps, exported, points } from './harness';
+import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, selectorProps, saved, exportProps, exported, points } from './harness';
 import { calculateTimelineCascade, detectTimezone, parseLocalToUtcEpoch } from '../../src/engine/cascade';
 import { formatMultiDayItinerary, type SingleRouteItineraryV2 } from '../../src/engine/export';
 import { parseItineraryJson, type ParsedTrip } from '../../src/engine/itineraryParser';
 import type { Waypoint, RouteResponse } from '../../src/types/routing';
+import { AuthGateScreen } from '../../src/components/AuthGateScreen';
 
 describe('Scheduling acceptance workflows', () => {
   it('keeps edits when switching days and adding days', async () => {
@@ -649,5 +650,231 @@ describe('Scheduling acceptance workflows', () => {
     expect(trip(app).tripName).toBe('Trip B Loaded Renamed');
     expect(trip(app).fileName).toBe('test.json');
     expect(trip(app).etag).toBe('"etag-b-valid"');
+  });
+
+  it('Bug A: marks created or imported trip as unsaved (isDirty true) until first successful save', async () => {
+    const app = await mountApp();
+    expect(header(app).isDirty).toBe(false);
+
+    const newTrip: ParsedTrip = {
+      tripName: 'Brand New Trip',
+      isMultiDay: false,
+      dates: { start: '2026-10-10', end: '2026-10-10' },
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-10',
+          title: 'Day 1',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: points(1),
+        },
+      ],
+    };
+
+    // Selecting trip with { unsaved: true }
+    await act(async () => {
+      selectTrip(app, newTrip, { unsaved: true });
+    });
+
+    // Must be dirty immediately upon selection of unsaved trip
+    expect(header(app).isDirty).toBe(true);
+
+    // Save fails with 500 error
+    api.saveItinerary.mockRejectedValueOnce(new Error('Network error'));
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    // Must still be dirty after failed save
+    expect(header(app).isDirty).toBe(true);
+
+    // Save succeeds
+    api.saveItinerary.mockResolvedValueOnce({ success: true, fileName: 'brand_new_trip.json' });
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    // Now it should be clean
+    expect(header(app).isDirty).toBe(false);
+
+    // Workspace load (without unsaved option) should not be dirty
+    const workspaceTrip = parseItineraryJson(fixture(), 'workspace.json');
+    await act(async () => {
+      selectTrip(app, workspaceTrip);
+    });
+    expect(header(app).isDirty).toBe(false);
+  });
+
+  it('Bug B: retains active multi-day trip and selection when terminal initialization fallback occurs after initial load', async () => {
+    const app = await mountApp();
+
+    // Select Day 2 (index 1) of the 2-day fixture
+    await act(async () => {
+      tabs(app).onSelectDay(1);
+    });
+
+    expect(trip(app).days.length).toBe(2);
+    expect(trip(app).tripName).toBe('Scheduling tests');
+
+    // Simulate transition to unauthenticated state via logout
+    await act(async () => {
+      await header(app).onLogout();
+    });
+
+    // AuthGateScreen should now be visible
+    const gateScreen = app.root.findByType(AuthGateScreen);
+    expect(gateScreen).toBeDefined();
+
+    // Configure auth status to succeed on retry, but both itinerary requests fail
+    api.fetchAuthStatus.mockResolvedValue({
+      authEnabled: true,
+      authenticated: true,
+      authorized: true,
+      user: { sub: 'driver-1', email: 'pilot@example.com', name: 'Pilot' },
+    });
+    api.fetchItinerary.mockRejectedValue(new Error('500 Itinerary Server Down'));
+
+    // Trigger retryInitialization via onRetry
+    await act(async () => {
+      await gateScreen.props.onRetry();
+    });
+
+    // Active trip MUST NOT have been replaced by the 1-day INITIAL_FALLBACK_TRIP
+    expect(trip(app).days.length).toBe(2);
+    expect(trip(app).tripName).toBe('Scheduling tests');
+  });
+
+  it('Bug B: initializes fallback cleanly with clamped activeDayIndex and storage when startup load fails', async () => {
+    // Startup with both initial file and sample fallback failing
+    api.fetchItinerary.mockRejectedValue(new Error('Failed to load any itinerary'));
+    api.fetchRoute.mockRejectedValue(new Error('Router offline'));
+    const location = { href: 'http://localhost:5173/?route=missing.json&day=5', search: '?route=missing.json&day=5' };
+    vi.stubGlobal('window', {
+      location,
+      alert: vi.fn(),
+      history: { replaceState: (_state: unknown, _title: string, url: string) => { location.href = url; location.search = new URL(url).search; } },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+
+    const app = await mountApp();
+
+    // Should cleanly fall back to INITIAL_FALLBACK_TRIP
+    expect(trip(app).tripName).toBe('Scenic Southwest: Phoenix to Flagstaff');
+    expect(localStorage.getItem('copilot_active_day')).toBe('0');
+    expect(localStorage.getItem('copilot_active_file')).toBe('sample_itinerary.json');
+    expect(header(app).isDirty).toBe(false);
+  });
+
+  it('Bug C: preserves pending routing results for inactive days when renaming an unsaved trip with new file target', async () => {
+    let releaseDay2Route!: (val: RouteResponse) => void;
+    api.fetchRoute.mockImplementation((coords: Array<{ lat: number; lng: number }>) => {
+      // Coords for day 2 has lat base 33.6
+      if (coords[0]?.lat > 33.5) {
+        return new Promise<RouteResponse>((resolve) => {
+          releaseDay2Route = resolve;
+        });
+      }
+      return Promise.resolve(roadResponse([3600, 1800]));
+    });
+
+    const app = await mountApp();
+
+    const multiDayTrip: ParsedTrip = {
+      tripName: 'Unsaved Multi-Day',
+      isMultiDay: true,
+      dates: { start: '2026-10-09', end: '2026-10-10' },
+      days: [
+        {
+          dayNumber: 1,
+          date: '2026-10-09',
+          title: 'Day 1',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: points(1),
+        },
+        {
+          dayNumber: 2,
+          date: '2026-10-10',
+          title: 'Day 2',
+          departureTime: '09:00:00',
+          timezone: 'America/Phoenix',
+          waypoints: points(2),
+        },
+      ],
+    };
+
+    await act(async () => {
+      selectTrip(app, multiDayTrip, { unsaved: true });
+    });
+
+    // Switch to Day 2 to start routing for Day 2
+    await act(async () => {
+      tabs(app).onSelectDay(1);
+    });
+
+    // Switch back to Day 1 so Day 2 is inactive while Day 2 route is pending
+    await act(async () => {
+      tabs(app).onSelectDay(0);
+    });
+
+    // While Day 2 routing is pending, user renames the trip (triggers isNewFileTarget since fileName is undefined)
+    await act(async () => {
+      header(app).onRenameTrip('Renamed Target Trip');
+    });
+
+    // Day 2 route now resolves
+    await act(async () => {
+      releaseDay2Route(roadResponse([3600, 1800]));
+    });
+
+    // Save trip
+    await act(async () => {
+      await header(app).onSaveTrip();
+    });
+
+    // Saved payload must include target_time for Day 2 (inactive day)
+    expect(saved().days[1].checkpoints[2].target_time).toBe('11:00:00');
+  });
+
+  it('Bug D (2): does not overwrite newer edits or selected trip when fallback fetch from deletion resolves late', async () => {
+    let releaseFallback!: (val: unknown) => void;
+
+    const app = await mountApp();
+
+    // Trigger delete of active trip, deferring fallback fetch
+    api.fetchItinerary.mockImplementation((file: string) => {
+      if (file === 'sample_itinerary.json') {
+        return new Promise((resolve) => {
+          releaseFallback = resolve;
+        });
+      }
+      return Promise.resolve(fixture());
+    });
+
+    await act(async () => {
+      selectorProps(app).onDeleteTrip!('test.json');
+    });
+
+    // While fallback fetch is pending, user edits the trip (e.g. renames it)
+    await act(async () => {
+      header(app).onRenameTrip('Keep This Edit');
+    });
+
+    expect(trip(app).tripName).toBe('Keep This Edit');
+
+    // Fallback fetch resolves late
+    await act(async () => {
+      releaseFallback({
+        trip_name: 'Sample Itinerary',
+        date: '2026-10-09',
+        timezone: 'America/Phoenix',
+        checkpoints: [],
+      });
+    });
+
+    // The trip should still be 'Keep This Edit', NOT replaced by Sample Itinerary
+    expect(trip(app).tripName).toBe('Keep This Edit');
   });
 });

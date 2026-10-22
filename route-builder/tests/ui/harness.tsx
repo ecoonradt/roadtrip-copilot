@@ -27,6 +27,8 @@ const mockedApi = vi.hoisted(() => ({
     }
   },
   fetchItinerary: vi.fn(),
+  fetchItineraryList: vi.fn(),
+  deleteItinerary: vi.fn(),
   fetchRoute: vi.fn(),
   fetchAiStatus: vi.fn(),
   saveItinerary: vi.fn(),
@@ -92,8 +94,17 @@ export function sidebar(app: ReactTestRenderer): SidebarProps { return app.root.
 export function tabs(app: ReactTestRenderer): DayProps { return app.root.findByType(DayTabBar).props as DayProps }
 export function exportProps(app: ReactTestRenderer): ModalProps { return app.root.findByType('test-export').props as ModalProps }
 export function trip(app: ReactTestRenderer): ParsedTrip { return exportProps(app).trip! }
-export function selectTrip(app: ReactTestRenderer, next: ParsedTrip): void {
-  (app.root.findByType('test-selector').props as { onSelectTrip: (value: ParsedTrip) => void }).onSelectTrip(next);
+export function selectTrip(app: ReactTestRenderer, next: ParsedTrip, options?: { unsaved?: boolean }): void {
+  (app.root.findByType('test-selector').props as { onSelectTrip: (value: ParsedTrip, options?: { unsaved?: boolean }) => void }).onSelectTrip(next, options);
+}
+export function selectorProps(app: ReactTestRenderer) {
+  return app.root.findByType('test-selector').props as {
+    isOpen: boolean;
+    onClose: () => void;
+    onSelectTrip: (trip: ParsedTrip, options?: { unsaved?: boolean }) => void;
+    currentFileName?: string;
+    onDeleteTrip?: (fileName: string) => void;
+  };
 }
 export function mapClick(app: ReactTestRenderer, lat = 33.4, lng = -112): void {
   (app.root.findByType('test-map').props as { onMapClick: (lat: number, lng: number) => void }).onMapClick(lat, lng);
@@ -123,6 +134,8 @@ export async function exported<T extends ItineraryExportModel = MultiDayItinerar
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks();
   api.fetchItinerary.mockResolvedValue(fixture());
+  api.fetchItineraryList.mockResolvedValue({ itineraries: [] });
+  api.deleteItinerary.mockResolvedValue({ success: true, fileName: 'test.json' });
   api.fetchRoute.mockImplementation((coords: Array<{ lat: number; lng: number }>) => Promise.resolve(roadResponse(coords.length === 4 ? [3600, 1800, 1200] : [3600, 1800])));
   api.fetchAiStatus.mockResolvedValue({ available: false });
   api.fetchAuthStatus.mockResolvedValue({ authEnabled: false, authenticated: true, authorized: true, user: null });

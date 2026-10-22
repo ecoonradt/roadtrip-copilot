@@ -80,6 +80,7 @@ route-builder/
 ├── server/
 │   ├── app.ts                  # Fastify application factory
 │   ├── index.ts                # Server entrypoint (:3001)
+│   ├── loadEnv.ts              # Node 20.12+ .env loader side-effect module
 │   ├── hooks/
 │   │   └── authGuard.ts        # Dual-mode OIDC cookie/Bearer JWT & allowlist preHandler hook
 │   ├── routes/

@@ -78,6 +78,7 @@ roadtrip-copilot/
 │   ├── server/                # Fastify TypeScript backend
 │   │   ├── app.ts             # Fastify app factory with CORS, authGuard hook, and routes
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
+│   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
 │   │   ├── hooks/             # Fastify preHandler hooks (authGuard.ts dual-mode OIDC + allowlist gate)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
 │   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, deviceService, itineraryStorageService, scoutService)

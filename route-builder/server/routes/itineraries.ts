@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import {
   type IItineraryStorageService,
-  defaultItineraryStorageService,
+  ItineraryStorageService,
   PreconditionFailedError,
 } from '../services/itineraryStorageService.js';
 
@@ -17,7 +17,7 @@ export const itineraryRoutes: FastifyPluginAsync<ItineraryPluginOptions> = async
   fastify: FastifyInstance,
   options: ItineraryPluginOptions
 ) => {
-  const service = options.storageService || defaultItineraryStorageService;
+  const service = options.storageService || new ItineraryStorageService();
 
   // GET /api/itineraries - List all itineraries available in workspace or user prefix
   fastify.get('/api/itineraries', async (request, reply) => {

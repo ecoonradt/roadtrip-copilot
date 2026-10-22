@@ -257,322 +257,114 @@ function isPreconditionFailedError(err: unknown): boolean {
     (typeof e.message === 'string' && e.message.toLowerCase().includes('precondition failed'))
   );
 }
-
-export interface CrossProcessFileLockOptions {
-  retryDelayMs?: number;
+export interface KeyedMutexOptions {
   timeoutMs?: number;
-  staleLockMs?: number;
-  bypassInProcessQueue?: boolean;
 }
 
-export class CrossProcessFileLock {
-  private static inProcessQueues = new Map<string, Promise<unknown>>();
-  static readonly DEFAULT_RETRY_DELAY_MS = 20;
-  static readonly DEFAULT_LOCK_TIMEOUT_MS = 5000;
-  static readonly DEFAULT_STALE_LOCK_MS = 5000;
-  static readFile = fs.readFile;
-  static unlink = fs.unlink;
-
-  static isProcessAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (killErr: unknown) {
-      const isEsrch = Boolean(
-        killErr && typeof killErr === 'object' && (killErr as { code?: string }).code === 'ESRCH'
-      );
-      return !isEsrch;
-    }
+export class LockTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LockTimeoutError';
+    Object.setPrototypeOf(this, LockTimeoutError.prototype);
   }
+}
 
-  static async isLockStale(lockPath: string, staleLockMs: number): Promise<boolean> {
-    try {
-      const stat = await fs.stat(lockPath);
-      let raw = '';
-      try {
-        raw = await fs.readFile(lockPath, 'utf-8');
-      } catch (readErr: unknown) {
-        const isEnoent = Boolean(
-          readErr && typeof readErr === 'object' && (readErr as { code?: string }).code === 'ENOENT'
-        );
-        if (isEnoent) return false;
-        const age = Date.now() - stat.mtimeMs;
-        return age > staleLockMs;
-      }
+interface MutexWaiter {
+  grant: () => void;
+}
 
-      let data: { pid?: unknown; timestamp?: unknown; token?: unknown } | null = null;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = null;
-      }
+interface MutexState {
+  locked: boolean;
+  waiters: MutexWaiter[];
+}
 
-      if (!data || typeof data !== 'object' || typeof data.pid !== 'number') {
-        const age = Date.now() - stat.mtimeMs;
-        return age > staleLockMs;
-      }
-
-      const pid = data.pid;
-      if (CrossProcessFileLock.isProcessAlive(pid)) {
-        return false;
-      }
-
-      const timestamp = typeof data.timestamp === 'number' ? data.timestamp : stat.mtimeMs;
-      const age = Date.now() - timestamp;
-      return age > staleLockMs;
-    } catch {
-      return false;
-    }
-  }
-
-  static async tryRecoverStaleLock(
-    lockPath: string,
-    staleLockMs: number,
-    lockToken: string
-  ): Promise<boolean> {
-    const recoveryPath = `${lockPath}.recovery`;
-    let recHandle: fs.FileHandle | null = null;
-    try {
-      recHandle = await fs.open(recoveryPath, 'wx');
-      const recInfo = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
-      await recHandle.writeFile(recInfo, 'utf-8');
-      await recHandle.close();
-      recHandle = null;
-    } catch (err: unknown) {
-      if (recHandle) {
-        await recHandle.close().catch(() => {});
-        await fs.unlink(recoveryPath).catch(() => {});
-        recHandle = null;
-      }
-      const isEExist = Boolean(
-        err && typeof err === 'object' && (err as { code?: string }).code === 'EEXIST'
-      );
-      if (isEExist) {
-        try {
-          const recStat = await fs.stat(recoveryPath);
-          const recAge = Date.now() - recStat.mtimeMs;
-          let recOwnerDead = false;
-          try {
-            const recRaw = await fs.readFile(recoveryPath, 'utf-8');
-            const recData = JSON.parse(recRaw) as { pid?: unknown };
-            if (typeof recData.pid === 'number' && !CrossProcessFileLock.isProcessAlive(recData.pid)) {
-              recOwnerDead = true;
-            }
-          } catch {
-            // Unparseable recovery file
-          }
-          if (recOwnerDead || recAge > 2000) {
-            await fs.unlink(recoveryPath).catch(() => {});
-          }
-        } catch {
-          // File was unlinked concurrently
-        }
-        return false;
-      }
-      throw err;
-    }
-
-    try {
-      const stillStale = await CrossProcessFileLock.isLockStale(lockPath, staleLockMs);
-      if (!stillStale) {
-        return false;
-      }
-
-      await fs.unlink(lockPath).catch(() => {});
-
-      let lockHandle: fs.FileHandle | null = null;
-      try {
-        lockHandle = await fs.open(lockPath, 'wx');
-        const lockInfo = JSON.stringify({ pid: process.pid, token: lockToken, timestamp: Date.now() });
-        await lockHandle.writeFile(lockInfo, 'utf-8');
-        await lockHandle.close();
-        lockHandle = null;
-        return true;
-      } catch {
-        if (lockHandle) {
-          await lockHandle.close().catch(() => {});
-          await fs.unlink(lockPath).catch(() => {});
-          lockHandle = null;
-        }
-        return false;
-      }
-    } finally {
-      await fs.unlink(recoveryPath).catch(() => {});
-    }
-  }
-
-  static async releaseLock(lockPath: string, lockToken: string): Promise<void> {
-    const maxRetries = 5;
-    const retryDelayMs = 25;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        let raw = '';
-        try {
-          raw = (await CrossProcessFileLock.readFile(lockPath, 'utf-8')).toString();
-        } catch (readErr: unknown) {
-          const isEnoent = Boolean(
-            readErr && typeof readErr === 'object' && (readErr as { code?: string }).code === 'ENOENT'
-          );
-          if (isEnoent) {
-            return;
-          }
-          throw readErr;
-        }
-
-        let shouldUnlink = false;
-        try {
-          const currentData = JSON.parse(raw) as { token?: unknown };
-          if (currentData && typeof currentData === 'object' && currentData.token === lockToken) {
-            shouldUnlink = true;
-          }
-        } catch {
-          // Unparseable / corrupted content on disk where our lock should be
-          shouldUnlink = true;
-        }
-
-        if (shouldUnlink) {
-          await CrossProcessFileLock.unlink(lockPath).catch((unlinkErr: unknown) => {
-            const isEnoent = Boolean(
-              unlinkErr && typeof unlinkErr === 'object' && (unlinkErr as { code?: string }).code === 'ENOENT'
-            );
-            if (!isEnoent) throw unlinkErr;
-          });
-          return;
-        } else {
-          return;
-        }
-      } catch {
-        if (attempt < maxRetries - 1) {
-          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-        }
-      }
-    }
-
-    try {
-      const raw = (await CrossProcessFileLock.readFile(lockPath, 'utf-8')).toString();
-      try {
-        const currentData = JSON.parse(raw) as { token?: unknown };
-        if (currentData && typeof currentData === 'object' && currentData.token === lockToken) {
-          await CrossProcessFileLock.unlink(lockPath).catch(() => {});
-        }
-      } catch {
-        await CrossProcessFileLock.unlink(lockPath).catch(() => {});
-      }
-    } catch (err: unknown) {
-      const isEnoent = Boolean(
-        err && typeof err === 'object' && (err as { code?: string }).code === 'ENOENT'
-      );
-      if (!isEnoent) {
-        await CrossProcessFileLock.unlink(lockPath).catch(() => {});
-      }
-    }
-  }
+/**
+ * In-process FIFO keyed mutex for coordinating concurrent writes to the same local file.
+ *
+ * NOTE: Single-process by design. Running multiple server processes against the same
+ * local itineraries directory is unsupported. In production, Amazon S3 provides
+ * cross-process atomicity via HTTP conditional writes (If-Match / If-None-Match).
+ */
+export class KeyedMutex {
+  static readonly DEFAULT_TIMEOUT_MS = 5000;
+  private static states = new Map<string, MutexState>();
 
   static async runExclusive<T>(
-    filePath: string,
+    key: string,
     fn: () => Promise<T>,
-    options?: CrossProcessFileLockOptions
+    options?: KeyedMutexOptions
   ): Promise<T> {
-    const canonicalPath = path.resolve(filePath);
+    const canonicalKey = path.resolve(key);
+    const timeoutMs = options?.timeoutMs ?? KeyedMutex.DEFAULT_TIMEOUT_MS;
 
-    if (options?.bypassInProcessQueue) {
-      return await CrossProcessFileLock.acquireLockAndRun(canonicalPath, fn, options);
+    let state = KeyedMutex.states.get(canonicalKey);
+    if (!state) {
+      state = { locked: false, waiters: [] };
+      KeyedMutex.states.set(canonicalKey, state);
     }
 
-    // In-process static queue per canonical path to line up concurrent requests cleanly without polling
-    const prev = CrossProcessFileLock.inProcessQueues.get(canonicalPath) || Promise.resolve();
-    let resolveNext!: () => void;
-    const next = new Promise<void>((resolve) => {
-      resolveNext = resolve;
-    });
-    CrossProcessFileLock.inProcessQueues.set(canonicalPath, next);
+    if (state.locked) {
+      await new Promise<void>((resolve, reject) => {
+        let granted = false;
+        let timer: NodeJS.Timeout | null = null;
 
-    try {
-      try {
-        await prev;
-      } catch {
-        // Proceed even if previous queued promise threw an error
-      }
-      return await CrossProcessFileLock.acquireLockAndRun(canonicalPath, fn, options);
-    } finally {
-      resolveNext();
-      if (CrossProcessFileLock.inProcessQueues.get(canonicalPath) === next) {
-        CrossProcessFileLock.inProcessQueues.delete(canonicalPath);
-      }
-    }
-  }
+        const waiter: MutexWaiter = {
+          grant: () => {
+            granted = true;
+            if (timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+            resolve();
+          },
+        };
 
-  static async acquireLockAndRun<T>(
-    canonicalPath: string,
-    fn: () => Promise<T>,
-    options?: CrossProcessFileLockOptions
-  ): Promise<T> {
-    const retryDelay = options?.retryDelayMs ?? CrossProcessFileLock.DEFAULT_RETRY_DELAY_MS;
-    const timeoutMs = options?.timeoutMs ?? CrossProcessFileLock.DEFAULT_LOCK_TIMEOUT_MS;
-    const staleLockMs = options?.staleLockMs ?? CrossProcessFileLock.DEFAULT_STALE_LOCK_MS;
-
-    const lockPath = `${canonicalPath}.lock`;
-    await fs.mkdir(path.dirname(lockPath), { recursive: true }).catch(() => {});
-
-    const startTime = Date.now();
-    const lockToken = crypto.randomUUID();
-
-    while (true) {
-      let handle: fs.FileHandle | null = null;
-      try {
-        handle = await fs.open(lockPath, 'wx');
-        const lockInfo = JSON.stringify({ pid: process.pid, token: lockToken, timestamp: Date.now() });
-        await handle.writeFile(lockInfo, 'utf-8');
-        await handle.close();
-        handle = null;
-        break; // Lock acquired
-      } catch (err: unknown) {
-        if (handle) {
-          await handle.close().catch(() => {});
-          await fs.unlink(lockPath).catch(() => {});
-          handle = null;
-        }
-
-        const isEExist = Boolean(
-          err && typeof err === 'object' && (err as { code?: string }).code === 'EEXIST'
-        );
-        if (!isEExist) {
-          throw err;
-        }
-
-        // Stale lock detection & atomic recovery
-        const isStale = await CrossProcessFileLock.isLockStale(lockPath, staleLockMs);
-        if (isStale) {
-          const recovered = await CrossProcessFileLock.tryRecoverStaleLock(lockPath, staleLockMs, lockToken);
-          if (recovered) {
-            break; // Lock acquired via stale-lock recovery
+        timer = setTimeout(() => {
+          if (granted) return;
+          const current = KeyedMutex.states.get(canonicalKey);
+          if (current) {
+            const idx = current.waiters.indexOf(waiter);
+            if (idx !== -1) {
+              current.waiters.splice(idx, 1);
+            }
+            if (!current.locked && current.waiters.length === 0) {
+              KeyedMutex.states.delete(canonicalKey);
+            }
           }
-        }
+          reject(new LockTimeoutError(`Timeout acquiring lock for ${key} after ${timeoutMs}ms`));
+        }, timeoutMs);
 
-        if (Date.now() - startTime >= timeoutMs) {
-          throw new Error(`Timeout acquiring lock for ${canonicalPath} after ${timeoutMs}ms`);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, retryDelay));
-      }
+        state!.waiters.push(waiter);
+      });
+    } else {
+      state.locked = true;
     }
 
     try {
       return await fn();
     } finally {
-      await CrossProcessFileLock.releaseLock(lockPath, lockToken);
+      const current = KeyedMutex.states.get(canonicalKey);
+      if (current) {
+        if (current.waiters.length > 0) {
+          const nextWaiter = current.waiters.shift()!;
+          nextWaiter.grant();
+        } else {
+          current.locked = false;
+          KeyedMutex.states.delete(canonicalKey);
+        }
+      }
     }
   }
 
   async runExclusive<T>(
-    filePath: string,
+    key: string,
     fn: () => Promise<T>,
-    options?: CrossProcessFileLockOptions
+    options?: KeyedMutexOptions
   ): Promise<T> {
-    return CrossProcessFileLock.runExclusive(filePath, fn, options);
+    return KeyedMutex.runExclusive(key, fn, options);
   }
 }
+
 
 export interface LocalFileSystemStorageOptions {
   storageDirectories?: string[];
@@ -696,7 +488,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
 
-    return CrossProcessFileLock.runExclusive(targetPath, async () => {
+    return KeyedMutex.runExclusive(targetPath, async () => {
       let existingContent: string | null = null;
       let existingEtag: string | null = null;
       try {
@@ -770,7 +562,7 @@ export class LocalFileSystemStorageService implements IItineraryStorageService {
 
     const targetPath = path.join(this.primaryWriteDirectory, safeName);
 
-    return CrossProcessFileLock.runExclusive(targetPath, async () => {
+    return KeyedMutex.runExclusive(targetPath, async () => {
       let existingContent: string;
       try {
         existingContent = await fs.readFile(targetPath, 'utf-8');
@@ -1150,4 +942,4 @@ export class ItineraryStorageService implements IItineraryStorageService {
   }
 }
 
-export const defaultItineraryStorageService = new ItineraryStorageService();
+
