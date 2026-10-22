@@ -107,7 +107,7 @@ Implement cloud-native itinerary persistence backed by Amazon S3 (`users/{email}
   ```bash
   cd route-builder && npm test
   ```
-  *Result:* Passed (21/21 test files, 358/358 tests passed).
+  *Result:* Passed (21/21 test files, 359/359 tests passed).
 * **Browser Test Suite:**
   ```bash
   cd route-builder && npm run test:browser
@@ -134,12 +134,11 @@ Implement cloud-native itinerary persistence backed by Amazon S3 (`users/{email}
 4. **Code Review Concurrency & Namespace Hardening:** Hardened S3 namespace scoping against cross-user collisions (`+` character preservation and hex percent-encoding in `getUserPrefix`), eliminated slow-save trip overwrite and state reversion in `App.tsx` via revision guards and functional state updates, enforced create-only write protection (`If-None-Match: *`) for new trips and imports, cleared foreign ETags on imported JSON and unpersisted fallback templates, ensured atomic local write/delete synchronization via in-memory keyed FIFO locks and temp file renames, added S3 continuation pagination handling, and eliminated hardcoded `us-east-1` client region defaulting.
 5. **Cross-Process Atomicity & Lifecycle Review Follow-up:** Initial replacement of per-instance locking with `CrossProcessFileLock` (OS-level lockfiles) was superseded by the in-process `KeyedMutex` per ADR-0008 (review proved file-level ownership can never be made safe under process pauses or PID reuse; local backend is dev-only, while S3 conditional writes provide cross-process safety in production); incremented `tripRevisionRef` across all initial-load paths to prevent slow saves from adopting newly loaded route identities; updated `handleSaveTrip` to adopt synchronized baseline state on clean saves eliminating dirty-state regressions; added conflict recovery in `handleRenameTrip` so 412 collisions on imported filenames can be renamed and saved under a new destination; resolved test gaps in `s3Storage.test.ts` (testing real SDK profile region resolution) and `scheduling.test.tsx` (realistic deferred save responses and zero alert assertions).
 6. **Sample Route Is In-Code Content, Not a Storage Artifact (Requirement Change):** The bundled `sample_itinerary.json` assets were deleted and every storage special case removed (`isProtected` is now generic for files outside the primary write directory; no fallback directories, no appended list entry, no first-save-over-sample path). The drift was real: three copies existed (the root asset, a `route-builder/` copy for the container, and the `INITIAL_FALLBACK_TRIP` clone) with 3 vs 4 stops, and because `getItinerary` returned `_etag` for the primary directory, editing the auto-loaded sample and pressing Save could overwrite the tracked working-tree file. `src/engine/sampleTrip.ts` is the single source of truth and returns a fresh relative/ad-hoc, single-day trip that is offered only when starting a new route. "No active route" is now an explicit state: the non-dismissible `RouteSelectorModal` opens on first visit, a `404` clears the pointer and reopens the chooser, and other load failures show a Retry error screen. `copilot_active_file` is written only for previously saved selections and after a successful save, so unsaved/new routes no longer reload into a 404. Per D9 this is recorded as a requirement change, not an ADR.
+7. **Startup/Retry Loading Guard (Review Follow-up):** Pending route loads now show a noninteractive loading screen when no trip is active and the chooser is closed. Deferred startup and retry tests prevent placeholder edits from cancelling the load and leaving an unsaveable trip; first-visit chooser and already-active-trip behavior remain unchanged.
 
 ---
 
 ## 6. Next Session Handoff
 
-* **Where We Stopped:** Milestone 2 implementation, the in-code sample-route refactor (no storage special cases), independent review fixes, comprehensive regression tests, CDK assertions, browser geometry tests, and living documentation are complete and verified green locally (`./scripts/ci_check.sh` and `npm run test:browser`).
+* **Where We Stopped:** Milestone 2 implementation, the in-code sample-route refactor (no storage special cases), startup/retry loading guard, independent review fixes, comprehensive regression tests, CDK assertions, browser geometry tests, and living documentation are complete and verified green locally (`./scripts/ci_check.sh` and `npm run test:browser`). The loading guard was also verified in Chromium with a deferred retry and a fresh-visit chooser.
 * **Next Step:** Push branch `feat/m2-s3-itinerary-storage` to GitHub and open pull request targeting `main`. Cloud deployment will be performed upon user instruction or CI merge.
-
-

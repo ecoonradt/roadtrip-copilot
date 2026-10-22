@@ -1218,6 +1218,16 @@ export function App() {
     );
   }
 
+  if (!hasActiveTrip && isInitializing && !isRouteSelectorOpen) {
+    return (
+      <div className="min-h-screen w-screen bg-slate-950 flex items-center justify-center">
+        <p role="status" className="text-sm text-slate-400">
+          Loading your route…
+        </p>
+      </div>
+    );
+  }
+
   if (!hasActiveTrip && initialLoadError) {
     return (
       <div className="min-h-screen w-screen bg-slate-950 flex items-center justify-center px-4">

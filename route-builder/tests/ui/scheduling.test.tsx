@@ -619,6 +619,26 @@ describe('Scheduling acceptance workflows', () => {
     expect(trip(app).tripName).toBe('Scheduling tests');
   });
 
+  it('shows only a loading view while the startup route is pending', async () => {
+    let release!: (value: ReturnType<typeof fixture>) => void;
+    api.fetchItinerary.mockReturnValue(new Promise<ReturnType<typeof fixture>>((resolve) => { release = resolve; }));
+
+    const app = await mountApp();
+
+    expect(textOf(app.root.findByProps({ role: 'status' }))).toBe('Loading your route…');
+    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-map')).toHaveLength(0);
+    expect(app.root.findAllByType('test-sidebar')).toHaveLength(0);
+    expect(app.root.findAllByType('test-selector')).toHaveLength(0);
+
+    await act(async () => release(fixture()));
+
+    expect(trip(app).tripName).toBe('Scheduling tests');
+    expect(trip(app).fileName).toBe('test.json');
+    expect(header(app).onSaveTrip).toBeDefined();
+    expect(header(app).isDirty).toBe(false);
+  });
+
   it('surfaces a retry screen without an active trip when startup load fails', async () => {
     stubWindowLocation('?route=missing.json&day=5');
     api.fetchItinerary.mockRejectedValue(new Error('Failed to load any itinerary'));
@@ -633,10 +653,19 @@ describe('Scheduling acceptance workflows', () => {
     expect(app.root.findAllByType('test-selector')).toHaveLength(0);
     expect(app.root.findAllByType('test-header')).toHaveLength(0);
 
-    api.fetchItinerary.mockResolvedValue(fixture());
+    let release!: (value: ReturnType<typeof fixture>) => void;
+    api.fetchItinerary.mockReturnValue(new Promise<ReturnType<typeof fixture>>((resolve) => { release = resolve; }));
     await act(async () => {
       (retry!.props as { onClick: () => void }).onClick();
     });
+
+    expect(textOf(app.root.findByProps({ role: 'status' }))).toBe('Loading your route…');
+    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-map')).toHaveLength(0);
+    expect(app.root.findAllByType('test-sidebar')).toHaveLength(0);
+    expect(app.root.findAllByType('test-selector')).toHaveLength(0);
+
+    await act(async () => release(fixture()));
 
     expect(trip(app).tripName).toBe('Scheduling tests');
     expect(header(app).onSaveTrip).toBeDefined();

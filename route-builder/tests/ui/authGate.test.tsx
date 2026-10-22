@@ -455,7 +455,7 @@ describe('Frontend Auth UI & Gating', () => {
   });
 
   it('does not overwrite newly selected or imported trip when pending retry itinerary request resolves late', async () => {
-    // Initial mount: auth fails, and itinerary request hangs
+    // Initial mount: auth fails, but the initial trip loads behind the auth gate
     api.fetchAuthStatus.mockResolvedValue({
       authEnabled: true,
       authenticated: false,
@@ -469,7 +469,7 @@ describe('Frontend Auth UI & Gating', () => {
       resolvePendingItinerary = resolve;
     });
 
-    api.fetchItinerary.mockReturnValue(pendingItineraryPromise as Promise<never>);
+    api.fetchItinerary.mockResolvedValueOnce(fixture()).mockReturnValue(pendingItineraryPromise as Promise<never>);
 
     const app = await mountApp();
     await act(async () => {
@@ -496,7 +496,7 @@ describe('Frontend Auth UI & Gating', () => {
       await Promise.resolve();
     });
 
-    // Studio is rendered while the initial itinerary request is still pending
+    // Studio is available because a trip is already active while the retry request is pending
     expect(app.root.findAllByType('test-header')).toHaveLength(1);
 
     // User deliberately imports / selects another trip
