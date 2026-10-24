@@ -88,6 +88,7 @@ roadtrip-copilot/
 │   │   ├── components/        # AppHeader, AccountMenu, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import), sampleTrip.ts (in-code sample route factory)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
+│   │   ├── utils/             # itinerarySession.ts (stable trip session identity across save/rename)
 │   │   ├── constants/         # aiCopy.ts (provider-neutral AI-disabled UI copy)
 │   │   └── types/             # Frontend data models (auth, routing, ai, scout)
 │   └── tests/                 # Vitest suites (backend, engine, AI, schema/device, ui/) and Playwright header/account/session checks (browser/)

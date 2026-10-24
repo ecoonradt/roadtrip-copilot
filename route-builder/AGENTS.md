@@ -131,6 +131,8 @@ route-builder/
 │   ├── services/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
+│   ├── utils/
+│   │   └── itinerarySession.ts # Stable trip session identity across save/rename
 │   ├── constants/
 │   │   └── aiCopy.ts           # Provider-neutral copy for AI-disabled UI states
 │   └── types/                  # Frontend data models (auth, routing, ai, scout)
