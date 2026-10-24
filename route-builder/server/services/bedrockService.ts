@@ -35,7 +35,14 @@ export { InvalidModelError };
 export const DEFAULT_BEDROCK_SCOUT_MODEL_ID = 'us.moonshotai.kimi-k3';
 export const DEFAULT_BEDROCK_COPYWRITER_MODEL_ID = 'us.amazon.nova-2-lite-v1:0';
 export const MAX_TOOL_ITERATIONS = 5;
+export const MAX_TOOLS_PER_ITERATION = 8;
 export const MODEL_AVAILABILITY_TTL_MS = 5 * 60 * 1000;
+
+function sanitizeToolErrorMessage(rawMessage: string): string {
+  return rawMessage
+    .replace(/arn:aws[a-zA-Z0-9\-_:/*]*/g, '[redacted-arn]')
+    .replace(/\/roadtrip-copilot\/[a-zA-Z0-9_.\-/]+/g, '[redacted-ssm-parameter]');
+}
 
 /**
  * Cross-region inference profile prefixes. `GetFoundationModelAvailability` only accepts a
@@ -201,6 +208,32 @@ export function formatBedrockToolLabel(
     return isDone
       ? host ? `Read content from ${host}` : 'Completed reading web content'
       : host ? `Reading content from ${host}` : 'Reading web content...';
+  }
+
+  if (name === 'resolve_and_standardize_place') {
+    const query = typeof input.query === 'string' ? input.query.trim() : '';
+    return isDone
+      ? query ? `Verified place "${query}"` : 'Verified place details'
+      : query ? `Verifying place: "${query}"` : 'Verifying place details...';
+  }
+
+  if (name === 'snap_to_highway_corridor') {
+    const road = typeof input.road_name === 'string' ? input.road_name.trim() : '';
+    return isDone
+      ? road ? `Snapped coordinate to ${road}` : 'Snapped coordinate to highway'
+      : road ? `Snapping coordinate to ${road}...` : 'Snapping coordinate to highway...';
+  }
+
+  if (name === 'calculate_detour_impact') {
+    return isDone ? 'Calculated detour driving impact' : 'Calculating detour driving impact...';
+  }
+
+  if (name === 'simulate_schedule_cascade') {
+    return isDone ? 'Simulated schedule cascade' : 'Simulating schedule cascade...';
+  }
+
+  if (name === 'audit_corridor_waypoints') {
+    return isDone ? 'Audited corridor waypoints' : 'Auditing corridor waypoints...';
   }
 
   const cleanName = name.replace(/_/g, ' ');
@@ -812,6 +845,11 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         if (pendingTools.length === 0) {
           throw new MalformedAiResponseError('Model signaled tool_use but emitted no executable tool calls');
         }
+        if (pendingTools.length > MAX_TOOLS_PER_ITERATION) {
+          throw new Error(
+            `Model requested too many parallel tool calls (${pendingTools.length} > ${MAX_TOOLS_PER_ITERATION})`
+          );
+        }
         if (iteration === MAX_TOOL_ITERATIONS - 1) {
           throw new Error(`Route Scout exceeded maximum tool iterations (${MAX_TOOL_ITERATIONS})`);
         }
@@ -821,14 +859,22 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
           assistantContent.push({ text: cleanedTurnText });
           accumulatedFinalText += (accumulatedFinalText ? '\n\n' : '') + cleanedTurnText;
         }
-        for (const t of pendingTools) {
+
+        const preparedTools = pendingTools.map((t) => {
           let parsedInput: Record<string, unknown> = {};
-          try {
-            if (t.inputJson.trim()) {
-              parsedInput = JSON.parse(t.inputJson) as Record<string, unknown>;
+          let parseError: string | undefined;
+          const trimmedInput = t.inputJson.trim();
+          if (trimmedInput) {
+            try {
+              const rawParsed: unknown = JSON.parse(trimmedInput);
+              if (typeof rawParsed === 'object' && rawParsed !== null && !Array.isArray(rawParsed)) {
+                parsedInput = rawParsed as Record<string, unknown>;
+              } else {
+                parseError = `Tool input for "${t.name}" must be a JSON object`;
+              }
+            } catch {
+              parseError = `Tool input for "${t.name}" was malformed JSON`;
             }
-          } catch {
-            parsedInput = {};
           }
           assistantContent.push({
             toolUse: {
@@ -837,19 +883,14 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
               input: parsedInput as unknown as DocumentType,
             },
           } as unknown as ContentBlock);
-        }
+          return { ...t, parsedInput, parseError };
+        });
+
         messages.push({ role: 'assistant', content: assistantContent });
 
         const toolResultBlocks: ContentBlock[] = (await Promise.all(
-          pendingTools.map(async (t) => {
-            let parsedInput: Record<string, unknown> = {};
-            try {
-              if (t.inputJson.trim()) {
-                parsedInput = JSON.parse(t.inputJson) as Record<string, unknown>;
-              }
-            } catch {
-              parsedInput = {};
-            }
+          preparedTools.map(async (t) => {
+            const { parsedInput, parseError } = t;
             onChunk({
               event: 'activity',
               data: {
@@ -862,13 +903,29 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
             const t0 = Date.now();
             let resultValue: unknown = undefined;
             let isErr = false;
-            try {
-              resultValue = await dispatcher(t.name, parsedInput);
-            } catch (dispatchErr: unknown) {
+            if (parseError) {
               isErr = true;
-              resultValue = {
-                error: dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr),
-              };
+              resultValue = { error: parseError };
+            } else {
+              try {
+                resultValue = await dispatcher(t.name, parsedInput);
+                if (options?.abortSignal?.aborted) {
+                  throw new Error('Request aborted');
+                }
+              } catch (dispatchErr: unknown) {
+                if (
+                  options?.abortSignal?.aborted ||
+                  (dispatchErr instanceof Error && dispatchErr.message === 'Request aborted')
+                ) {
+                  throw new Error('Request aborted');
+                }
+                isErr = true;
+                const rawErrMsg =
+                  dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
+                resultValue = {
+                  error: sanitizeToolErrorMessage(rawErrMsg),
+                };
+              }
             }
             const durationSeconds = Number(((Date.now() - t0) / 1000).toFixed(1));
             onChunk({

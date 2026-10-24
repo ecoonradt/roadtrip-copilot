@@ -5,12 +5,26 @@ import type {
   ScoutChatResponse,
   ScoutStreamEvent,
   ScoutActivity,
+  ScoutWaypointSummary,
 } from '../types/scout.js';
 import type { ToolDeclaration } from '../types/ai.js';
 import type { GenerationOptions, AiHarnessAdapter } from './aiService.js';
 import { AiService } from './aiService.js';
 import { createDefaultAiService } from './aiRegistry.js';
 import { MalformedAiResponseError } from './schemaParser.js';
+import { isValidGooglePlaceId, validateScoutPlaceId } from './placeId.js';
+import {
+  SCOUT_TOOL_DECLARATIONS,
+  ScoutToolLibrary,
+  createTurnGroundingCache,
+  cleanPlaceName,
+  haversineMiles,
+  type ResolvedPlaceRecord,
+  type ScoutToolLibraryOptions,
+  type TurnGroundingCache,
+} from './scoutTools.js';
+
+export { isValidGooglePlaceId, validateScoutPlaceId };
 
 /**
  * Builds the comprehensive domain prompt for Route Scout (pure road-trip domain, harness-agnostic).
@@ -124,7 +138,7 @@ GUIDELINES:
 1. Provide practical, driver-oriented advice: parking accessibility (e.g. pull-offs vs steep lots), paved vs dirt roads, scenic value, pacing, daylight/golden hour timing, and local tips.
 2. NEVER claim you added or changed a waypoint yourself. The human driver always has final approval. Suggest ideas naturally.
 3. Keep responses conversational, concise, and helpful (typically 2-4 focused paragraphs).
-4. When you recommend adding new stops or updating an existing waypoint's coordinates/dwell, append an exact structured JSON block at the very end using the format below. You are ABLE to emit multiple suggestion cards in the array when genuinely appropriate (for instance, if an audit warrants updating the current stop to a drive-by AND adding a specific recommended viewpoint/pull-off). However, do not force or spam multiple cards when a single targeted recommendation or simple reassurance is sufficient.
+4. When you recommend adding new stops, updating an existing waypoint's coordinates/dwell, or deleting a redundant or broken waypoint, append an exact structured JSON block at the very end using the format below. You are ABLE to emit multiple suggestion cards in the array when genuinely appropriate (for instance, if an audit warrants updating the current stop to a drive-by AND adding a specific recommended viewpoint/pull-off). However, do not force or spam multiple cards when a single targeted recommendation or simple reassurance is sufficient.
 5. If no waypoint actions are needed (e.g. general questions or reassurance), do not include the json:suggestions block.
 6. DRIVE-BY WAYPOINTS MUST NEVER LEAVE THE HIGHWAY:
    - A drive-by waypoint (or scenic pull-off intended as an in-transit notification trigger with 0m dwell) exists purely to trigger spoken audio or heads-up alerts from the app as the driver passes by.
@@ -230,6 +244,11 @@ JSON SUGGESTIONS BLOCK FORMAT (Append at the end if making concrete recommendati
       "message": "Heads-up alert text (<=2 lines)",
       "speech": "Natural conversational spoken TTS audio (15-25 words, ~10s)"
     }
+  },
+  {
+    "action": "delete_waypoint",
+    "targetWaypointId": "target_id",
+    "reason": "Explanation for removing this redundant or broken stop."
   }
 ]
 \`\`\`
@@ -289,55 +308,99 @@ export function separateThoughtAndReply(
 }
 
 /**
- * Structurally verifies a Google Place ID against Google's binary protobuf specification:
- * - Starts with "ChIJ"
- * - Base64url encoded
- * - Decodes to exactly 20 bytes with tags: byte[0]=0x0a, byte[1]=0x12, byte[2]=0x09, byte[11]=0x11
+ * Hydrates an AI suggestion with verified establishment names, addresses,
+ * Google Place IDs, and authentic physical entrance coordinates from grounded tool calls.
+ * Never mutates the input suggestion object.
  */
-export function isValidGooglePlaceId(placeId: string): boolean {
-  if (typeof placeId !== 'string') return false;
-  const trimmed = placeId.trim();
-  if (!/^ChIJ[A-Za-z0-9_-]{20,45}$/.test(trimmed)) {
-    return false;
-  }
-  try {
-    let b64 = trimmed.replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
-    const buf = Buffer.from(b64, 'base64');
-    if (buf.length !== 20) return false;
-    return buf[0] === 0x0a && buf[1] === 0x12 && buf[2] === 0x09 && buf[11] === 0x11;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Deterministically validates a Google Place ID returned by Route Scout or external AI.
- * Strips invalid or unverified place IDs.
- * Rules:
- * 1. If knownPlaceIds is provided and contains the ID, it is trusted immediately.
- * 2. Otherwise, newly returned Place IDs must pass the binary protobuf structural validation.
- * "No Place ID is always better than a wrong Place ID."
- */
-export function validateScoutPlaceId(
-  placeId: unknown,
+export function hydrateSuggestionFromResolvedPlaces(
+  suggestion: ScoutSuggestion,
+  resolvedPlaces?: ResolvedPlaceRecord[],
   knownPlaceIds?: Set<string>
-): string | undefined {
-  if (typeof placeId !== 'string') return undefined;
-  const trimmed = placeId.trim();
-  if (!trimmed) return undefined;
+): ScoutSuggestion {
+  const result: ScoutSuggestion = { ...suggestion };
+  if (!resolvedPlaces || resolvedPlaces.length === 0) return result;
 
-  // 1. If in known verified IDs, accept directly
-  if (knownPlaceIds && knownPlaceIds.has(trimmed)) {
-    return trimmed;
+  let matched: ResolvedPlaceRecord | undefined;
+
+  // 1. Exact google_place_id match.
+  // If suggestion.google_place_id is already set, ONLY match a record with that exact Place ID
+  // so we never cross-pollinate Place ID of A with coordinates/address of B (F-32).
+  if (result.google_place_id) {
+    matched = resolvedPlaces.find((r) => r.google_place_id === result.google_place_id);
+  } else {
+    // 2. Normalized name match
+    const sugName = cleanPlaceName(result.place_name || result.name).toLowerCase();
+    if (sugName) {
+      // 2a. Prefer exact normalized equality
+      matched = resolvedPlaces.find((r) => {
+        const rPlace = r.place_name.toLowerCase();
+        const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
+        return (
+          (rPlace.length > 0 && rPlace === sugName) ||
+          (rDisplay.length > 0 && rDisplay === sugName)
+        );
+      });
+
+      // 2b. Only fall back to substring containment if >= 4 chars and unambiguously matches a single record
+      if (!matched && sugName.length >= 4) {
+        const substringMatches = resolvedPlaces.filter((r) => {
+          const rPlace = r.place_name.toLowerCase();
+          return (
+            rPlace.length >= 4 &&
+            (rPlace.includes(sugName) || sugName.includes(rPlace))
+          );
+        });
+        if (substringMatches.length === 1) {
+          matched = substringMatches[0];
+        }
+      }
+    }
+
+    // 3. Proximity match (<= 0.15 miles) strictly for commercial physical stop additions
+    // when unambiguously matching at most 1 resolved place (F-31).
+    const isCommercialStop =
+      result.type === 'meal' || result.type === 'fuel' || result.type === 'lodging';
+    if (
+      !matched &&
+      result.action === 'add_waypoint' &&
+      isCommercialStop &&
+      !result.is_route_anchor
+    ) {
+      const proximityCandidates = resolvedPlaces.filter(
+        (r) => haversineMiles(result.lat, result.lng, r.lat, r.lng) <= 0.15
+      );
+      if (proximityCandidates.length === 1) {
+        matched = proximityCandidates[0];
+      }
+    }
   }
 
-  // 2. Binary Protobuf structural validation
-  if (!isValidGooglePlaceId(trimmed)) {
-    return undefined;
+  if (matched) {
+    if (
+      !result.google_place_id &&
+      matched.google_place_id &&
+      validateScoutPlaceId(matched.google_place_id, knownPlaceIds)
+    ) {
+      result.google_place_id = matched.google_place_id;
+    }
+    if (!result.place_name && matched.place_name) {
+      result.place_name = matched.place_name;
+    }
+    if (!result.address && matched.address) {
+      result.address = matched.address;
+    }
+    // Only overwrite coordinates for commercial physical stops (meal, fuel, lodging)
+    // so scenic_pull_off and scenic_drive_by pins are never moved off their overlook/highway coordinate.
+    if (
+      (result.type === 'meal' || result.type === 'fuel' || result.type === 'lodging') &&
+      !result.is_route_anchor
+    ) {
+      result.lat = Number(matched.lat.toFixed(6));
+      result.lng = Number(matched.lng.toFixed(6));
+    }
   }
 
-  return trimmed;
+  return result;
 }
 
 /**
@@ -345,7 +408,12 @@ export function validateScoutPlaceId(
  */
 export function parseScoutResponse(
   rawOutput: string,
-  options?: { knownPlaceIds?: Set<string>; sanitize?: (value: string) => string }
+  options?: {
+    knownPlaceIds?: Set<string>;
+    resolvedPlaces?: ResolvedPlaceRecord[];
+    tripWaypoints?: ScoutWaypointSummary[];
+    sanitize?: (value: string) => string;
+  }
 ): { reply: string; suggestions: ScoutSuggestion[]; thought?: string } {
   if (!rawOutput || rawOutput.trim().length === 0) {
     throw new MalformedAiResponseError('AI provider returned an empty Route Scout response');
@@ -386,17 +454,18 @@ export function parseScoutResponse(
           if (
             typeof item === 'object' &&
             item !== null &&
-            (item.action === 'add_waypoint' || item.action === 'update_waypoint') &&
-            typeof item.lat === 'number' &&
-            typeof item.lng === 'number' &&
-            !isNaN(item.lat) &&
-            !isNaN(item.lng)
+            (item.action === 'add_waypoint' || item.action === 'update_waypoint')
           ) {
-            const newId =
-              typeof item.newId === 'string' && item.newId.trim().length > 0
-                ? item.newId.trim()
-                : typeof item.new_id === 'string' && item.new_id.trim().length > 0
-                ? item.new_id.trim()
+            const targetWaypointId =
+              typeof item.targetWaypointId === 'string' && item.targetWaypointId.trim().length > 0
+                ? item.targetWaypointId.trim()
+                : typeof item.target_waypoint_id === 'string' && item.target_waypoint_id.trim().length > 0
+                ? item.target_waypoint_id.trim()
+                : undefined;
+
+            const matchedWp =
+              item.action === 'update_waypoint' && targetWaypointId && options?.tripWaypoints
+                ? options.tripWaypoints.find((w) => w.id === targetWaypointId)
                 : undefined;
 
             const place_name =
@@ -415,6 +484,56 @@ export function parseScoutResponse(
 
             const validatedPlaceId = validateScoutPlaceId(rawPlaceId, options?.knownPlaceIds);
 
+            // Backfill missing coordinates from resolvedPlaces or matchedWp when omitted by the model (F-35)
+            let resolvedLat: number | undefined =
+              typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined;
+            let resolvedLng: number | undefined =
+              typeof item.lng === 'number' && Number.isFinite(item.lng) ? item.lng : undefined;
+
+            if ((resolvedLat === undefined || resolvedLng === undefined) && options?.resolvedPlaces) {
+              const candidateName = cleanPlaceName(
+                place_name || (typeof item.name === 'string' ? item.name : '')
+              ).toLowerCase();
+              const matchedPlace = options.resolvedPlaces.find((r) => {
+                if (validatedPlaceId && r.google_place_id === validatedPlaceId) return true;
+                if (!validatedPlaceId && candidateName.length > 0) {
+                  const rPlace = r.place_name.toLowerCase();
+                  const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
+                  return rPlace === candidateName || rDisplay === candidateName;
+                }
+                return false;
+              });
+              if (matchedPlace) {
+                resolvedLat = matchedPlace.lat;
+                resolvedLng = matchedPlace.lng;
+              }
+            }
+
+            if ((resolvedLat === undefined || resolvedLng === undefined) && matchedWp) {
+              resolvedLat = matchedWp.lat;
+              resolvedLng = matchedWp.lng;
+            }
+
+            if (
+              resolvedLat === undefined ||
+              resolvedLng === undefined ||
+              !Number.isFinite(resolvedLat) ||
+              !Number.isFinite(resolvedLng) ||
+              resolvedLat < -90 ||
+              resolvedLat > 90 ||
+              resolvedLng < -180 ||
+              resolvedLng > 180
+            ) {
+              return;
+            }
+
+            const newId =
+              typeof item.newId === 'string' && item.newId.trim().length > 0
+                ? item.newId.trim()
+                : typeof item.new_id === 'string' && item.new_id.trim().length > 0
+                ? item.new_id.trim()
+                : undefined;
+
             const rawIsAnchor =
               typeof item.is_route_anchor === 'boolean'
                 ? item.is_route_anchor
@@ -422,31 +541,52 @@ export function parseScoutResponse(
                 ? item.isRouteAnchor
                 : undefined;
 
-            // Physical stops (lodging, meal, fuel, stop, origin, destination, or dwell > 0) are NEVER pass-through anchors
+            const resolvedType =
+              typeof item.type === 'string' && item.type.trim().length > 0
+                ? item.type.trim()
+                : matchedWp?.type || 'scenic_pull_off';
+
+            const resolvedDwellMinutes =
+              typeof item.dwell_minutes === 'number' && Number.isFinite(item.dwell_minutes) && item.dwell_minutes >= 0
+                ? item.dwell_minutes
+                : matchedWp && typeof matchedWp.dwell_minutes === 'number'
+                ? matchedWp.dwell_minutes
+                : resolvedType === 'scenic_drive_by'
+                ? 0
+                : 15;
+
+            // Physical stops (lodging, meal, fuel, stop, origin, destination, or explicit dwell > 0) are NEVER pass-through anchors
             const isPhysical =
-              item.type === 'lodging' ||
-              item.type === 'meal' ||
-              item.type === 'fuel' ||
-              item.type === 'stop' ||
-              item.type === 'origin' ||
-              item.type === 'destination' ||
+              resolvedType === 'lodging' ||
+              resolvedType === 'meal' ||
+              resolvedType === 'fuel' ||
+              resolvedType === 'stop' ||
+              resolvedType === 'origin' ||
+              resolvedType === 'destination' ||
               (typeof item.dwell_minutes === 'number' && item.dwell_minutes > 0);
 
             const is_route_anchor = isPhysical ? false : rawIsAnchor;
 
-            suggestions.push({
+            const baseSug: ScoutSuggestion = {
               id: `scout_sug_${Date.now()}_${index}`,
               action: item.action,
-              name: typeof item.name === 'string' ? item.name : 'Suggested Stop',
+              name:
+                typeof item.name === 'string' && item.name.trim().length > 0
+                  ? item.name
+                  : matchedWp?.name || 'Suggested Stop',
               place_name,
-              type: typeof item.type === 'string' ? item.type : 'scenic_pull_off',
-              lat: Number(item.lat.toFixed(6)),
-              lng: Number(item.lng.toFixed(6)),
-              dwell_minutes: typeof item.dwell_minutes === 'number' ? item.dwell_minutes : 15,
-              trigger_radius_miles: typeof item.trigger_radius_miles === 'number' ? item.trigger_radius_miles : 2.0,
+              type: resolvedType,
+              lat: Number(resolvedLat.toFixed(6)),
+              lng: Number(resolvedLng.toFixed(6)),
+              dwell_minutes: resolvedDwellMinutes,
+              trigger_radius_miles:
+                typeof item.trigger_radius_miles === 'number' && Number.isFinite(item.trigger_radius_miles)
+                  ? item.trigger_radius_miles
+                  : matchedWp?.trigger_radius_miles ?? 2.0,
               reason: typeof item.reason === 'string' ? item.reason : 'Recommended by Route Scout',
-              insertAfterWaypointId: typeof item.insertAfterWaypointId === 'string' ? item.insertAfterWaypointId : undefined,
-              targetWaypointId: typeof item.targetWaypointId === 'string' ? item.targetWaypointId : undefined,
+              insertAfterWaypointId:
+                typeof item.insertAfterWaypointId === 'string' ? item.insertAfterWaypointId : undefined,
+              targetWaypointId,
               newId,
               address:
                 typeof item.address === 'string' && item.address.trim().length > 0
@@ -455,7 +595,7 @@ export function parseScoutResponse(
               google_place_id: validatedPlaceId,
               is_route_anchor,
               notification:
-                item.type !== 'stop' &&
+                resolvedType !== 'stop' &&
                 typeof item.notification === 'object' && item.notification !== null
                   ? {
                       title: typeof item.notification.title === 'string' ? item.notification.title : '',
@@ -463,6 +603,70 @@ export function parseScoutResponse(
                       speech: typeof item.notification.speech === 'string' ? item.notification.speech : '',
                     }
                   : undefined,
+            };
+            const hydrated = hydrateSuggestionFromResolvedPlaces(
+              baseSug,
+              options?.resolvedPlaces,
+              options?.knownPlaceIds
+            );
+            suggestions.push(hydrated);
+          } else if (
+            typeof item === 'object' &&
+            item !== null &&
+            item.action === 'delete_waypoint'
+          ) {
+            const targetWaypointId =
+              typeof item.targetWaypointId === 'string' && item.targetWaypointId.trim().length > 0
+                ? item.targetWaypointId.trim()
+                : typeof item.target_waypoint_id === 'string' && item.target_waypoint_id.trim().length > 0
+                ? item.target_waypoint_id.trim()
+                : undefined;
+
+            if (!targetWaypointId || suggestions.some((s) => s.action === 'delete_waypoint' && s.targetWaypointId === targetWaypointId)) {
+              return;
+            }
+
+            const matchedWp = options?.tripWaypoints?.find((w) => w.id === targetWaypointId);
+            // When tripWaypoints are provided, strictly require targetWaypointId to exist in tripWaypoints
+            // and take authoritative name/type/lat/lng from matchedWp to prevent card spoofing or (0,0) Null Island (F-34).
+            if (options?.tripWaypoints && options.tripWaypoints.length > 0 && !matchedWp) {
+              return;
+            }
+
+            const lat = matchedWp
+              ? Number(matchedWp.lat.toFixed(6))
+              : typeof item.lat === 'number' && Number.isFinite(item.lat)
+              ? Number(item.lat.toFixed(6))
+              : 0;
+            const lng = matchedWp
+              ? Number(matchedWp.lng.toFixed(6))
+              : typeof item.lng === 'number' && Number.isFinite(item.lng)
+              ? Number(item.lng.toFixed(6))
+              : 0;
+            const name = matchedWp
+              ? matchedWp.name
+              : typeof item.name === 'string' && item.name.trim().length > 0
+              ? item.name.trim()
+              : 'Remove Stop';
+            const type = matchedWp
+              ? matchedWp.type
+              : typeof item.type === 'string' && item.type.trim().length > 0
+              ? item.type.trim()
+              : 'stop';
+            const reason =
+              typeof item.reason === 'string' && item.reason.trim().length > 0
+                ? item.reason.trim()
+                : 'Recommended for removal by Route Scout';
+
+            suggestions.push({
+              id: `scout_sug_${Date.now()}_${index}`,
+              action: 'delete_waypoint',
+              name,
+              type,
+              lat,
+              lng,
+              targetWaypointId,
+              reason,
             });
           }
         });
@@ -516,6 +720,8 @@ export interface ScoutServiceOptions {
   aiService?: AiService;
   tools?: ToolDeclaration[];
   toolDispatcher?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  toolLibrary?: ScoutToolLibrary;
+  toolLibraryOptions?: ScoutToolLibraryOptions;
 }
 
 /**
@@ -524,21 +730,82 @@ export interface ScoutServiceOptions {
 export class ScoutService {
   public readonly aiService: AiService;
   private tools: ToolDeclaration[];
-  private toolDispatcher: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  private customToolDispatcher?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  private toolLibrary: ScoutToolLibrary;
 
   constructor(aiServiceOrOptions?: AiService | ScoutServiceOptions) {
     if (aiServiceOrOptions instanceof AiService) {
       this.aiService = aiServiceOrOptions;
-      this.tools = [];
-      this.toolDispatcher = async () => ({});
+      this.tools = SCOUT_TOOL_DECLARATIONS;
+      this.toolLibrary = new ScoutToolLibrary();
     } else if (aiServiceOrOptions && typeof aiServiceOrOptions === 'object') {
       this.aiService = aiServiceOrOptions.aiService || createDefaultAiService();
-      this.tools = aiServiceOrOptions.tools || [];
-      this.toolDispatcher = aiServiceOrOptions.toolDispatcher || (async () => ({}));
+      this.tools = aiServiceOrOptions.tools ?? SCOUT_TOOL_DECLARATIONS;
+      this.customToolDispatcher = aiServiceOrOptions.toolDispatcher;
+      this.toolLibrary =
+        aiServiceOrOptions.toolLibrary ?? new ScoutToolLibrary(aiServiceOrOptions.toolLibraryOptions);
     } else {
       this.aiService = createDefaultAiService();
-      this.tools = [];
-      this.toolDispatcher = async () => ({});
+      this.tools = SCOUT_TOOL_DECLARATIONS;
+      this.toolLibrary = new ScoutToolLibrary();
+    }
+  }
+
+  private recordCustomToolGrounding(
+    name: string,
+    _args: Record<string, unknown>,
+    result: unknown,
+    cache: TurnGroundingCache
+  ): void {
+    if (name !== 'resolve_and_standardize_place' || !result || typeof result !== 'object') {
+      return;
+    }
+    const obj = result as Record<string, unknown>;
+    const list: unknown[] = [];
+    if (Array.isArray(obj.places)) {
+      list.push(...obj.places);
+    } else if (obj.best_match && typeof obj.best_match === 'object') {
+      list.push(obj.best_match);
+    }
+    for (const item of list) {
+      if (typeof item === 'object' && item !== null) {
+        const rec = item as Partial<ResolvedPlaceRecord>;
+        if (
+          typeof rec.place_name === 'string' &&
+          rec.place_name.trim().length > 0 &&
+          typeof rec.lat === 'number' &&
+          Number.isFinite(rec.lat) &&
+          rec.lat >= -90 &&
+          rec.lat <= 90 &&
+          typeof rec.lng === 'number' &&
+          Number.isFinite(rec.lng) &&
+          rec.lng >= -180 &&
+          rec.lng <= 180
+        ) {
+          const validPlaceId =
+            typeof rec.google_place_id === 'string' && isValidGooglePlaceId(rec.google_place_id)
+              ? rec.google_place_id.trim()
+              : undefined;
+          cache.resolvedPlaces.push({
+            query: typeof rec.query === 'string' ? rec.query : rec.place_name,
+            place_name: rec.place_name.trim(),
+            display_name: typeof rec.display_name === 'string' ? rec.display_name : rec.place_name.trim(),
+            address: typeof rec.address === 'string' ? rec.address : '',
+            lat: rec.lat,
+            lng: rec.lng,
+            google_place_id: validPlaceId,
+            types: Array.isArray(rec.types)
+              ? rec.types.filter((t): t is string => typeof t === 'string')
+              : undefined,
+            weekday_descriptions: Array.isArray(rec.weekday_descriptions)
+              ? rec.weekday_descriptions.filter((d): d is string => typeof d === 'string')
+              : undefined,
+          });
+          if (validPlaceId) {
+            cache.knownPlaceIds.add(validPlaceId);
+          }
+        }
+      }
     }
   }
 
@@ -576,23 +843,38 @@ export class ScoutService {
     const sanitize = (text: string) => adapter.sanitizeResponse(text);
     const domainPrompt = adapter.decorateScoutPrompt(buildScoutDomainPrompt(request, sanitize));
 
-    const knownPlaceIds = new Set<string>(
-      (request.tripContext?.waypoints || [])
-        .map((w) => w.google_place_id)
-        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-    );
+    const groundingCache = createTurnGroundingCache(request.tripContext?.waypoints);
+
+    const turnDispatcher = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+      if (this.customToolDispatcher) {
+        const customRes = await this.customToolDispatcher(name, args);
+        this.recordCustomToolGrounding(name, args, customRes, groundingCache);
+        return customRes;
+      }
+      return this.toolLibrary.executeTool(name, args, {
+        tripContext: request.tripContext,
+        scope: request.scope,
+        abortSignal: options.abortSignal,
+        groundingCache,
+      });
+    };
 
     if (adapter.generateStreamWithTools) {
       const streamRes = await adapter.generateStreamWithTools(
         domainPrompt,
         this.tools,
-        this.toolDispatcher,
+        turnDispatcher,
         () => {},
         { modelId: activeModelId, abortSignal: options.abortSignal }
       );
       const { reply, suggestions, thought } = parseScoutResponse(
         adapter.sanitizeResponse(streamRes.text),
-        { knownPlaceIds, sanitize }
+        {
+          knownPlaceIds: groundingCache.knownPlaceIds,
+          resolvedPlaces: groundingCache.resolvedPlaces,
+          tripWaypoints: request.tripContext?.waypoints,
+          sanitize,
+        }
       );
       return {
         reply,
@@ -612,7 +894,12 @@ export class ScoutService {
     });
     const { reply, suggestions, thought } = parseScoutResponse(
       adapter.sanitizeResponse(rawOutput),
-      { knownPlaceIds, sanitize }
+      {
+        knownPlaceIds: groundingCache.knownPlaceIds,
+        resolvedPlaces: groundingCache.resolvedPlaces,
+        tripWaypoints: request.tripContext?.waypoints,
+        sanitize,
+      }
     );
     return {
       reply,
@@ -650,17 +937,27 @@ export class ScoutService {
     const sanitize = (text: string) => adapter.sanitizeResponse(text);
     const domainPrompt = adapter.decorateScoutPrompt(buildScoutDomainPrompt(request, sanitize));
 
-    const knownPlaceIds = new Set<string>(
-      (request.tripContext?.waypoints || [])
-        .map((w) => w.google_place_id)
-        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-    );
+    const groundingCache = createTurnGroundingCache(request.tripContext?.waypoints);
+
+    const turnDispatcher = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+      if (this.customToolDispatcher) {
+        const customRes = await this.customToolDispatcher(name, args);
+        this.recordCustomToolGrounding(name, args, customRes, groundingCache);
+        return customRes;
+      }
+      return this.toolLibrary.executeTool(name, args, {
+        tripContext: request.tripContext,
+        scope: request.scope,
+        abortSignal: options.abortSignal,
+        groundingCache,
+      });
+    };
 
     const activities: ScoutActivity[] = [];
     const streamRes = await adapter.generateStreamWithTools(
       domainPrompt,
       this.tools,
-      this.toolDispatcher,
+      turnDispatcher,
       (streamEvt) => {
         if (options.abortSignal?.aborted) return;
         if (streamEvt.event === 'activity') {
@@ -684,7 +981,12 @@ export class ScoutService {
 
     const { reply, suggestions, thought } = parseScoutResponse(
       adapter.sanitizeResponse(streamRes.text),
-      { knownPlaceIds, sanitize }
+      {
+        knownPlaceIds: groundingCache.knownPlaceIds,
+        resolvedPlaces: groundingCache.resolvedPlaces,
+        tripWaypoints: request.tripContext?.waypoints,
+        sanitize,
+      }
     );
     if (suggestions.length > 0) {
       onEvent({ event: 'suggestions', data: { suggestions } });

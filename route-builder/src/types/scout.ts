@@ -55,7 +55,7 @@ export interface ScoutTripContext {
 
 export interface ScoutSuggestion {
   id: string;
-  action: 'add_waypoint' | 'update_waypoint';
+  action: 'add_waypoint' | 'update_waypoint' | 'delete_waypoint';
   name: string;
   place_name?: string;
   type: string;

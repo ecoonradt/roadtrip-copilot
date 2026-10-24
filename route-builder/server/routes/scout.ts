@@ -50,6 +50,12 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
       });
     }
 
+    if (tripContext.waypoints.length > 100) {
+      return reply.status(400).send({
+        error: 'Request body "tripContext.waypoints" must not exceed 100 waypoints',
+      });
+    }
+
     try {
       scoutService.validateProvider(preferredEngine);
       await scoutService.resolveModelId(modelId, preferredEngine);
@@ -64,13 +70,24 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
       throw err;
     }
 
+    const abortController = new AbortController();
+    const socket = request.raw.socket;
+    const onChatClose = () => {
+      abortController.abort();
+    };
+    reply.raw.on('close', onChatClose);
+    socket?.on('close', onChatClose);
+
     try {
       const response = await scoutService.chat(
         { scope, messages, tripContext, sessionId, modelId },
-        { apiKey, preferredEngine, modelId }
+        { apiKey, preferredEngine, modelId, abortSignal: abortController.signal }
       );
       return reply.status(200).send(response);
     } catch (err: unknown) {
+      if (abortController.signal.aborted) {
+        return;
+      }
       if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
         return reply.status(400).send({ error: (err as Error).message });
       }
@@ -81,6 +98,9 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
       const message = err instanceof Error ? err.message : 'Route Scout error';
       fastify.log.error({ err }, `Route Scout chat failed: ${message}`);
       return reply.status(500).send({ error: message });
+    } finally {
+      reply.raw.removeListener('close', onChatClose);
+      socket?.removeListener('close', onChatClose);
     }
   });
 
@@ -88,9 +108,22 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
   fastify.post<{ Body: ChatBody }>('/api/ai/scout/chat/stream', async (request, reply) => {
     const { scope, messages, tripContext, sessionId, apiKey, preferredEngine, modelId } = request.body || {};
 
-    if (!scope || !scope.type || !Array.isArray(messages) || messages.length === 0 || !tripContext) {
+    if (
+      !scope ||
+      !scope.type ||
+      !Array.isArray(messages) ||
+      messages.length === 0 ||
+      !tripContext ||
+      !Array.isArray(tripContext.waypoints)
+    ) {
       return reply.status(400).send({
         error: 'Invalid request payload for Scout chat stream',
+      });
+    }
+
+    if (tripContext.waypoints.length > 100) {
+      return reply.status(400).send({
+        error: 'Request body "tripContext.waypoints" must not exceed 100 waypoints',
       });
     }
 

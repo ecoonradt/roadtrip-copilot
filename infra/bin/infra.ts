@@ -72,6 +72,20 @@ const originVerifySecretSsmParam =
   process.env.ORIGIN_VERIFY_SECRET_SSM_PARAM ||
   (app.node.tryGetContext('originVerifySecretSsmParam') as string | undefined);
 
+const googlePlacesApiKey =
+  app.node.tryGetContext('googlePlacesApiKey') as string | undefined;
+
+const googlePlacesApiKeySsmParam =
+  process.env.GOOGLE_PLACES_API_KEY_SSM_PARAM ||
+  (app.node.tryGetContext('googlePlacesApiKeySsmParam') as string | undefined);
+
+const braveSearchApiKey =
+  app.node.tryGetContext('braveSearchApiKey') as string | undefined;
+
+const braveSearchApiKeySsmParam =
+  process.env.BRAVE_SEARCH_API_KEY_SSM_PARAM ||
+  (app.node.tryGetContext('braveSearchApiKeySsmParam') as string | undefined);
+
 const bedrockScoutModelId =
   process.env.BEDROCK_SCOUT_MODEL_ID ||
   (app.node.tryGetContext('bedrockScoutModelId') as string | undefined);
@@ -96,6 +110,10 @@ new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   allowedHosts,
   publicBaseUrl,
   originVerifySecret,
+  googlePlacesApiKey,
+  googlePlacesApiKeySsmParam,
+  braveSearchApiKey,
+  braveSearchApiKeySsmParam,
   bedrockScoutModelId,
   bedrockCopywriterModelId,
 });

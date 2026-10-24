@@ -1,7 +1,7 @@
 # WP-03: Amazon Bedrock Adapter & Configurable Model Selection
 
 * **Milestone:** Milestone 3 (M3) — Amazon Bedrock Adapter & Configurable Model Selection
-* **Status:** Review of `a2a7467` confirmed the static-catalog/display-metadata cleanup is bounded, with no functional regression or blocking finding identified. Automated suites remain green. Two documentation wording qualifications remain nonblocking. Live Bedrock invocation remains blocked by account-level `ValidationException: Error 002` (AWS Support pending); deployment/manual acceptance is outstanding.
+* **Status:** Code Complete & Merged to `main` (Live AWS deployment and manual CloudFront acceptance pending AWS Support account recovery)
 * **Branch:** `feat/m3-bedrock-adapter`
 * **Governing Documents:**
   * Architecture Blueprint: [`route_scout_cloud_architecture.md`](../../route_scout_cloud_architecture.md)
