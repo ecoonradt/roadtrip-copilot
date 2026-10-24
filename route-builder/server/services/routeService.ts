@@ -131,7 +131,11 @@ export class RouteService {
     return parsedPairs;
   }
 
-  public async getRoute(coordsStr: string, customCalibration?: number): Promise<RouteResponse> {
+  public async getRoute(
+    coordsStr: string,
+    customCalibration?: number,
+    abortSignal?: AbortSignal
+  ): Promise<RouteResponse> {
     const validPairs = this.parseAndValidateCoordinates(coordsStr);
 
     const effectiveCalibration =
@@ -156,6 +160,7 @@ export class RouteService {
       headers: {
         'Accept': 'application/json',
       },
+      ...(abortSignal ? { signal: abortSignal } : {}),
     });
 
     if (!res.ok) {

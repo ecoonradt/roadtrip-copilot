@@ -23,6 +23,7 @@ import {
   Terminal,
   Globe,
   ChevronRight,
+  Trash2,
 } from 'lucide-react';
 import type {
   ScoutScope,
@@ -51,6 +52,7 @@ export interface RouteScoutDrawerProps {
   onChangeScope: (newScope: ScoutScope) => void;
   onAddWaypoint: (suggestion: ScoutSuggestion) => void;
   onUpdateWaypoint: (targetWaypointId: string, updates: Partial<Waypoint>) => void;
+  onDeleteWaypoint?: (targetWaypointId: string) => void;
   onPreviewCoordinate: (pin: ScoutPreviewPin | null) => void;
   activePreviewPin?: ScoutPreviewPin | null;
   aiAvailable?: boolean;
@@ -276,6 +278,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   onChangeScope,
   onAddWaypoint,
   onUpdateWaypoint,
+  onDeleteWaypoint,
   onPreviewCoordinate,
   activePreviewPin,
   aiAvailable = true,
@@ -379,6 +382,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   // Track added and updated suggestions for UI feedback
   const [addedSuggestionIds, setAddedSuggestionIds] = useState<Set<string>>(new Set());
   const [updatedSuggestionIds, setUpdatedSuggestionIds] = useState<Set<string>>(new Set());
+  const [deletedSuggestionIds, setDeletedSuggestionIds] = useState<Set<string>>(new Set());
 
   // Copy-to-clipboard state
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -423,6 +427,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       setErrorMessage(null);
       setAddedSuggestionIds(new Set());
       setUpdatedSuggestionIds(new Set());
+      setDeletedSuggestionIds(new Set());
     }
   }, [currentItineraryId, cancelActiveTurn]);
 
@@ -944,6 +949,27 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       ...(suggestion.notification ? { notification: suggestion.notification } : {}),
     });
     setUpdatedSuggestionIds((prev) => new Set([...prev, suggestion.id]));
+    if (
+      activePreviewPin &&
+      Math.abs(activePreviewPin.lat - suggestion.lat) < 0.0001 &&
+      Math.abs(activePreviewPin.lng - suggestion.lng) < 0.0001
+    ) {
+      onPreviewCoordinate(null);
+    }
+  };
+
+  const handleDeleteSuggestion = (suggestion: ScoutSuggestion) => {
+    const targetId = suggestion.targetWaypointId;
+    if (!targetId || !onDeleteWaypoint || !waypoints.some((w) => w.id === targetId)) return;
+    onDeleteWaypoint(targetId);
+    setDeletedSuggestionIds((prev) => new Set([...prev, suggestion.id]));
+    if (
+      activePreviewPin &&
+      Math.abs(activePreviewPin.lat - suggestion.lat) < 0.0001 &&
+      Math.abs(activePreviewPin.lng - suggestion.lng) < 0.0001
+    ) {
+      onPreviewCoordinate(null);
+    }
   };
 
   const handleTogglePreview = (suggestion: ScoutSuggestion) => {
@@ -1303,6 +1329,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                     {msg.suggestions.map((sug) => {
                       const isAdded = addedSuggestionIds.has(sug.id);
                       const isUpdated = updatedSuggestionIds.has(sug.id);
+                      const isDeleted = deletedSuggestionIds.has(sug.id);
                       const isPreviewed =
                         activePreviewPin &&
                         Math.abs(activePreviewPin.lat - sug.lat) < 0.0001 &&
@@ -1321,7 +1348,11 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                                   {sug.type.replace(/_/g, ' ')}
                                 </span>
                                 <span className="text-[11px] text-slate-400 font-mono">
-                                  {sug.action === 'add_waypoint' ? 'New Stop' : 'Update'}
+                                  {sug.action === 'add_waypoint'
+                                    ? 'New Stop'
+                                    : sug.action === 'delete_waypoint'
+                                    ? 'Remove Stop'
+                                    : 'Update'}
                                 </span>
                               </div>
                               <h4 className="text-sm font-bold text-white leading-snug">
@@ -1466,6 +1497,42 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                                 )}
                               </button>
                             )}
+
+                            {/* Remove Waypoint Button */}
+                            {sug.action === 'delete_waypoint' && (() => {
+                              const targetExists = Boolean(
+                                sug.targetWaypointId &&
+                                  waypoints.some((w) => w.id === sug.targetWaypointId)
+                              );
+                              const isRemoveDisabled = isDeleted || !onDeleteWaypoint || !targetExists;
+                              return (
+                                <button
+                                  onClick={() => handleDeleteSuggestion(sug)}
+                                  disabled={isRemoveDisabled}
+                                  className={`flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:cursor-default ${
+                                    isDeleted
+                                      ? 'bg-emerald-950/80 border border-emerald-600 text-emerald-300'
+                                      : !targetExists || !onDeleteWaypoint
+                                      ? 'bg-slate-800/80 border border-slate-700 text-slate-400'
+                                      : 'bg-rose-600 hover:bg-rose-500 text-white shadow-sm'
+                                  }`}
+                                >
+                                  {isDeleted ? (
+                                    <>
+                                      <Check className="w-3 h-3 text-emerald-400" />
+                                      <span>Removed ✓</span>
+                                    </>
+                                  ) : !targetExists ? (
+                                    <span>Stop Not Found</span>
+                                  ) : (
+                                    <>
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>Remove Stop</span>
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            })()}
                           </div>
                         </div>
                       );

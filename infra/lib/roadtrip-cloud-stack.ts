@@ -27,6 +27,10 @@ export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
   allowedHosts?: string;
   publicBaseUrl?: string;
   originVerifySecret?: string;
+  googlePlacesApiKey?: string;
+  googlePlacesApiKeySsmParam?: string;
+  braveSearchApiKey?: string;
+  braveSearchApiKeySsmParam?: string;
   bedrockScoutModelId?: string;
   bedrockCopywriterModelId?: string;
 }
@@ -55,12 +59,19 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
       allowedEmailsSsmParam: props?.allowedEmailsSsmParam,
       publicBaseUrlSsmParam: props?.publicBaseUrlSsmParam,
       originVerifySecretSsmParam: props?.originVerifySecretSsmParam,
+      googlePlacesApiKeySsmParam: props?.googlePlacesApiKeySsmParam,
+      braveSearchApiKeySsmParam: props?.braveSearchApiKeySsmParam,
     };
 
     for (const [propName, paramPath] of Object.entries(ssmProps)) {
-      if (paramPath && !paramPath.startsWith('/roadtrip-copilot/')) {
+      if (
+        paramPath !== undefined &&
+        (!/^\/roadtrip-copilot\/[A-Za-z0-9_.\-/]+$/.test(paramPath) ||
+          paramPath.includes('..') ||
+          paramPath.includes('//'))
+      ) {
         throw new Error(
-          `Invalid SSM parameter path "${paramPath}" for ${propName}. All SSM parameter paths must start with "/roadtrip-copilot/".`,
+          `Invalid SSM parameter path "${paramPath}" for ${propName}. All SSM parameter paths must start with "/roadtrip-copilot/" and contain only valid parameter characters without path traversal.`,
         );
       }
     }
@@ -112,6 +123,10 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         ALLOWED_HOSTS: props?.allowedHosts ?? '',
         PUBLIC_BASE_URL: props?.publicBaseUrl ?? '',
         ...(props?.originVerifySecret ? { ORIGIN_VERIFY_SECRET: props.originVerifySecret } : {}),
+        GOOGLE_PLACES_API_KEY: props?.googlePlacesApiKey ?? '',
+        GOOGLE_PLACES_API_KEY_SSM_PARAM: props?.googlePlacesApiKeySsmParam ?? '/roadtrip-copilot/google-places-api-key',
+        BRAVE_SEARCH_API_KEY: props?.braveSearchApiKey ?? '',
+        BRAVE_SEARCH_API_KEY_SSM_PARAM: props?.braveSearchApiKeySsmParam ?? '/roadtrip-copilot/brave-search-api-key',
         BEDROCK_SCOUT_MODEL_ID: props?.bedrockScoutModelId || DEFAULT_BEDROCK_SCOUT_MODEL_ID,
         BEDROCK_COPYWRITER_MODEL_ID: props?.bedrockCopywriterModelId || DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
       },

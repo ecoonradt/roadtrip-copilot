@@ -35,14 +35,17 @@
 * Enforces constraints: titles $\le 30$ chars, spoken messages 15–25 words ($\le 2$ lines), trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
 
 ### E. Route Scout Conversational Co-Pilot & Adapter Seam
-* **Role & Scoping:** A dedicated conversational road-trip co-pilot (`RouteScoutDrawer.tsx`, `scoutService.ts`, `/api/ai/scout/*`) operating in two distinct scopes:
+* **Role & Scoping:** A dedicated conversational road-trip co-pilot (`RouteScoutDrawer.tsx`, `scoutService.ts`, `scoutTools.ts`, `/api/ai/scout/*`) operating in two distinct scopes:
   * **Day Scope:** Evaluates overall driving pace, scenic corridors, overlook opportunities, and meal/fuel deserts.
   * **Waypoint Scope:** Audits road accessibility (paved vs. dirt), parking pull-offs, lighting/golden hour timing, and coordinate precision.
 * **Pluggable Adapter Seam:** The core road-trip domain prompt (`buildScoutDomainPrompt`) is kept strictly pure and harness-agnostic. All harness-specific tool permissions and execution rules live behind the `AiHarnessAdapter` lifecycle hooks:
-  * `AwsBedrockHarnessAdapter.generateStreamWithTools`: Executes multi-turn `ConverseStreamCommand` tool loops (`MAX_TOOL_ITERATIONS = 5`, parallel `Promise.all` tool dispatch) with `activity`, `thought`, and `delta` SSE streaming and `<thinking>`/`<think>` reasoning tag hygiene.
+  * `AwsBedrockHarnessAdapter.generateStreamWithTools`: Executes multi-turn `ConverseStreamCommand` tool loops (`MAX_TOOL_ITERATIONS = 5`, `MAX_TOOLS_PER_ITERATION = 8`, parallel `Promise.all` tool dispatch) with `activity`, `thought`, and `delta` SSE streaming and `<thinking>`/`<think>` reasoning tag hygiene.
   * `decorateScoutPrompt(domainPrompt)`: The Bedrock adapter returns the domain prompt unchanged. Harness-specific tool allowlists and execution rules live in the adapter/dispatcher seam, never in `buildScoutDomainPrompt`.
   * `sanitizeResponse(rawText)`: Strips internal harness preambles, `<thinking>`/`<think>` XML blocks, and trailing meta-commentary from driver-facing prose. `ScoutService` passes it into `buildScoutDomainPrompt` / `parseScoutResponse` as an optional sanitizer, so the domain layer defaults to identity and stays provider-neutral.
-* **Interactive Suggestion Cards & Human-in-the-Loop Verification:** Emits actionable candidate blocks (`json:suggestions`) allowing 1-click **Add Waypoint** or **Update Waypoint** with dynamic map preview pins before driver approval. Operates under the principle that AI assistants are valuable discovery advisors but require human verification for real-world geometry. The UI supports an in-app "Test on Google Maps" query link, `place_name` vs `name` decoupling, and automatic Place ID extraction from pasted Maps URLs to lock in verified locations.
+* **Discovery & Deterministic Domain Grounding Tool Library (`scoutTools.ts`):** Provides 7 server-side tools executed in parallel (`Promise.all`) during Bedrock tool turns:
+  * **Web Discovery (`search_web`, `read_url_content`):** Queries the Brave Search API (`BRAVE_SEARCH_API_KEY` or SSM `/roadtrip-copilot/brave-search-api-key`) and fetches external HTTP/HTTPS pages with strict SSRF, DNS-rebinding, redirect, port, content-type, and 512 KB response size guards.
+  * **Deterministic Domain Grounding (`resolve_and_standardize_place`, `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, `audit_corridor_waypoints`):** Resolves physical establishments via Google Places API (New) Text Search (`GOOGLE_PLACES_API_KEY` or SSM `/roadtrip-copilot/google-places-api-key`) with a strict `X-Goog-FieldMask` and 50 km radius clamp, snaps scenic pull-offs and route anchors to OSRM highway geometry (`/nearest/v1/driving`) with highway designator disambiguation (`US-89` vs `I-89` vs `AZ-89`), computes exact detour distance/duration deltas via `RouteService`, simulates schedule cascades and timezone crossings in memory, and audits corridor waypoints with bounded concurrency (`MAX_AUDIT_CONCURRENCY = 4`).
+* **Server-Side Suggestion Hydration & Interactive Cards (`add_waypoint` / `update_waypoint` / `delete_waypoint`):** Per-turn `TurnGroundingCache` deterministically hydrates `add_waypoint` and `update_waypoint` suggestion cards with verified `ChIJ...` Place IDs (`placeId.ts`), clean `place_name`, street `address`, and entrance coordinates resolved during the turn without cross-request leakage. Supports 1-click **Add to Route**, **Update Stop**, and **Remove Stop** (`delete_waypoint`) with dynamic map preview pins, an in-app "Test on Google Maps" query link, and automatic Place ID extraction from pasted Maps URLs.
 * **SSE Streaming & Keep-Alive Heartbeats:** Streams tokens over `/api/ai/scout/chat/stream` with immediate `: ping\n\n` and periodic `: keep-alive\n\n` SSE comments to keep CloudFront and Lambda Function URL streams alive during multi-turn tool calls.
 
 ### F. Timeline Cascade, Navigation Links & Device Handoff
@@ -104,7 +107,9 @@ route-builder/
 │   │   ├── aiRegistry.ts       # Composition root registering the primary AI provider adapter
 │   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
 │   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk/S3 storage
-│   │   └── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
+│   │   ├── placeId.ts          # Google Place ID validator & anti-hallucination guard
+│   │   ├── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
+│   │   └── scoutTools.ts       # 7-tool discovery & deterministic domain grounding library
 │   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
 ├── src/
 │   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator

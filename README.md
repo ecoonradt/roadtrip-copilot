@@ -146,7 +146,7 @@ The repository includes a desktop-first web application in `route-builder/` for 
 
 * **Interactive Map Canvas & Routing:** OpenStreetMap canvas powered by Leaflet and backend OSRM routing proxies with in-memory caching.
 * **Timeline Cascade Engine:** Live schedule calculations with dwell time ripple, multi-state timezone boundary detection, and backward catch-up scheduling.
-* **Route Scout AI Assistant:** Interactive sidebar co-pilot to audit drive segments, discover overlooks, and insert vetted waypoints with 1-click timeline integration.
+* **Route Scout AI Assistant & Grounding Tools:** Interactive sidebar co-pilot backed by a 7-tool discovery and domain grounding library (web search, SSRF-hardened page reader, Google Places API New entity resolution, OSRM highway corridor snapping, detour impact math, schedule cascade simulation, and corridor auditing) with 1-click **Add to Route**, **Update Stop**, and **Remove Stop** timeline integration.
 * **AI Heads-Up Generation:** Instant generation of Android Auto heads-up cards and TTS scripts tailored to car audio constraints.
 * **Multi-Leg Google Maps Export:** Generates route-shaping navigation links with automatic 9-stop leg chunking and QR codes to prevent unwanted highway rerouting.
 * **1-Click Device Handoff:** Instant ADB push to phone storage, local Wi-Fi QR code download, or SAF file export.

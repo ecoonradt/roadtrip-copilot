@@ -109,6 +109,10 @@ describe('RoadtripCopilotCloudStack', () => {
           ALLOWED_EMAILS_SSM_PARAM: '/roadtrip-copilot/allowed-emails',
           ORIGIN_VERIFY_SECRET_SSM_PARAM: '/roadtrip-copilot/origin-verify-secret',
           ALLOWED_HOSTS: '',
+          GOOGLE_PLACES_API_KEY: '',
+          GOOGLE_PLACES_API_KEY_SSM_PARAM: '/roadtrip-copilot/google-places-api-key',
+          BRAVE_SEARCH_API_KEY: '',
+          BRAVE_SEARCH_API_KEY_SSM_PARAM: '/roadtrip-copilot/brave-search-api-key',
           BEDROCK_SCOUT_MODEL_ID: 'us.moonshotai.kimi-k3',
           BEDROCK_COPYWRITER_MODEL_ID: 'us.amazon.nova-2-lite-v1:0',
         }),
@@ -129,6 +133,10 @@ describe('RoadtripCopilotCloudStack', () => {
       originVerifySecretSsmParam: '/roadtrip-copilot/custom-origin-verify-secret',
       allowedHosts: 'custom.roadtrip.com',
       originVerifySecret: 'custom-secret-key',
+      googlePlacesApiKey: 'custom-google-places-key',
+      googlePlacesApiKeySsmParam: '/roadtrip-copilot/custom-google-places-key',
+      braveSearchApiKey: 'custom-brave-search-key',
+      braveSearchApiKeySsmParam: '/roadtrip-copilot/custom-brave-search-key',
       bedrockScoutModelId: 'custom.scout-model',
       bedrockCopywriterModelId: 'custom.copywriter-model',
     });
@@ -148,6 +156,10 @@ describe('RoadtripCopilotCloudStack', () => {
           ORIGIN_VERIFY_SECRET_SSM_PARAM: '/roadtrip-copilot/custom-origin-verify-secret',
           ALLOWED_HOSTS: 'custom.roadtrip.com',
           ORIGIN_VERIFY_SECRET: 'custom-secret-key',
+          GOOGLE_PLACES_API_KEY: 'custom-google-places-key',
+          GOOGLE_PLACES_API_KEY_SSM_PARAM: '/roadtrip-copilot/custom-google-places-key',
+          BRAVE_SEARCH_API_KEY: 'custom-brave-search-key',
+          BRAVE_SEARCH_API_KEY_SSM_PARAM: '/roadtrip-copilot/custom-brave-search-key',
           BEDROCK_SCOUT_MODEL_ID: 'custom.scout-model',
           BEDROCK_COPYWRITER_MODEL_ID: 'custom.copywriter-model',
         }),
@@ -155,12 +167,36 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
-  it('rejects SSM parameter paths that do not start with /roadtrip-copilot/', () => {
+  it('rejects SSM parameter paths that do not start with /roadtrip-copilot/ or contain path traversal', () => {
     expect(() =>
       createStack({
         jwtSecretSsmParam: '/custom/jwt-secret',
       }),
-    ).toThrow('Invalid SSM parameter path "/custom/jwt-secret" for jwtSecretSsmParam. All SSM parameter paths must start with "/roadtrip-copilot/".');
+    ).toThrow('Invalid SSM parameter path "/custom/jwt-secret" for jwtSecretSsmParam. All SSM parameter paths must start with "/roadtrip-copilot/" and contain only valid parameter characters without path traversal.');
+
+    expect(() =>
+      createStack({
+        googlePlacesApiKeySsmParam: '/custom/google-places-key',
+      }),
+    ).toThrow('Invalid SSM parameter path "/custom/google-places-key" for googlePlacesApiKeySsmParam. All SSM parameter paths must start with "/roadtrip-copilot/" and contain only valid parameter characters without path traversal.');
+
+    expect(() =>
+      createStack({
+        braveSearchApiKeySsmParam: '/custom/brave-search-key',
+      }),
+    ).toThrow('Invalid SSM parameter path "/custom/brave-search-key" for braveSearchApiKeySsmParam. All SSM parameter paths must start with "/roadtrip-copilot/" and contain only valid parameter characters without path traversal.');
+
+    expect(() =>
+      createStack({
+        googlePlacesApiKeySsmParam: '/roadtrip-copilot/../other-app/secret',
+      }),
+    ).toThrow('Invalid SSM parameter path "/roadtrip-copilot/../other-app/secret" for googlePlacesApiKeySsmParam.');
+
+    expect(() =>
+      createStack({
+        braveSearchApiKeySsmParam: '/roadtrip-copilot/',
+      }),
+    ).toThrow('Invalid SSM parameter path "/roadtrip-copilot/" for braveSearchApiKeySsmParam.');
   });
 
   it('grants FastifyApiFunction IAM execution role permissions for SSM parameters and KMS decryption', () => {

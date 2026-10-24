@@ -8,7 +8,7 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
 
 * **Interactive Map Canvas & Routing:** OpenStreetMap canvas powered by Leaflet and backend OSRM routing proxies with in-memory caching.
 * **Timeline Schedule Engine:** Computes arrival and departure times across all stops, automatically rippling dwell time changes downstream and shifting local times at state and timezone boundaries while keeping UTC milestones chronological. Includes a backward "Catch-up" deadline solver.
-* **Route Scout Conversational Co-Pilot:** An interactive route intelligence advisor in a slide-out drawer that audits daily driving pace, discovers scenic vistas, local food, and fuel stops along your driving corridor, and inserts verified waypoints directly into your timeline.
+* **Route Scout Conversational Co-Pilot & Grounding Tools:** An interactive route intelligence advisor in a slide-out drawer backed by a 7-tool server-side discovery and deterministic domain grounding library (`search_web`, `read_url_content`, `resolve_and_standardize_place` via Google Places API New, `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, and `audit_corridor_waypoints`). Audits daily driving pace, discovers scenic vistas, local food, and fuel stops along your driving corridor, and emits verified `add_waypoint`, `update_waypoint`, and `delete_waypoint` suggestion cards with 1-click timeline integration.
 * **AI Heads-Up Generation:** Instant generation of Android Auto heads-up cards (titles up to 30 characters, messages up to 2 lines) and natural spoken phonetic TTS scripts (15-25 words, spoken within 8-12 seconds) with trigger radii clamped between 0.3 and 6.0 miles.
 * **Multi-Stop Google Maps Navigation Links:** Constructs Google Maps driving URLs with route-shaping waypoints to prevent Google Maps from rerouting onto standard highways. Routes exceeding 9 intermediate stops are automatically partitioned into continuous driving legs with dedicated QR codes.
 * **1-Click Device Handoff:** Directly push itineraries to connected Android phones over ADB, download via local Wi-Fi QR codes, or export JSON files for Android Storage Access Framework (SAF) import.
@@ -77,7 +77,7 @@ To use the **AI Heads-Up Alert Copywriter** or the **Route Scout Conversational 
 
 1. **Discover & Stage with Route Scout:**
    * Ask Route Scout for advice (e.g. *"Where should we refuel before heading into the mountains?"* or *"Audit my day 2 waypoints for Google Maps issues"*).
-   * Review the candidate cards (`add_waypoint` or `update_waypoint`) with their on-map pin previews, and click **Apply** to integrate them into your timeline cascade.
+   * Review the candidate cards (`add_waypoint`, `update_waypoint`, or `delete_waypoint`) with their on-map pin previews, and click **Add to Route**, **Update Stop**, or **Remove Stop** to integrate them into your timeline cascade.
 
 2. **Verify on Google Maps ("Test on Google Maps"):**
    * Open the **Edit Waypoint** modal (pencil icon) on any physical stop (fuel, meals, lodging, viewpoints).
@@ -116,6 +116,8 @@ The application works with zero configuration by default in an AWS environment. 
 | `JWT_SECRET` | *(None)* | Server HMAC-SHA256 secret for signing session cookies and Bearer JWTs (or resolved at runtime from SSM SecureString `/roadtrip-copilot/jwt-secret`). |
 | `BEDROCK_SCOUT_MODEL_ID` | `us.moonshotai.kimi-k3` | Default Amazon Bedrock model or inference profile ID for the Route Scout co-pilot. |
 | `BEDROCK_COPYWRITER_MODEL_ID` | `us.amazon.nova-2-lite-v1:0` | Default Amazon Bedrock model or inference profile ID for waypoint alert & day-title copywriting. |
+| `GOOGLE_PLACES_API_KEY` | *(None)* | Google Places API (New) key for Route Scout `resolve_and_standardize_place` tool (or resolved at runtime from SSM SecureString `/roadtrip-copilot/google-places-api-key`). |
+| `BRAVE_SEARCH_API_KEY` | *(None)* | Brave Search API key for Route Scout `search_web` tool (or resolved at runtime from SSM SecureString `/roadtrip-copilot/brave-search-api-key`). |
 | `AWS_REGION` | *(SDK credential chain)* | AWS region for the Bedrock runtime and control-plane clients. Deployment uses `us-east-2`. |
 | `NODE_ENV` | `development` | Set to `production` for production builds. |
 

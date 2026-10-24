@@ -740,8 +740,34 @@ export function App() {
   }, [updateCurrentDayWaypoints, waypoints, currentDay.timezone]);
 
   const handleDeleteWaypoint = useCallback((id: string) => {
-    updateCurrentDayWaypoints(waypoints.filter((w) => w.id !== id));
-  }, [updateCurrentDayWaypoints, waypoints]);
+    const target = waypoints.find((w) => w.id === id);
+    updateCurrentDayWaypoints((prevWaypoints) => prevWaypoints.filter((w) => w.id !== id));
+    if (selectedWaypointId === id) {
+      setSelectedWaypointId(null);
+    }
+    setScoutScope((prev) => {
+      if (prev.type === 'waypoint' && prev.waypointId === id) {
+        return {
+          type: 'day',
+          dayNumber: currentDay.dayNumber,
+          dayTitle: currentDay.title,
+        };
+      }
+      return prev;
+    });
+    if (target) {
+      setScoutPreviewPin((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.lat - target.lat) < 0.0001 &&
+          Math.abs(prev.lng - target.lng) < 0.0001
+        ) {
+          return null;
+        }
+        return prev;
+      });
+    }
+  }, [updateCurrentDayWaypoints, waypoints, selectedWaypointId, currentDay.dayNumber, currentDay.title]);
 
   const handleUpdateWaypoint = useCallback((id: string, updates: Partial<Waypoint>) => {
     updateCurrentDayWaypoints((prevWaypoints) =>
@@ -853,33 +879,34 @@ export function App() {
         notification: suggestion.notification,
       };
 
-      const updated = [...waypoints];
-      if (suggestion.insertAfterWaypointId) {
-        const insertIdx = updated.findIndex(
-          (w) => w.id === suggestion.insertAfterWaypointId
-        );
-        if (insertIdx !== -1) {
-          updated.splice(insertIdx + 1, 0, newWp);
-        } else if (
-          updated.length > 1 &&
-          updated[updated.length - 1].type === 'destination'
-        ) {
-          updated.splice(updated.length - 1, 0, newWp);
+      updateCurrentDayWaypoints((prevWaypoints) => {
+        const updated = [...prevWaypoints];
+        if (suggestion.insertAfterWaypointId) {
+          const insertIdx = updated.findIndex(
+            (w) => w.id === suggestion.insertAfterWaypointId
+          );
+          if (insertIdx !== -1) {
+            updated.splice(insertIdx + 1, 0, newWp);
+          } else if (
+            updated.length > 1 &&
+            updated[updated.length - 1].type === 'destination'
+          ) {
+            updated.splice(updated.length - 1, 0, newWp);
+          } else {
+            updated.push(newWp);
+          }
         } else {
-          updated.push(newWp);
+          if (
+            updated.length > 1 &&
+            updated[updated.length - 1].type === 'destination'
+          ) {
+            updated.splice(updated.length - 1, 0, newWp);
+          } else {
+            updated.push(newWp);
+          }
         }
-      } else {
-        if (
-          updated.length > 1 &&
-          updated[updated.length - 1].type === 'destination'
-        ) {
-          updated.splice(updated.length - 1, 0, newWp);
-        } else {
-          updated.push(newWp);
-        }
-      }
-
-      updateCurrentDayWaypoints(updated);
+        return updated;
+      });
 
       // Clear preview pin if it matches this suggestion
       setScoutPreviewPin((prev) => {
@@ -893,7 +920,7 @@ export function App() {
         return prev;
       });
     },
-    [updateCurrentDayWaypoints, waypoints, currentDay.timezone]
+    [updateCurrentDayWaypoints, currentDay.timezone]
   );
 
   const handleRenameTrip = useCallback((name: string) => {
@@ -1476,6 +1503,7 @@ export function App() {
           onChangeScope={setScoutScope}
           onAddWaypoint={handleAddWaypointFromScout}
           onUpdateWaypoint={handleUpdateWaypoint}
+          onDeleteWaypoint={handleDeleteWaypoint}
           onPreviewCoordinate={setScoutPreviewPin}
           activePreviewPin={scoutPreviewPin}
           aiAvailable={aiAvailable}
