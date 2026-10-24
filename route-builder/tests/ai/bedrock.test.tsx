@@ -305,6 +305,146 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
           else delete process.env.BEDROCK_EXCLUDED_MODEL_IDS;
         }
       });
+
+      it('rejects inherited object-property names (constructor, __proto__, toString) safely as InvalidModelError (P2 Finding 5)', async () => {
+        const adapter = new AwsBedrockHarnessAdapter({
+          available: true,
+          availableModels: BEDROCK_MODEL_CATALOG,
+        });
+
+        await expect(adapter.validateModelId('constructor')).rejects.toThrow(InvalidModelError);
+        await expect(adapter.validateModelId('__proto__')).rejects.toThrow(InvalidModelError);
+        await expect(adapter.validateModelId('toString')).rejects.toThrow(InvalidModelError);
+
+        expect(adapter.resolveCanonicalModelId('constructor')).toBe('constructor');
+        expect(adapter.resolveCanonicalModelId('__proto__')).toBe('__proto__');
+        expect(adapter.resolveCanonicalModelId('toString')).toBe('toString');
+      });
+
+      it('excludes foundation model and all variants when foundation ID is excluded, but preserves variants when only specific profile is excluded (P2 Finding 2)', async () => {
+        const mockControlClient = {
+          send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+            if (cmd.input?.byOutputModality === 'TEXT') {
+              return {
+                modelSummaries: [
+                  {
+                    modelId: 'amazon.nova-2-lite-v1:0',
+                    modelName: 'Nova 2 Lite',
+                    providerName: 'Amazon',
+                    inputModalities: ['TEXT'],
+                    outputModalities: ['TEXT'],
+                    responseStreamingSupported: true,
+                  },
+                ],
+              };
+            }
+            if (!cmd.input?.modelId) {
+              return {
+                inferenceProfileSummaries: [
+                  {
+                    inferenceProfileId: 'us.amazon.nova-2-lite-v1:0',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-2-lite-v1:0' }],
+                  },
+                  {
+                    inferenceProfileId: 'global.amazon.nova-2-lite-v1:0',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-2-lite-v1:0' }],
+                  },
+                ],
+              };
+            }
+            return {
+              authorizationStatus: 'AUTHORIZED',
+              entitlementAvailability: 'AVAILABLE',
+              regionAvailability: 'AVAILABLE',
+              agreementAvailability: { status: 'AVAILABLE' },
+            };
+          }),
+        };
+
+        // Case A: Bare foundation ID excluded -> covers both US and global profiles
+        const adapterWithBareExcluded = new AwsBedrockHarnessAdapter({
+          controlClient: mockControlClient as unknown as BedrockClient,
+          client: {} as unknown as BedrockRuntimeClient,
+          excludedModelIds: ['amazon.nova-2-lite-v1:0'],
+        });
+        const modelsA = await adapterWithBareExcluded.getAvailableModels();
+        expect(modelsA.map((m) => m.id)).toEqual([]);
+        await expect(adapterWithBareExcluded.validateModelId('amazon.nova-2-lite-v1:0')).rejects.toThrow(/excluded by policy/);
+        await expect(adapterWithBareExcluded.validateModelId('us.amazon.nova-2-lite-v1:0')).rejects.toThrow(/excluded by policy/);
+        await expect(adapterWithBareExcluded.validateModelId('global.amazon.nova-2-lite-v1:0')).rejects.toThrow(/excluded by policy/);
+
+        // Case B: Profile-scoped exclusion -> excludes US variant, retains global variant
+        const adapterWithProfileExcluded = new AwsBedrockHarnessAdapter({
+          controlClient: mockControlClient as unknown as BedrockClient,
+          client: {} as unknown as BedrockRuntimeClient,
+          excludedModelIds: ['us.amazon.nova-2-lite-v1:0'],
+        });
+        const modelsB = await adapterWithProfileExcluded.getAvailableModels();
+        expect(modelsB.map((m) => m.id)).toEqual(['global.amazon.nova-2-lite-v1:0']);
+        expect(await adapterWithProfileExcluded.validateModelId('amazon.nova-2-lite-v1:0', 'scout')).toBe('global.amazon.nova-2-lite-v1:0');
+        await expect(adapterWithProfileExcluded.validateModelId('us.amazon.nova-2-lite-v1:0')).rejects.toThrow(/excluded by policy/);
+      });
+
+      it('deterministically selects US inference profile over global profile regardless of AWS listing order (P2 Finding 2)', async () => {
+        const mockControlClient = {
+          send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+            if (cmd.input?.byOutputModality === 'TEXT') {
+              return {
+                modelSummaries: [
+                  {
+                    modelId: 'vendor.test-model-v1:0',
+                    modelName: 'Test Model',
+                    providerName: 'Vendor',
+                    inputModalities: ['TEXT'],
+                    outputModalities: ['TEXT'],
+                    responseStreamingSupported: true,
+                  },
+                ],
+              };
+            }
+            if (!cmd.input?.modelId) {
+              return {
+                // Return global first, then us
+                inferenceProfileSummaries: [
+                  {
+                    inferenceProfileId: 'global.vendor.test-model-v1:0',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/vendor.test-model-v1:0' }],
+                  },
+                  {
+                    inferenceProfileId: 'us.vendor.test-model-v1:0',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/vendor.test-model-v1:0' }],
+                  },
+                ],
+              };
+            }
+            return {
+              authorizationStatus: 'AUTHORIZED',
+              entitlementAvailability: 'AVAILABLE',
+              regionAvailability: 'AVAILABLE',
+              agreementAvailability: { status: 'AVAILABLE' },
+            };
+          }),
+        };
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          controlClient: mockControlClient as unknown as BedrockClient,
+          client: {} as unknown as BedrockRuntimeClient,
+        });
+
+        const models = await adapter.getAvailableModels();
+        expect(models.map((m) => m.id)).toEqual(['global.vendor.test-model-v1:0', 'us.vendor.test-model-v1:0']);
+        // Dynamic alias prioritizes us.* over global.*
+        expect(adapter.resolveCanonicalModelId('vendor.test-model-v1:0')).toBe('us.vendor.test-model-v1:0');
+        expect(await adapter.validateModelId('vendor.test-model-v1:0', 'scout')).toBe('us.vendor.test-model-v1:0');
+      });
     });
 
     describe('Region Resolution (Negative Constraint Verification)', () => {
@@ -2448,6 +2588,333 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       expect(res.json().error).toContain('excluded by policy');
       expect(mockRuntimeSend).not.toHaveBeenCalled();
     });
+
+    it('cold instance resolves bare ID to newly discovered profile on the first request without prior getAvailableModels call (P2 Finding 1)', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'new-vendor.cold-model-v1:0',
+                  modelName: 'Cold Model',
+                  providerName: 'New Vendor',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  responseStreamingSupported: true,
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                {
+                  inferenceProfileId: 'us.new-vendor.cold-model-v1:0',
+                  status: 'ACTIVE',
+                  type: 'SYSTEM_DEFINED',
+                  models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/new-vendor.cold-model-v1:0' }],
+                },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+        defaultCopywriterModelId: 'new-vendor.cold-model-v1:0',
+      });
+      // Note: NO getAvailableModels() call here - testing cold path directly
+      const validated = await adapter.validateModelId('new-vendor.cold-model-v1:0', 'scout');
+      expect(validated).toBe('us.new-vendor.cold-model-v1:0');
+    });
+
+    it('POST /api/copilot/day-title with a bare configured default succeeds on the first request on a cold instance (P2 Finding 1)', async () => {
+      const mockRuntimeSend = vi.fn().mockResolvedValue({
+        output: {
+          message: {
+            content: [{ text: JSON.stringify({ title: 'Sedona Explorer' }) }],
+          },
+        },
+      });
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'new-vendor.cold-model-v1:0',
+                  modelName: 'Cold Model',
+                  providerName: 'New Vendor',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  responseStreamingSupported: true,
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                {
+                  inferenceProfileId: 'us.new-vendor.cold-model-v1:0',
+                  status: 'ACTIVE',
+                  type: 'SYSTEM_DEFINED',
+                  models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/new-vendor.cold-model-v1:0' }],
+                },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: { send: mockRuntimeSend } as unknown as BedrockRuntimeClient,
+        defaultCopywriterModelId: 'new-vendor.cold-model-v1:0',
+      });
+      const aiService = new AiService({ adapters: [adapter] });
+      const app = createApp({ logger: false, aiService });
+
+      // Request #1 without modelId - uses bare defaultCopywriterModelId on cold instance
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/day-title',
+        payload: {
+          dayNumber: 1,
+          stops: ['Sedona', 'Flagstaff'],
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(mockRuntimeSend).toHaveBeenCalled();
+    });
+
+    it('updates dynamic aliases across TTL cache refresh (P2 Finding 1)', async () => {
+      let profileVersion = 'v1';
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'refresh-vendor.model',
+                  modelName: 'Refresh Model',
+                  providerName: 'Refresh Vendor',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  responseStreamingSupported: true,
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                {
+                  inferenceProfileId: `us.refresh-vendor.model-${profileVersion}`,
+                  status: 'ACTIVE',
+                  type: 'SYSTEM_DEFINED',
+                  models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/refresh-vendor.model' }],
+                },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      // First validation resolves v1
+      const first = await adapter.validateModelId('refresh-vendor.model', 'scout');
+      expect(first).toBe('us.refresh-vendor.model-v1');
+
+      // Update provider to v2 and expire TTL
+      profileVersion = 'v2';
+      (adapter as unknown as { availabilityCheckedAt: number }).availabilityCheckedAt = 0;
+
+      // Second validation after TTL refresh resolves to v2
+      const second = await adapter.validateModelId('refresh-vendor.model', 'scout');
+      expect(second).toBe('us.refresh-vendor.model-v2');
+    });
+
+    it('pre-heartbeat disconnect: does not invoke inference if client disconnects during pre-stream model discovery (P2 Finding 3)', async () => {
+      let resolveDiscovery!: () => void;
+      const discoveryPromise = new Promise<void>((resolve) => {
+        resolveDiscovery = resolve;
+      });
+
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            await discoveryPromise;
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'amazon.nova-2-lite-v1:0',
+                  modelName: 'Nova 2 Lite',
+                  providerName: 'Amazon',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  responseStreamingSupported: true,
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                {
+                  inferenceProfileId: 'us.amazon.nova-2-lite-v1:0',
+                  status: 'ACTIVE',
+                  type: 'SYSTEM_DEFINED',
+                  models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-2-lite-v1:0' }],
+                },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const mockRuntimeSend = vi.fn();
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: { send: mockRuntimeSend } as unknown as BedrockRuntimeClient,
+      });
+
+      const aiService = new AiService({ adapters: [adapter] });
+      const scoutService = new ScoutService(aiService);
+      const app = createApp({ logger: false, aiService, scoutService });
+      await app.listen({ port: 0, host: '127.0.0.1' });
+
+      try {
+        const address = app.server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        const abortController = new AbortController();
+
+        const fetchPromise = fetch(`http://127.0.0.1:${port}/api/ai/scout/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scope: { type: 'day', dayNumber: 1 },
+            messages: [{ role: 'user', content: 'Explore route' }],
+            tripContext: sampleTripContext,
+          }),
+          signal: abortController.signal,
+        });
+
+        // Abort while discovery is in progress (pre-heartbeat window)
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        abortController.abort();
+        await fetchPromise.catch(() => undefined);
+
+        // Release discovery
+        resolveDiscovery();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Runtime inference should never have been invoked
+        expect(mockRuntimeSend).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('returns HTTP 400 when modelId is an inherited object property like constructor, __proto__, toString (P2 Finding 5)', async () => {
+      const adapter = new AwsBedrockHarnessAdapter({
+        available: true,
+        availableModels: BEDROCK_MODEL_CATALOG,
+      });
+      const aiService = new AiService({ adapters: [adapter] });
+      const app = createApp({ logger: false, aiService });
+
+      for (const badModel of ['constructor', '__proto__', 'toString']) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/copilot/day-title',
+          payload: {
+            dayNumber: 1,
+            stops: ['Stop A', 'Stop B'],
+            modelId: badModel,
+          },
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toContain('Unsupported or unavailable Bedrock model ID');
+      }
+    });
+
+    it('basic invalid payload returns HTTP 400 with zero discovery or runtime calls even when discovery/control plane is failing (P2 Finding 6)', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockRejectedValue(new Error('Discovery unavailable: IAM or control-plane failure')),
+      };
+      const mockRuntimeSend = vi.fn();
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: { send: mockRuntimeSend } as unknown as BedrockRuntimeClient,
+      });
+      const aiService = new AiService({ adapters: [adapter] });
+      const scoutService = new ScoutService(aiService);
+      const app = createApp({ logger: false, aiService, scoutService });
+
+      // 1. /api/copilot/day-title with empty body {}
+      const resDayTitle = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/day-title',
+        payload: {},
+      });
+      expect(resDayTitle.statusCode).toBe(400);
+      expect(resDayTitle.json().error).toContain('Request body must contain a non-empty "stops" array');
+
+      // 2. /api/ai/scout/chat with empty body {}
+      const resScoutChat = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {},
+      });
+      expect(resScoutChat.statusCode).toBe(400);
+      expect(resScoutChat.json().error).toContain('Request body must contain a valid "scope" object');
+
+      // 3. /api/ai/scout/chat/stream with empty body {}
+      const resScoutStream = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {},
+      });
+      expect(resScoutStream.statusCode).toBe(400);
+      expect(resScoutStream.json().error).toContain('Invalid request payload for Scout chat stream');
+
+      // Assert zero discovery and zero runtime SDK calls were made
+      expect(mockControlClient.send).not.toHaveBeenCalled();
+      expect(mockRuntimeSend).not.toHaveBeenCalled();
+    });
   });
 
   describe('3. Client SSE Parser & UI Model Selector Tests', () => {
@@ -3013,6 +3480,190 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const day1Json = JSON.stringify(drawer.toJSON());
         expect(day1Json).not.toContain('Route Scout is analyzing route geometry & corridor');
+      });
+
+      it('preserves completed suggestions-only message across drawer close/reopen and scope switch (P2 Finding 4)', async () => {
+        let resolveStreamPromise: () => void = () => {};
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => [],
+              });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              return new Promise((resolve) => {
+                resolveStreamPromise = () => {
+                  const encoder = new TextEncoder();
+                  const stream = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      const suggestionsBlock = JSON.stringify({
+                        reply: '',
+                        suggestions: [
+                          {
+                            id: 'sug-scenic-1',
+                            action: 'add_waypoint',
+                            name: 'Completed Scenic Vista',
+                            type: 'scenic',
+                            lat: 34.8697,
+                            lng: -111.761,
+                            notes: 'Must-see red rocks vista',
+                            reason: 'Iconic panoramic viewpoint along corridor',
+                          },
+                        ],
+                        sessionId: 's_test_123',
+                        engine: 'bedrock',
+                      });
+                      controller.enqueue(
+                        encoder.encode(`event: done\ndata: ${suggestionsBlock}\n\n`)
+                      );
+                      controller.close();
+                    },
+                  });
+                  resolve({
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'text/event-stream' }),
+                    body: stream,
+                  });
+                };
+              });
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Suggest scenic spots' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        // Resolve the streaming response
+        await act(async () => {
+          resolveStreamPromise();
+        });
+
+        // The completed suggestion card is rendered
+        let jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+
+        // Close the drawer and reopen: verify completed suggestion card is preserved
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={false}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+
+        // Switch scope to Day 2 and return to Day 1: verify completed suggestion card is preserved
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={1}
+              activeDay={sampleTrip.days[1] || sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 2 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
       });
 
       it('gates Route Scout input, send button, and quick prompts when selectedModelId is empty (R5)', () => {

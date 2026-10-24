@@ -32,20 +32,6 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
   fastify.post<{ Body: ChatBody }>('/api/ai/scout/chat', async (request, reply) => {
     const { scope, messages, tripContext, sessionId, apiKey, preferredEngine, modelId } = request.body || {};
 
-    try {
-      scoutService.validateProvider(preferredEngine);
-      await scoutService.resolveModelId(modelId, preferredEngine);
-    } catch (err: unknown) {
-      if (
-        err instanceof InvalidModelError ||
-        err instanceof UnknownAiProviderError ||
-        (err as { statusCode?: number })?.statusCode === 400
-      ) {
-        return reply.status(400).send({ error: (err as Error).message });
-      }
-      throw err;
-    }
-
     if (!scope || !scope.type) {
       return reply.status(400).send({
         error: 'Request body must contain a valid "scope" object with "type" ("day" | "waypoint")',
@@ -62,6 +48,20 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
       return reply.status(400).send({
         error: 'Request body must contain a valid "tripContext" object with "waypoints" array',
       });
+    }
+
+    try {
+      scoutService.validateProvider(preferredEngine);
+      await scoutService.resolveModelId(modelId, preferredEngine);
+    } catch (err: unknown) {
+      if (
+        err instanceof InvalidModelError ||
+        err instanceof UnknownAiProviderError ||
+        (err as { statusCode?: number })?.statusCode === 400
+      ) {
+        return reply.status(400).send({ error: (err as Error).message });
+      }
+      throw err;
     }
 
     try {
@@ -88,10 +88,54 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
   fastify.post<{ Body: ChatBody }>('/api/ai/scout/chat/stream', async (request, reply) => {
     const { scope, messages, tripContext, sessionId, apiKey, preferredEngine, modelId } = request.body || {};
 
+    if (!scope || !scope.type || !Array.isArray(messages) || messages.length === 0 || !tripContext) {
+      return reply.status(400).send({
+        error: 'Invalid request payload for Scout chat stream',
+      });
+    }
+
+    const abortController = new AbortController();
+    let preStreamClosed = Boolean(
+      reply.raw.destroyed ||
+      request.raw.socket?.destroyed ||
+      !request.raw.socket
+    );
+
+    const onPreStreamClose = () => {
+      preStreamClosed = true;
+      abortController.abort();
+    };
+
+    reply.raw.on('close', onPreStreamClose);
+    const socket = request.raw.socket;
+    socket?.on('close', onPreStreamClose);
+
+    let resolvedModelId: string | undefined;
     try {
+      if (preStreamClosed || abortController.signal.aborted) {
+        return;
+      }
+
       scoutService.validateProvider(preferredEngine);
-      await scoutService.resolveModelId(modelId, preferredEngine);
+      resolvedModelId = await scoutService.resolveModelId(modelId, preferredEngine);
+
+      if (
+        preStreamClosed ||
+        abortController.signal.aborted ||
+        reply.raw.destroyed ||
+        socket?.destroyed
+      ) {
+        return;
+      }
     } catch (err: unknown) {
+      if (
+        preStreamClosed ||
+        abortController.signal.aborted ||
+        reply.raw.destroyed ||
+        socket?.destroyed
+      ) {
+        return;
+      }
       if (
         err instanceof InvalidModelError ||
         err instanceof UnknownAiProviderError ||
@@ -100,12 +144,18 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
         return reply.status(400).send({ error: (err as Error).message });
       }
       throw err;
+    } finally {
+      reply.raw.removeListener('close', onPreStreamClose);
+      socket?.removeListener('close', onPreStreamClose);
     }
 
-    if (!scope || !scope.type || !Array.isArray(messages) || messages.length === 0 || !tripContext) {
-      return reply.status(400).send({
-        error: 'Invalid request payload for Scout chat stream',
-      });
+    if (
+      preStreamClosed ||
+      abortController.signal.aborted ||
+      reply.raw.destroyed ||
+      socket?.destroyed
+    ) {
+      return;
     }
 
     reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -116,7 +166,6 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
     reply.raw.write(': ping\n\n');
 
     let streamClosed = false;
-    const abortController = new AbortController();
 
     const keepAliveTimer = setInterval(() => {
       if (!streamClosed && !reply.raw.writableEnded && !reply.raw.destroyed) {
@@ -139,11 +188,11 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
 
     try {
       await scoutService.chatStream(
-        { scope, messages, tripContext, sessionId, modelId },
+        { scope, messages, tripContext, sessionId, modelId: resolvedModelId },
         (streamEvent) => {
           sendEvent(streamEvent.event, streamEvent.data);
         },
-        { apiKey, preferredEngine, modelId, abortSignal: abortController.signal }
+        { apiKey, preferredEngine, modelId: resolvedModelId, abortSignal: abortController.signal }
       );
     } catch (err: unknown) {
       if (abortController.signal.aborted || streamClosed) {
