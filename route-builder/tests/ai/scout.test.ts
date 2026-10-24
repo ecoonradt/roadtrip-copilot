@@ -9,12 +9,12 @@ import {
   isValidGooglePlaceId,
 } from '../../server/services/scoutService.js';
 import { AiService, type AiHarnessAdapter } from '../../server/services/aiService.js';
-import { AwsBedrockHarnessAdapter, BEDROCK_MODEL_CATALOG, sanitizeBedrockResponse } from '../../server/services/bedrockService.js';
+import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from '../../server/services/bedrockService.js';
 import { MalformedAiResponseError } from '../../server/services/schemaParser.js';
 import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { vi } from 'vitest';
 import { createApp } from '../../server/app.js';
-import type { ToolDeclaration, GenerateStreamWithToolsResult } from '../../server/types/ai.js';
+import type { ToolDeclaration, GenerateStreamWithToolsResult, AiModelOption } from '../../server/types/ai.js';
 import type { ScoutChatRequest, ScoutScope, ScoutTripContext, ScoutStreamEvent } from '../../server/types/scout.js';
 
 describe('Route Scout Service & Prompts', () => {
@@ -570,8 +570,17 @@ I have framed this as a candidate update below to convert your focused Gallup fu
     });
 
     it('chat throws loud error when engine fails rather than returning silent template', async () => {
+      const mockModels: AiModelOption[] = [
+        {
+          id: 'us.moonshotai.kimi-k3',
+          name: 'Moonshot Kimi K3',
+          provider: 'Moonshot AI',
+          description: 'Flagship 2.8T MoE corridor & agentic reasoning engine (1M context)',
+          role: 'both',
+        },
+      ];
       const mockBedrock = new AwsBedrockHarnessAdapter({
-        availableModels: BEDROCK_MODEL_CATALOG,
+        availableModels: mockModels,
         client: {
           send: vi.fn().mockRejectedValue(new Error('Bedrock connection timeout')),
         } as unknown as BedrockRuntimeClient,
