@@ -12,6 +12,7 @@ import {
   sanitizeBedrockResponse,
   formatBedrockToolLabel,
 } from '../../server/services/bedrockService.js';
+import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
   AiService,
   type AiHarnessAdapter,
@@ -171,8 +172,8 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         expect(MAX_TOOL_ITERATIONS).toBe(5);
       });
 
-      it('verifies BEDROCK_MODEL_CATALOG contains 14 models with valid id, name, provider, description, and role', () => {
-        expect(BEDROCK_MODEL_CATALOG).toHaveLength(14);
+      it('verifies BEDROCK_MODEL_CATALOG contains 18 models with valid id, name, provider, description, and role', () => {
+        expect(BEDROCK_MODEL_CATALOG).toHaveLength(18);
 
         for (const model of BEDROCK_MODEL_CATALOG) {
           expect(typeof model.id).toBe('string');
@@ -365,6 +366,18 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
             'Stop at Bell Rock.\n\nI have attached this as a candidate update.'
           )
         ).toBe('Stop at Bell Rock.');
+
+        expect(
+          sanitizeBedrockResponse(
+            'Stop at Bell Rock scenic overlook.</thinking>'
+          )
+        ).toBe('Stop at Bell Rock scenic overlook.');
+
+        expect(
+          sanitizeBedrockResponse(
+            'Stop at Bell Rock scenic overlook.</think>'
+          )
+        ).toBe('Stop at Bell Rock scenic overlook.');
       });
 
       it('formats tool labels correctly for search_web and read_url_content', () => {
@@ -846,7 +859,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const data = res.json();
       expect(data.available).toBe(true);
       expect(data.engine).toBe('bedrock');
-      expect(data.models).toHaveLength(14);
+      expect(data.models).toHaveLength(18);
       expect(data.defaultScoutModelId).toBe('us.moonshotai.kimi-k3');
       expect(data.defaultCopywriterModelId).toBe('us.amazon.nova-2-lite-v1:0');
     });
@@ -1140,6 +1153,93 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       // 4. Must contain done event with engine: "bedrock"
       expect(body).toContain('event: done\n');
       expect(body).toContain('"engine":"bedrock"');
+    });
+
+    it('POST /api/ai/scout/chat/stream emits a single event: error without duplication on failure', async () => {
+      const mockBedrockAdapter: AiHarnessAdapter = {
+        id: 'bedrock',
+        name: 'Amazon Bedrock',
+        isAvailable: vi.fn().mockResolvedValue(true),
+        generate: vi.fn(),
+        validateModelId: (m: string) =>
+          new AwsBedrockHarnessAdapter({ available: true }).validateModelId(m),
+        generateStreamWithTools: vi.fn().mockRejectedValue(new Error('ValidationException: Error 002')),
+      };
+
+      const aiService = new AiService({ adapters: [mockBedrockAdapter] });
+      const scoutService = new ScoutService(aiService);
+      const app = createApp({ logger: false, scoutService });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit Sedona stops' }],
+          tripContext: sampleTripContext,
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.body;
+      const errorMatches = body.match(/event: error/g);
+      expect(errorMatches).toHaveLength(1);
+      expect(body).toContain('ValidationException: Error 002');
+    });
+
+    it('AwsBedrockHarnessAdapter halts immediately and does not retry when abortSignal is aborted', async () => {
+      const abortController = new AbortController();
+      abortController.abort();
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        client: {
+          send: vi.fn(),
+        } as unknown as BedrockRuntimeClient,
+      });
+
+      await expect(
+        adapter.generate('Test prompt', { abortSignal: abortController.signal })
+      ).rejects.toThrow('Request aborted');
+
+      await expect(
+        adapter.generateStreamWithTools(
+          'Test prompt',
+          [],
+          vi.fn(),
+          vi.fn(),
+          { abortSignal: abortController.signal }
+        )
+      ).rejects.toThrow('Request aborted');
+    });
+
+    it('dynamic model availability checking filters catalog using GetFoundationModelAvailabilityCommand', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          const modelId = cmd.input?.modelId;
+          if (modelId === 'us.moonshotai.kimi-k3' || modelId === 'us.amazon.nova-2-lite-v1:0') {
+            return {
+              authorizationStatus: 'AUTHORIZED',
+              agreementAvailability: { status: 'AVAILABLE' },
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            agreementAvailability: { status: 'NOT_AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      const available = await adapter.getAvailableModels();
+      expect(available.map((m) => m.id)).toEqual([
+        'us.moonshotai.kimi-k3',
+        'us.amazon.nova-2-lite-v1:0',
+      ]);
+      expect(adapter.getModelCatalog().models).toHaveLength(2);
     });
   });
 

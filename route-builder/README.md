@@ -55,15 +55,11 @@ In authentication-enabled deployments, slow session checks show connection feedb
 
 The core Route Builder (map planning, OSRM routing, timeline cascade calculations, and device sync) works 100% offline with zero configuration.
 
-To use the **AI Heads-Up Alert Copywriter** or the **Route Scout Conversational Co-Pilot**, configure an AI engine using one of the following methods:
+To use the **AI Heads-Up Alert Copywriter** or the **Route Scout Conversational Co-Pilot**, configure your AWS credentials for **Amazon Bedrock**:
 
 * **Amazon Bedrock (Cloud & AWS Credentials):** Uses Amazon Bedrock's unified Converse / ConverseStream API (`@aws-sdk/client-bedrock-runtime`) with configurable multi-vendor model selection in the Route Scout drawer and Edit Waypoint modal. Defaults to **Moonshot Kimi K3** (`us.moonshotai.kimi-k3`) for Route Scout and **Amazon Nova 2 Lite** (`us.amazon.nova-2-lite-v1:0`) for alert copywriting, with support for Amazon Nova Pro, OpenAI GPT-OSS 120B/20B, DeepSeek V3.2, Mistral Large 3, and Moonshot Kimi K2.5.
-* **Local Zero-Config (`agy`):** If the Antigravity CLI (`agy`) is in your PATH (e.g. `~/.local/bin/agy`), the Route Builder automatically detects and invokes the active Gemini Flash model (e.g. `gemini-3.8-flash-high`) using your active session. **Zero API keys required.** Grounded web searches verify real-world coordinates and operating hours without headless lockups. (Optional model override: `export AGY_MODEL="model-name"`).
-* **Google AI Studio Fallback:** Supply a Google AI Studio developer API key in the UI settings modal or via environment variable:
-  ```bash
-  export GEMINI_API_KEY="your-google-ai-studio-api-key"
-  ```
-  *(Defaults to `gemini-3.8-flash`; override via `export GEMINI_MODEL="model-name"`).*
+* **Authentication:** Authenticate via standard AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION="us-east-2"`) or an AWS profile (`AWS_PROFILE="your-profile"`). In production, execution roles authenticate automatically via IAM.
+
 
 ---
 

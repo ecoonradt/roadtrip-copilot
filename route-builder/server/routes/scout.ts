@@ -136,6 +136,9 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
         { apiKey, preferredEngine, modelId, abortSignal: abortController.signal }
       );
     } catch (err: unknown) {
+      if (abortController.signal.aborted || streamClosed) {
+        return;
+      }
       const message = err instanceof Error ? err.message : 'Route Scout streaming error';
       fastify.log.error({ err }, `Route Scout stream failed: ${message}`);
       sendEvent('error', { error: message });

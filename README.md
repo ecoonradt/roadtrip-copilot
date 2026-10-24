@@ -164,7 +164,8 @@ npm run dev
 
 > [!NOTE]
 > **AI Configuration Note:**
-> Route planning, road routing, timeline calculations, and device sync work 100% offline out-of-the-box. AI features (heads-up alert copywriting and the interactive Route Scout conversational assistant) use Amazon Bedrock (`ConverseCommand` / `ConverseStreamCommand` with configurable model selection), the local Antigravity CLI (`agy`), or a Google AI Studio API key.
+> Route planning, road routing, timeline calculations, and device sync work 100% offline out-of-the-box. AI features (heads-up alert copywriting and the interactive Route Scout conversational assistant) use Amazon Bedrock (`ConverseCommand` / `ConverseStreamCommand` with configurable multi-vendor model selection) via your AWS credentials.
+
 
 For complete documentation on route authoring, AI model configuration, test suites, and phone handoff methods, see [route-builder/README.md](route-builder/README.md).
 

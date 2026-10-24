@@ -10,7 +10,7 @@ const account = process.env.CDK_DEFAULT_ACCOUNT;
 if (!selectedRegion) {
   throw new Error(
     'Missing required AWS region in CDK_DEFAULT_REGION or AWS_REGION. ' +
-      'In the new AWS experience, all regional resources must target the project\'s assigned Region. ' +
+      'All regional resources must target the primary Region (e.g. us-east-2). ' +
       'Please set AWS_REGION or CDK_DEFAULT_REGION before synthesizing or deploying this stack.',
   );
 }

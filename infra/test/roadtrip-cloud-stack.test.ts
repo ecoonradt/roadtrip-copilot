@@ -215,6 +215,8 @@ describe('RoadtripCopilotCloudStack', () => {
             Action: [
               'bedrock:InvokeModel',
               'bedrock:InvokeModelWithResponseStream',
+              'bedrock:GetFoundationModelAvailability',
+              'bedrock:ListInferenceProfiles',
             ],
             Effect: 'Allow',
             Resource: [
@@ -238,6 +240,7 @@ describe('RoadtripCopilotCloudStack', () => {
                   ],
                 ],
               },
+              '*',
             ],
           }),
         ]),

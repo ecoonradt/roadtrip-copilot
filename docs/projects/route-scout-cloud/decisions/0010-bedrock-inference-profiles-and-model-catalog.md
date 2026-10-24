@@ -48,7 +48,16 @@ Chosen Option: **Option B**.
 * `route-builder/server/services/bedrockService.ts`:
   * Default `BEDROCK_SCOUT_MODEL_ID` = `'us.moonshotai.kimi-k3'`; default `BEDROCK_COPYWRITER_MODEL_ID` = `'us.amazon.nova-2-lite-v1:0'`.
   * Normalize known bare inference-profile model IDs to their `us.` prefix and validate requested `modelId` values against the curated catalog + configured environment model IDs (`400 Bad Request` on unknown model IDs).
-  * Set generous `maxTokens` (`4096` for copywriting/text, `8192` for multi-turn tool streaming) so reasoning models never exhaust `maxTokens` during internal chain-of-thought.
-  * Ignore `delta.reasoningContent` for user-visible text chunks, strip `<thinking>...</thinking>` and `<think>...</think>` tags during streaming and in `sanitizeResponse`, and omit `reasoningContent` when appending assistant `toolUse` turns to `messages`.
+  * Set appropriate `maxTokens` (`4096` for copywriting/text and Route Scout multi-turn tool streaming). Amazon Nova models enforce an upper limit of 5,000 output tokens (`maxTokens <= 5000`), so `4096` ensures maximum headroom across both Moonshot and Nova models without tripping validation caps.
+  * Dynamically filter active models via `bedrock:GetFoundationModelAvailability` (`refreshModelAvailability`) with 5-minute in-memory caching, presenting only verified available models in `GET /api/ai/status`.
+  * Ignore `delta.reasoningContent` for user-visible text chunks, strip `<thinking>...</thinking>`, `<think>...</think>`, and lone/orphan closing tags (`</thinking>`, `</think>`) during streaming and in `sanitizeResponse`, and omit `reasoningContent` when appending assistant `toolUse` turns to `messages`.
 * `infra/lib/roadtrip-cloud-stack.ts`:
   * Grant `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on `arn:aws:bedrock:*::foundation-model/*` and `arn:aws:bedrock:*:${this.account}:inference-profile/*`.
+  * Grant `bedrock:GetFoundationModelAvailability` and `bedrock:ListInferenceProfiles` on `*`.
+
+## 6. Addendum (2026-10-23): Account Plan Transition & Error 002 Resolution
+On 2026-10-23, runtime invocation tests against `us-east-2` Bedrock models on the initial Free Tier plan returned `ValidationException: Error 002: Access to Bedrock models is not allowed for this account`. Investigation revealed that the AWS 'New Experience' Free Tier plan placed an automated safety hold on foundation model marketplace agreements.
+
+Transitioning the account plan to `PAID` (with promotional credits expanded to $159.99) and activating Advanced Features lifted the backend marketplace subscription constraints, enabling unconstrained model invocation across the active catalog while preserving the strict $0 idle cost architecture.
+
+

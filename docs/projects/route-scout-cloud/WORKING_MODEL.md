@@ -129,16 +129,19 @@ Before dispatching any `flash` worker, the Orchestrator must verify live externa
    * Validate all caller-supplied identifiers (e.g., `modelId` against the configured catalog/allowlist, returning `400 Bad Request` for unknown values) at the route boundary before invoking cloud SDKs.
 5. **UI Geometry & Browser Test Compatibility:**
    * Check how new UI controls and mount-time `fetch` calls interact with existing UI harnesses (`tests/ui/harness.tsx`) and Playwright browser tests (`tests/browser/appHeader.browser.ts`, which enforces single-row `56px` header height across `1024px–1920px` viewports and fails on any unmocked `/api/*` request).
+6. **Zero Silent Fallbacks or Mock Degradation:**
+   * Never instruct workers to build silent fallbacks to mock templates, client-side mocks, or local CLIs (`agy`). External API failures must fail loudly and transparently with explicit HTTP status codes (`502`, `503`, `400`). Building any fallback mechanism requires prior user consultation and explicit written approval.
 
 #### Gate 2: Orchestrator Adversarial Diff Audit & Multi-Suite Verification (Pre-PR)
-A worker's self-reported success is never sufficient. Before opening or updating a PR, the Orchestrator must personally inspect the full `git diff` against this 7-point **Adversarial Review Checklist**:
+A worker's self-reported success is never sufficient. Before opening or updating a PR, the Orchestrator must personally inspect the full `git diff` against this 8-point **Adversarial Review Checklist**:
 1. **Region & IAM Accuracy:** Zero hardcoded `'us-east-1'` fallbacks in regional SDK clients; CDK IAM policies include all required resource ARNs (e.g., both `foundation-model/*` and `inference-profile/*` for Bedrock).
 2. **Race Condition & Stale-State Audit:** Every async UI handler/effect guards post-`await` state mutations against `signal.aborted` or a revision ref; switching scope/model/trip mid-flight is race-safe.
 3. **Timer, Listener & Stream Leak Audit:** Every `setInterval` (such as SSE keep-alives) is cleared in `finally` and on socket `close`.
 4. **Boundary Validation & Error Status Fidelity:** Invalid parameters return `400` (not `500` or silent fallback); `ApiError` preserves HTTP status codes end-to-end.
-5. **Prompt & Output Hygiene:** Internal model reasoning (`reasoningContent`, `<think>...</think>`, `<thinking>...</thinking>`) and SSE heartbeat comments (`: ping`, `: keep-alive`) never leak into user-visible text or corrupt JSON extraction.
-6. **Adversarial Test Coverage:** Tests explicitly exercise unhappy paths—unknown `modelId` (`400`), stream error/disconnect timer cleanup, tool-loop iteration limit (`MAX_TOOL_ITERATIONS`), stale async response suppression, and adapter fallback order.
-7. **Full Verification Matrix:** Both `./scripts/ci_check.sh` AND `cd route-builder && npm run test:browser` pass with zero warnings or layout regressions.
+5. **Zero Silent Fallbacks or Mock Degradation:** Catch blocks must never swallow errors to silently return canned mock responses or fall back to local-only tooling (`agy`). External service failures must bubble up cleanly with accurate status codes and user-visible error details.
+6. **Prompt & Output Hygiene:** Internal model reasoning (`reasoningContent`, `<think>...</think>`, `<thinking>...</thinking>`) and SSE heartbeat comments (`: ping`, `: keep-alive`) never leak into user-visible text or corrupt JSON extraction.
+7. **Adversarial Test Coverage:** Tests explicitly exercise unhappy paths—unknown `modelId` (`400`), stream error/disconnect timer cleanup, tool-loop iteration limit (`MAX_TOOL_ITERATIONS`), stale async response suppression, and failure propagation without silent mock degradation.
+8. **Full Verification Matrix:** Both `./scripts/ci_check.sh` AND `cd route-builder && npm run test:browser` pass with zero warnings or layout regressions.
 
 ---
 

@@ -49,3 +49,10 @@ Chosen Option: **Option 1 (Scoped IAM CI Deployer in CDK with Optional External 
   * Exports `GitHubActionsUserName` (`roadtrip-copilot-github-actions-deployer`) and `GitHubActionsRoleArn` in `CfnOutput`.
 * **`.github/workflows/deploy.yml`:**
   * Passes `aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}`, `aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}`, `role-to-assume: ${{ vars.AWS_ROLE_ARN }}`, and `aws-region: ${{ vars.AWS_REGION }}` to `aws-actions/configure-aws-credentials@v4`.
+
+## 6. Addendum (2026-10-23): Activation of Advanced Features & Keyless OIDC Roadmap
+On 2026-10-23, the AWS account upgraded to Paid and activated Advanced Features, transitioning to a standard AWS account model with full AWS Organizations capabilities. This permanently lifted the `DenyIAMRestrictedActions` SCP that originally blocked `iam:CreateOpenIDConnectProvider`.
+
+* **Current Status:** Existing scoped IAM machine user credentials (`roadtrip-copilot-github-actions-deployer`) continue to operate without disruption.
+* **Keyless OIDC Migration:** Tracked under GitHub Issue [#7](https://github.com/ecoonradt/roadtrip-copilot/issues/7) as scheduled technical debt cleanup to migrate CI/CD authentication to native GitHub Actions OIDC federation (`token.actions.githubusercontent.com`).
+
