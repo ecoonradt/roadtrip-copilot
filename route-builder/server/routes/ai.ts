@@ -91,6 +91,10 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
     async (request, reply) => {
       const { dayNumber, stops, apiKey, preferredEngine, modelId } = request.body || {};
 
+      if (!Array.isArray(stops) || stops.length === 0) {
+        return reply.status(400).send({ error: 'Request body must contain a non-empty "stops" array' });
+      }
+
       try {
         await aiService.resolveModelId(modelId, 'copywriter', preferredEngine);
       } catch (err: unknown) {
@@ -98,10 +102,6 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
           return reply.status(400).send({ error: (err as Error).message });
         }
         throw err;
-      }
-
-      if (!Array.isArray(stops) || stops.length === 0) {
-        return reply.status(400).send({ error: 'Request body must contain a non-empty "stops" array' });
       }
       try {
         const result = await aiService.generateDayTitle(

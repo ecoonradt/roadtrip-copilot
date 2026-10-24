@@ -329,24 +329,32 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
     const activeTurn = activeTurnRef.current;
     activeTurnRef.current = null;
+    if (!activeTurn) {
+      return;
+    }
 
     setConversations((prev) => {
-      let changed = false;
-      const next: Record<string, ScoutMessage[]> = {};
-      for (const [k, list] of Object.entries(prev)) {
-        const filtered = list.filter((m) => {
-          if (m.role === 'assistant' && !m.content.trim()) {
-            if (activeTurn && m.id === activeTurn.assistantMsgId) return false;
+      const list = prev[activeTurn.convKey];
+      if (!list) return prev;
+
+      const filtered = list.filter((m) => {
+        if (m.id === activeTurn.assistantMsgId) {
+          const hasProse = Boolean(m.content && m.content.trim());
+          const hasSuggestions = Boolean(m.suggestions && m.suggestions.length > 0);
+          if (!hasProse && !hasSuggestions) {
             return false;
           }
-          return true;
-        });
-        if (filtered.length !== list.length) {
-          changed = true;
         }
-        next[k] = filtered;
+        return true;
+      });
+
+      if (filtered.length === list.length) {
+        return prev;
       }
-      return changed ? next : prev;
+      return {
+        ...prev,
+        [activeTurn.convKey]: filtered,
+      };
     });
   }, []);
 
@@ -869,13 +877,18 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Route Scout request failed';
       setErrorMessage(msg);
-      // Remove empty assistant message if it failed before receiving content
+      // Remove empty assistant message if it failed before receiving content or suggestions
       setConversations((prev) => {
         const list = prev[targetConvKey] || [];
         return {
           ...prev,
           [targetConvKey]: list.filter(
-            (m) => !(m.id === assistantMsgId && !m.content.trim())
+            (m) =>
+              !(
+                m.id === assistantMsgId &&
+                !m.content.trim() &&
+                (!m.suggestions || m.suggestions.length === 0)
+              )
           ),
         };
       });

@@ -48,6 +48,7 @@ const CROSS_REGION_PROFILE_PREFIXES = ['global.', 'us-gov.', 'us.', 'eu.', 'apac
  * foundation model ID (`moonshotai.kimi-k3`). Plain foundation model IDs are returned unchanged.
  */
 export function toFoundationModelId(modelId: string): string {
+  if (typeof modelId !== 'string') return '';
   const prefix = CROSS_REGION_PROFILE_PREFIXES.find((candidate) => modelId.startsWith(candidate));
   return prefix ? modelId.slice(prefix.length) : modelId;
 }
@@ -181,21 +182,40 @@ export const BEDROCK_MODEL_CATALOG: AiModelOption[] = [
   },
 ];
 
-export const INFERENCE_PROFILE_ALIASES: Record<string, string> = {
-  'moonshotai.kimi-k3': 'us.moonshotai.kimi-k3',
-  'amazon.nova-2-lite-v1:0': 'us.amazon.nova-2-lite-v1:0',
-  'amazon.nova-pro-v1:0': 'us.amazon.nova-pro-v1:0',
-  'us.amazon.nova-lite-v1:0': 'amazon.nova-lite-v1:0',
-  'openai.gpt-6-luna': 'us.openai.gpt-6-luna',
-  'openai.gpt-6-sol': 'us.openai.gpt-6-sol',
-  'openai.gpt-6.1-sol': 'us.openai.gpt-6.1-sol',
-  'openai.gpt-6-astra': 'us.openai.gpt-6-astra',
-  'anthropic.claude-sonnet-5-5': 'us.anthropic.claude-sonnet-5-5',
-  'anthropic.claude-opus-5-5': 'us.anthropic.claude-opus-5-5',
-  'anthropic.claude-sonnet-4-6': 'us.anthropic.claude-sonnet-4-6',
-  'anthropic.claude-haiku-4-5-20251001-v1:0': 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
-  'xai.grok-4.7': 'us.xai.grok-4.7',
-};
+export const INFERENCE_PROFILE_ALIASES: Readonly<Record<string, string>> = Object.freeze(
+  Object.assign(Object.create(null), {
+    'moonshotai.kimi-k3': 'us.moonshotai.kimi-k3',
+    'amazon.nova-2-lite-v1:0': 'us.amazon.nova-2-lite-v1:0',
+    'amazon.nova-pro-v1:0': 'us.amazon.nova-pro-v1:0',
+    'us.amazon.nova-lite-v1:0': 'amazon.nova-lite-v1:0',
+    'openai.gpt-6-luna': 'us.openai.gpt-6-luna',
+    'openai.gpt-6-sol': 'us.openai.gpt-6-sol',
+    'openai.gpt-6.1-sol': 'us.openai.gpt-6.1-sol',
+    'openai.gpt-6-astra': 'us.openai.gpt-6-astra',
+    'anthropic.claude-sonnet-5-5': 'us.anthropic.claude-sonnet-5-5',
+    'anthropic.claude-opus-5-5': 'us.anthropic.claude-opus-5-5',
+    'anthropic.claude-sonnet-4-6': 'us.anthropic.claude-sonnet-4-6',
+    'anthropic.claude-haiku-4-5-20251001-v1:0': 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    'xai.grok-4.7': 'us.xai.grok-4.7',
+  })
+);
+
+export function getStaticInferenceProfileAlias(modelId: string): string | undefined {
+  if (typeof modelId !== 'string') return undefined;
+  if (Object.prototype.hasOwnProperty.call(INFERENCE_PROFILE_ALIASES, modelId)) {
+    const val = INFERENCE_PROFILE_ALIASES[modelId];
+    return typeof val === 'string' ? val : undefined;
+  }
+  return undefined;
+}
+
+export function getProfilePreferenceScore(profileId: string): number {
+  if (profileId.startsWith('us.')) return 100;
+  if (profileId.startsWith('global.')) return 80;
+  if (profileId.startsWith('eu.')) return 60;
+  if (profileId.startsWith('apac.')) return 40;
+  return 10;
+}
 
 export const ADDITIONAL_ALLOWED_MODEL_IDS = new Set<string>([
   'amazon.nova-lite-v1:0',
@@ -343,12 +363,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       .filter(Boolean);
     const optExclusions = options.excludedModelIds
       ? Array.from(options.excludedModelIds)
+          .map((id) => (typeof id === 'string' ? id.trim() : ''))
+          .filter(Boolean)
       : [];
-    this.excludedModelIds = new Set(
-      [...envExclusions, ...optExclusions].map((id) =>
-        INFERENCE_PROFILE_ALIASES[id.trim()] || id.trim()
-      )
-    );
+    this.excludedModelIds = new Set([...envExclusions, ...optExclusions]);
 
     this.availableModels = options.availableModels ?? null;
     if (options.availableModels) {
@@ -367,14 +385,28 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       options.defaultScoutModelId ||
       process.env.BEDROCK_SCOUT_MODEL_ID ||
       DEFAULT_BEDROCK_SCOUT_MODEL_ID;
-    this.defaultScoutModelId = INFERENCE_PROFILE_ALIASES[rawScout.trim()] || rawScout.trim();
+    const cleanScout = typeof rawScout === 'string' ? rawScout.trim() : '';
+    this.defaultScoutModelId = getStaticInferenceProfileAlias(cleanScout) || cleanScout;
 
     const rawCopywriter =
       options.copywriterModelId ||
       options.defaultCopywriterModelId ||
       process.env.BEDROCK_COPYWRITER_MODEL_ID ||
       DEFAULT_BEDROCK_COPYWRITER_MODEL_ID;
-    this.defaultCopywriterModelId = INFERENCE_PROFILE_ALIASES[rawCopywriter.trim()] || rawCopywriter.trim();
+    const cleanCopywriter = typeof rawCopywriter === 'string' ? rawCopywriter.trim() : '';
+    this.defaultCopywriterModelId = getStaticInferenceProfileAlias(cleanCopywriter) || cleanCopywriter;
+  }
+
+  public isModelExcluded(modelId: string, foundationId?: string): boolean {
+    if (typeof modelId !== 'string' || !modelId) return false;
+    if (this.excludedModelIds.has(modelId)) {
+      return true;
+    }
+    const fId = foundationId || toFoundationModelId(modelId);
+    if (fId && this.excludedModelIds.has(fId)) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -408,7 +440,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         ]);
 
         const candidateMap = new Map<string, AiModelOption>();
-        const dynamicAliases = new Map<string, string>();
+        const profilesByFoundation = new Map<string, Array<{ profileId: string; role: 'scout' | 'copywriter' | 'both' }>>();
 
         // 1. Evaluate active system-defined inference profiles (e.g. us.*)
         for (const [profileId, { profile, foundationId }] of activeProfiles) {
@@ -418,7 +450,9 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
             continue;
           }
 
-          dynamicAliases.set(foundationId, profileId);
+          if (this.isModelExcluded(profileId, foundationId)) {
+            continue;
+          }
 
           const catalogEntry = BEDROCK_MODEL_CATALOG.find((m) => m.id === profileId);
           const provider = fm?.providerName || catalogEntry?.provider || inferProviderFromModelId(profileId);
@@ -431,6 +465,13 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
             description,
             role: compat.role,
           });
+
+          let group = profilesByFoundation.get(foundationId);
+          if (!group) {
+            group = [];
+            profilesByFoundation.set(foundationId, group);
+          }
+          group.push({ profileId, role: compat.role });
         }
 
         // 2. Foundation models with direct on-demand invocation
@@ -439,7 +480,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
           if (!compat.eligible) {
             continue;
           }
-          if (dynamicAliases.has(fmId)) {
+          if (this.isModelExcluded(fmId, fmId)) {
+            continue;
+          }
+          if (profilesByFoundation.has(fmId)) {
             continue;
           }
           if (fm.inferenceTypesSupported && !fm.inferenceTypesSupported.includes('ON_DEMAND')) {
@@ -458,15 +502,28 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
           });
         }
 
+        // Compute dynamic aliases deterministically from eligible, non-excluded profiles
+        const dynamicAliases = new Map<string, string>();
+        for (const [foundationId, profileList] of profilesByFoundation) {
+          if (profileList.length === 0) continue;
+          profileList.sort((a, b) => {
+            const scoreA = getProfilePreferenceScore(a.profileId);
+            const scoreB = getProfilePreferenceScore(b.profileId);
+            if (scoreA !== scoreB) {
+              return scoreB - scoreA;
+            }
+            return a.profileId.localeCompare(b.profileId);
+          });
+          dynamicAliases.set(foundationId, profileList[0].profileId);
+        }
+
         this.discoveredAliases = dynamicAliases;
 
-        // 3. Apply policy exclusions
+        // 3. Apply policy exclusions defense-in-depth
         for (const candidateId of Array.from(candidateMap.keys())) {
-          const fId = toFoundationModelId(candidateId);
-          if (
-            this.excludedModelIds.has(candidateId) ||
-            this.excludedModelIds.has(fId)
-          ) {
+          const activeEntry = activeProfiles.get(candidateId);
+          const fId = activeEntry ? activeEntry.foundationId : toFoundationModelId(candidateId);
+          if (this.isModelExcluded(candidateId, fId)) {
             candidateMap.delete(candidateId);
           }
         }
@@ -602,8 +659,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   }
 
   resolveCanonicalModelId(modelId: string): string {
+    if (typeof modelId !== 'string') return '';
     const trimmed = modelId.trim();
-    return this.discoveredAliases.get(trimmed) || INFERENCE_PROFILE_ALIASES[trimmed] || trimmed;
+    if (!trimmed) return '';
+    return this.discoveredAliases.get(trimmed) || getStaticInferenceProfileAlias(trimmed) || trimmed;
   }
 
   async validateModelId(modelId: string, role?: 'scout' | 'copywriter'): Promise<string> {
@@ -614,19 +673,25 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     if (!trimmed) {
       throw new InvalidModelError('Model ID must not be empty');
     }
+
+    if (this.isModelExcluded(trimmed, toFoundationModelId(trimmed))) {
+      throw new InvalidModelError(`Bedrock model ID is excluded by policy: "${modelId}"`);
+    }
+
+    // Ensure the catalog/alias snapshot is current BEFORE resolving and checking the effective ID (Finding 1)
+    const available = await this.getAvailableModels();
+
     const normalized = this.resolveCanonicalModelId(trimmed);
     const foundationId = toFoundationModelId(normalized);
 
+    // Apply exclusions against the resolved identity, bare ID, and foundation ID (Finding 2)
     if (
-      this.excludedModelIds.has(normalized) ||
-      this.excludedModelIds.has(trimmed) ||
-      this.excludedModelIds.has(foundationId)
+      this.isModelExcluded(normalized, foundationId) ||
+      this.isModelExcluded(trimmed, toFoundationModelId(trimmed))
     ) {
       throw new InvalidModelError(`Bedrock model ID is excluded by policy: "${modelId}"`);
     }
 
-    // Always ensure fresh discovery eligibility (R1)
-    const available = await this.getAvailableModels();
     const candidate = available.find((m) => m.id === normalized);
     if (!candidate) {
       throw new InvalidModelError(`Unsupported or unavailable Bedrock model ID: "${modelId}"`);
