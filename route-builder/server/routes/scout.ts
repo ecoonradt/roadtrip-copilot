@@ -34,9 +34,7 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
 
     try {
       scoutService.validateProvider(preferredEngine);
-      if (modelId !== undefined && modelId !== null) {
-        scoutService.validateModelId(modelId, preferredEngine);
-      }
+      await scoutService.resolveModelId(modelId, preferredEngine);
     } catch (err: unknown) {
       if (
         err instanceof InvalidModelError ||
@@ -92,9 +90,7 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
 
     try {
       scoutService.validateProvider(preferredEngine);
-      if (modelId !== undefined && modelId !== null) {
-        scoutService.validateModelId(modelId, preferredEngine);
-      }
+      await scoutService.resolveModelId(modelId, preferredEngine);
     } catch (err: unknown) {
       if (
         err instanceof InvalidModelError ||

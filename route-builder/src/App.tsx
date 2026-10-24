@@ -37,6 +37,7 @@ import {
   type ParsedTrip,
   type ParsedDay,
 } from './engine/itineraryParser';
+import { createItinerarySessionId } from './utils/itinerarySession.js';
 
 function createPlaceholderTrip(): ParsedTrip {
   return {
@@ -66,8 +67,10 @@ function getInitialRouteInfo(): { file: string | null; day: number } {
   return { file, day: isNaN(day) ? 0 : day };
 }
 
+
 export function App() {
   const [trip, setTrip] = useState<ParsedTrip>(() => createPlaceholderTrip());
+  const [itinerarySessionId, setItinerarySessionId] = useState<string>(() => createItinerarySessionId());
   const [hasActiveTrip, setHasActiveTrip] = useState(false);
   const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [activeDayIndex, setActiveDayIndex] = useState<number>(() => getInitialRouteInfo().day);
@@ -334,6 +337,7 @@ export function App() {
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     saveTargetEpochRef.current += 1;
+    setItinerarySessionId(createItinerarySessionId());
     setTrip(parsed);
     setLastSavedTripJson(JSON.stringify(parsed));
     const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
@@ -358,6 +362,7 @@ export function App() {
     loadTripSeqRef.current += 1;
     tripRevisionRef.current += 1;
     saveTargetEpochRef.current += 1;
+    setItinerarySessionId(createItinerarySessionId());
     hasActiveTripRef.current = false;
     setHasActiveTrip(false);
     setTrip(createPlaceholderTrip());
@@ -933,15 +938,20 @@ export function App() {
   const handleSuggestDayTitle = useCallback(async (index: number) => {
     const day = trip.days[index];
     if (!day || day.waypoints.length === 0) return;
+    const isEligible = aiModels.some(
+      (m) => (m.role === 'copywriter' || m.role === 'both') && m.id === selectedCopywriterModelId
+    );
+    if (!selectedCopywriterModelId || !isEligible) return;
+
     const startedRevision = tripRevisionRef.current;
     const { title } = await generateDayTitle(
       day.dayNumber,
       day.waypoints.map((w) => ({ name: w.name, type: w.type })),
-      { modelId: selectedCopywriterModelId || undefined }
+      { modelId: selectedCopywriterModelId }
     );
     if (startedRevision !== tripRevisionRef.current) return;
     handleRenameDay(index, title);
-  }, [trip.days, handleRenameDay, selectedCopywriterModelId]);
+  }, [trip.days, handleRenameDay, selectedCopywriterModelId, aiModels]);
 
   const handleSetBaseDate = useCallback((newDate: string) => {
     invalidatePendingInitialLoad();
@@ -1170,6 +1180,7 @@ export function App() {
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     saveTargetEpochRef.current += 1;
+    setItinerarySessionId(createItinerarySessionId());
     setTrip(newTrip);
     setLastSavedTripJson(JSON.stringify(newTrip));
     setActiveDayIndex(0);
@@ -1392,7 +1403,13 @@ export function App() {
         onDeleteDay={handleDeleteDay}
         onRenameDay={handleRenameDay}
         onSuggestDayTitle={handleSuggestDayTitle}
-        aiAvailable={aiAvailable}
+        aiAvailable={
+          aiAvailable &&
+          Boolean(
+            selectedCopywriterModelId &&
+            aiModels.some((m) => (m.role === 'copywriter' || m.role === 'both') && m.id === selectedCopywriterModelId)
+          )
+        }
       />
 
       {/* Main App Workspace: Left Waypoints Panel + Middle Map Canvas + Right Route Scout */}
@@ -1450,7 +1467,7 @@ export function App() {
           isOpen={isScoutOpen}
           onClose={() => setIsScoutOpen(false)}
           trip={trip}
-          itineraryId={trip.fileName || trip.tripName || 'default-itinerary'}
+          itineraryId={itinerarySessionId}
           activeDayIndex={activeDayIndex}
           activeDay={currentDay}
           waypoints={waypoints}

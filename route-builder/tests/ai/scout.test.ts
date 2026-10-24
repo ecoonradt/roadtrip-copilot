@@ -9,7 +9,7 @@ import {
   isValidGooglePlaceId,
 } from '../../server/services/scoutService.js';
 import { AiService, type AiHarnessAdapter } from '../../server/services/aiService.js';
-import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from '../../server/services/bedrockService.js';
+import { AwsBedrockHarnessAdapter, BEDROCK_MODEL_CATALOG, sanitizeBedrockResponse } from '../../server/services/bedrockService.js';
 import { MalformedAiResponseError } from '../../server/services/schemaParser.js';
 import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { vi } from 'vitest';
@@ -563,8 +563,15 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(() => parseScoutResponse(invalidJsonOutput)).toThrow(/unparseable suggestions block/);
     });
 
+    it('throws MalformedAiResponseError when json:suggestions block is empty', () => {
+      const emptyJsonOutput = `Here are suggestions:\n\n\`\`\`json:suggestions\n   \n\`\`\``;
+      expect(() => parseScoutResponse(emptyJsonOutput)).toThrow(MalformedAiResponseError);
+      expect(() => parseScoutResponse(emptyJsonOutput)).toThrow(/empty suggestions block/);
+    });
+
     it('chat throws loud error when engine fails rather than returning silent template', async () => {
       const mockBedrock = new AwsBedrockHarnessAdapter({
+        availableModels: BEDROCK_MODEL_CATALOG,
         client: {
           send: vi.fn().mockRejectedValue(new Error('Bedrock connection timeout')),
         } as unknown as BedrockRuntimeClient,

@@ -368,15 +368,21 @@ export function parseScoutResponse(
   const matchedBlockString = closedExplicitBlock ? closedExplicitBlock[0] : (genericMatch ? genericMatch[0] : '');
   const rawJson = closedExplicitBlock ? closedExplicitBlock[1] : (genericMatch ? genericMatch[1] : null);
 
-  if (rawJson) {
-    try {
-      const parsedArray = JSON.parse(rawJson);
-      if (!Array.isArray(parsedArray)) {
-        if (hasSuggestionsTag) {
-          throw new MalformedAiResponseError('AI response suggestions block did not contain a JSON array');
-        }
-      } else {
-        parsedArray.forEach((item, index) => {
+  if (rawJson !== null) {
+    const trimmedJson = rawJson.trim();
+    if (trimmedJson.length === 0) {
+      if (hasSuggestionsTag) {
+        throw new MalformedAiResponseError('AI response contained an empty suggestions block');
+      }
+    } else {
+      try {
+        const parsedArray = JSON.parse(trimmedJson);
+        if (!Array.isArray(parsedArray)) {
+          if (hasSuggestionsTag) {
+            throw new MalformedAiResponseError('AI response suggestions block did not contain a JSON array');
+          }
+        } else {
+          parsedArray.forEach((item, index) => {
           if (
             typeof item === 'object' &&
             item !== null &&
@@ -471,6 +477,7 @@ export function parseScoutResponse(
       // If parsing fails on generic json block, preserve raw output
     }
   }
+}
 
   const separated = separateThoughtAndReply(reply, options?.sanitize);
   return {
@@ -535,8 +542,16 @@ export class ScoutService {
     }
   }
 
-  validateModelId(modelId?: string, preferredEngine?: string): string | undefined {
-    return this.aiService.validateModelId(modelId, preferredEngine);
+  async validateModelId(
+    modelId?: string,
+    preferredEngine?: string,
+    role: 'scout' | 'copywriter' = 'scout'
+  ): Promise<string | undefined> {
+    return this.aiService.validateModelId(modelId, preferredEngine, role);
+  }
+
+  async resolveModelId(modelId?: string, preferredEngine?: string): Promise<string> {
+    return this.aiService.resolveModelId(modelId, 'scout', preferredEngine);
   }
 
   validateProvider(preferredEngine?: string): AiHarnessAdapter {
@@ -550,7 +565,12 @@ export class ScoutService {
     const effectiveModelId = options.modelId !== undefined ? options.modelId : request.modelId;
     const preferredEngine = options.preferredEngine ?? request.preferredEngine;
     const adapter = this.aiService.getAdapterFor(preferredEngine);
-    const validatedModelId = this.aiService.validateModelId(effectiveModelId, preferredEngine);
+
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
+    }
+
+    const activeModelId = await this.resolveModelId(effectiveModelId, preferredEngine);
 
     const sessionId = request.sessionId || `scout_${Date.now()}`;
     const sanitize = (text: string) => adapter.sanitizeResponse(text);
@@ -562,11 +582,6 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    if (!(await adapter.isAvailable(options.apiKey))) {
-      throw new Error(`${adapter.name} is currently unavailable.`);
-    }
-
-    const activeModelId = validatedModelId || adapter.getModelCatalog().defaultScoutModelId;
     if (adapter.generateStreamWithTools) {
       const streamRes = await adapter.generateStreamWithTools(
         domainPrompt,
@@ -620,7 +635,16 @@ export class ScoutService {
     const effectiveModelId = options.modelId !== undefined ? options.modelId : request.modelId;
     const preferredEngine = options.preferredEngine ?? request.preferredEngine;
     const adapter = this.aiService.getAdapterFor(preferredEngine);
-    const validatedModelId = this.aiService.validateModelId(effectiveModelId, preferredEngine);
+
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
+    }
+
+    if (!adapter.generateStreamWithTools) {
+      throw new Error(`${adapter.name} does not support streaming responses`);
+    }
+
+    const activeModelId = await this.resolveModelId(effectiveModelId, preferredEngine);
 
     const sessionId = request.sessionId || `scout_${Date.now()}`;
     const sanitize = (text: string) => adapter.sanitizeResponse(text);
@@ -632,15 +656,6 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    if (!(await adapter.isAvailable(options.apiKey))) {
-      throw new Error(`${adapter.name} is currently unavailable.`);
-    }
-
-    if (!adapter.generateStreamWithTools) {
-      throw new Error(`${adapter.name} does not support streaming responses`);
-    }
-
-    const activeModelId = validatedModelId || adapter.getModelCatalog().defaultScoutModelId;
     const activities: ScoutActivity[] = [];
     const streamRes = await adapter.generateStreamWithTools(
       domainPrompt,

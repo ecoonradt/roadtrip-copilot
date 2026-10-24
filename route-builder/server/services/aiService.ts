@@ -63,7 +63,7 @@ export interface AiHarnessAdapter {
   isAvailable(apiKey?: string): Promise<boolean>;
   generate(prompt: string, options?: GenerateOptions): Promise<string>;
   /** Normalizes a model id and throws when the provider does not offer it. */
-  validateModelId(modelId: string): string;
+  validateModelId(modelId: string, role?: 'scout' | 'copywriter'): Promise<string>;
   /** Account-verified models currently usable through this provider. */
   getAvailableModels(): Promise<AiModelOption[]>;
   /** Configured role defaults (used when the caller does not pin a model). */
@@ -152,11 +152,35 @@ export class AiService {
     return adapter;
   }
 
-  validateModelId(modelId?: string, preferredEngine?: string): string | undefined {
-    if (modelId === undefined || modelId === null) {
+  async validateModelId(
+    modelId?: string,
+    preferredEngine?: string,
+    role?: 'scout' | 'copywriter'
+  ): Promise<string | undefined> {
+    if (modelId === undefined || modelId === null || modelId === '') {
       return undefined;
     }
-    return this.getAdapterFor(preferredEngine).validateModelId(modelId);
+    return this.getAdapterFor(preferredEngine).validateModelId(modelId, role);
+  }
+
+  async resolveModelId(
+    modelId?: string,
+    role: 'scout' | 'copywriter' = 'copywriter',
+    preferredEngine?: string
+  ): Promise<string> {
+    const adapter = this.getAdapterFor(preferredEngine);
+    if (modelId !== undefined) {
+      if (typeof modelId !== 'string' || !modelId.trim()) {
+        throw new InvalidModelError('Model ID must not be empty');
+      }
+      return adapter.validateModelId(modelId, role);
+    }
+    const catalog = adapter.getModelCatalog();
+    const candidateId =
+      role === 'scout'
+        ? catalog.defaultScoutModelId
+        : catalog.defaultCopywriterModelId;
+    return adapter.validateModelId(candidateId, role);
   }
 
   /**
@@ -225,12 +249,12 @@ export class AiService {
     }
 
     const adapter = this.getAdapterFor(options.preferredEngine);
-    const validatedModelId = this.validateModelId(options.modelId, options.preferredEngine);
-    const prompt = buildSingleWaypointPrompt(waypoint);
-
     if (!(await adapter.isAvailable(options.apiKey))) {
       throw new Error(`${adapter.name} is currently unavailable.`);
     }
+
+    const validatedModelId = await this.resolveModelId(options.modelId, 'copywriter', options.preferredEngine);
+    const prompt = buildSingleWaypointPrompt(waypoint);
 
     const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
@@ -261,12 +285,12 @@ export class AiService {
     }
 
     const adapter = this.getAdapterFor(options.preferredEngine);
-    const validatedModelId = this.validateModelId(options.modelId, options.preferredEngine);
-    const prompt = buildDayTitlePrompt(ctx);
-
     if (!(await adapter.isAvailable(options.apiKey))) {
       throw new Error(`${adapter.name} is currently unavailable.`);
     }
+
+    const validatedModelId = await this.resolveModelId(options.modelId, 'copywriter', options.preferredEngine);
+    const prompt = buildDayTitlePrompt(ctx);
 
     const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
@@ -298,12 +322,12 @@ export class AiService {
     }
 
     const adapter = this.getAdapterFor(options.preferredEngine);
-    const validatedModelId = this.validateModelId(options.modelId, options.preferredEngine);
-    const prompt = buildBatchWaypointPrompt(waypoints);
-
     if (!(await adapter.isAvailable(options.apiKey))) {
       throw new Error(`${adapter.name} is currently unavailable.`);
     }
+
+    const validatedModelId = await this.resolveModelId(options.modelId, 'copywriter', options.preferredEngine);
+    const prompt = buildBatchWaypointPrompt(waypoints);
 
     const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,

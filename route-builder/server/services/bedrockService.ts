@@ -185,6 +185,7 @@ export const INFERENCE_PROFILE_ALIASES: Record<string, string> = {
   'moonshotai.kimi-k3': 'us.moonshotai.kimi-k3',
   'amazon.nova-2-lite-v1:0': 'us.amazon.nova-2-lite-v1:0',
   'amazon.nova-pro-v1:0': 'us.amazon.nova-pro-v1:0',
+  'us.amazon.nova-lite-v1:0': 'amazon.nova-lite-v1:0',
   'openai.gpt-6-luna': 'us.openai.gpt-6-luna',
   'openai.gpt-6-sol': 'us.openai.gpt-6-sol',
   'openai.gpt-6.1-sol': 'us.openai.gpt-6.1-sol',
@@ -328,6 +329,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   private availabilityPromise: Promise<AiModelOption[]> | null = null;
   private availabilityCheckedAt = 0;
   private excludedModelIds: Set<string>;
+  private discoveredAliases = new Map<string, string>();
 
   constructor(options: BedrockAdapterOptions = {}) {
     this.options = options;
@@ -349,6 +351,9 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     );
 
     this.availableModels = options.availableModels ?? null;
+    if (options.availableModels) {
+      this.availabilityCheckedAt = Date.now();
+    }
     if (options.controlClient) {
       this.controlClient = options.controlClient;
     } else if (this.hasCustomClient) {
@@ -370,26 +375,26 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       process.env.BEDROCK_COPYWRITER_MODEL_ID ||
       DEFAULT_BEDROCK_COPYWRITER_MODEL_ID;
     this.defaultCopywriterModelId = INFERENCE_PROFILE_ALIASES[rawCopywriter.trim()] || rawCopywriter.trim();
-
-    // Availability is resolved lazily on the first `getAvailableModels()` call (and cached for
-    // `MODEL_AVAILABILITY_TTL_MS`). Constructing an adapter never performs network I/O, so tests
-    // and callers that inject clients cannot accidentally hit Bedrock control-plane APIs.
   }
 
   /**
    * Rebuilds the verified model list from Amazon Bedrock control-plane APIs using AWS-driven discovery.
    *
-   * 1. Enumerates active system-defined and application inference profiles (ListInferenceProfiles).
+   * 1. Enumerates active system-defined inference profiles (ListInferenceProfiles).
    * 2. Enumerates text foundation models (ListFoundationModels with byOutputModality: TEXT).
-   * 3. Evaluates configured defaults alongside discovered models.
-   * 4. Applies policy-driven exclusions (excludedModelIds / BEDROCK_EXCLUDED_MODEL_IDS).
-   * 5. Verifies account availability via GetFoundationModelAvailability.
+   * 3. Evaluates compatibility consistently across profiles and direct models.
+   * 4. Normalizes canonical profile aliases from AWS profile metadata.
+   * 5. Applies policy-driven exclusions (excludedModelIds / BEDROCK_EXCLUDED_MODEL_IDS).
+   * 6. Verifies account availability via GetFoundationModelAvailability.
    */
   async refreshModelAvailability(): Promise<AiModelOption[]> {
     if (this.availabilityPromise) {
       return this.availabilityPromise;
     }
     if (!this.controlClient) {
+      if (this.availableModels !== null) {
+        return this.availableModels;
+      }
       throw new Error(
         'Bedrock control-plane client is unavailable; cannot verify model availability'
       );
@@ -399,93 +404,63 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       try {
         const [activeProfiles, foundationModels] = await Promise.all([
           this.fetchActiveInferenceProfiles(),
-          this.fetchTextFoundationModels(),
+          this.fetchFoundationModels(),
         ]);
 
-        const candidateMap = new Map<string, Partial<AiModelOption>>();
+        const candidateMap = new Map<string, AiModelOption>();
+        const dynamicAliases = new Map<string, string>();
 
-        // 1. Active inference profiles (e.g. us.*)
-        for (const [profileId, profile] of activeProfiles) {
-          const foundationId = toFoundationModelId(profileId);
+        // 1. Evaluate active system-defined inference profiles (e.g. us.*)
+        for (const [profileId, { profile, foundationId }] of activeProfiles) {
           const fm = foundationModels.get(foundationId);
+          const compat = this.checkModelCompatibility(fm);
+          if (!compat.eligible) {
+            continue;
+          }
+
+          dynamicAliases.set(foundationId, profileId);
+
           const catalogEntry = BEDROCK_MODEL_CATALOG.find((m) => m.id === profileId);
           const provider = fm?.providerName || catalogEntry?.provider || inferProviderFromModelId(profileId);
           const name = profile.inferenceProfileName || fm?.modelName || catalogEntry?.name || inferModelNameFromId(profileId);
           const description = profile.description || catalogEntry?.description || `${provider} ${name} inference profile`;
-          const role = fm?.responseStreamingSupported === false ? 'copywriter' : (catalogEntry?.role || 'both');
           candidateMap.set(profileId, {
             id: profileId,
             name,
             provider,
             description,
-            role,
+            role: compat.role,
           });
         }
 
         // 2. Foundation models with direct on-demand invocation
         for (const [fmId, fm] of foundationModels) {
-          const hasCoveringProfile = Array.from(activeProfiles.keys()).some(
-            (pId) => toFoundationModelId(pId) === fmId
-          );
-          if (
-            !hasCoveringProfile &&
-            (!fm.inferenceTypesSupported || fm.inferenceTypesSupported.includes('ON_DEMAND'))
-          ) {
-            const catalogEntry = BEDROCK_MODEL_CATALOG.find((m) => m.id === fmId);
-            const provider = fm.providerName || catalogEntry?.provider || inferProviderFromModelId(fmId);
-            const name = fm.modelName || catalogEntry?.name || inferModelNameFromId(fmId);
-            const description = catalogEntry?.description || `${provider} ${name} foundation model`;
-            const role = fm.responseStreamingSupported === false ? 'copywriter' : (catalogEntry?.role || 'both');
-            candidateMap.set(fmId, {
-              id: fmId,
-              name,
-              provider,
-              description,
-              role,
-            });
+          const compat = this.checkModelCompatibility(fm);
+          if (!compat.eligible) {
+            continue;
           }
+          if (dynamicAliases.has(fmId)) {
+            continue;
+          }
+          if (fm.inferenceTypesSupported && !fm.inferenceTypesSupported.includes('ON_DEMAND')) {
+            continue;
+          }
+          const catalogEntry = BEDROCK_MODEL_CATALOG.find((m) => m.id === fmId);
+          const provider = fm.providerName || catalogEntry?.provider || inferProviderFromModelId(fmId);
+          const name = fm.modelName || catalogEntry?.name || inferModelNameFromId(fmId);
+          const description = catalogEntry?.description || `${provider} ${name} foundation model`;
+          candidateMap.set(fmId, {
+            id: fmId,
+            name,
+            provider,
+            description,
+            role: compat.role,
+          });
         }
 
-        // 3. Configured environment defaults (must never be excluded from discovery)
-        const defaultsToCheck = [
-          this.defaultScoutModelId,
-          this.defaultCopywriterModelId,
-          process.env.BEDROCK_SCOUT_MODEL_ID
-            ? (INFERENCE_PROFILE_ALIASES[process.env.BEDROCK_SCOUT_MODEL_ID.trim()] || process.env.BEDROCK_SCOUT_MODEL_ID.trim())
-            : undefined,
-          process.env.BEDROCK_COPYWRITER_MODEL_ID
-            ? (INFERENCE_PROFILE_ALIASES[process.env.BEDROCK_COPYWRITER_MODEL_ID.trim()] || process.env.BEDROCK_COPYWRITER_MODEL_ID.trim())
-            : undefined,
-        ].filter((id): id is string => Boolean(id));
+        this.discoveredAliases = dynamicAliases;
 
-        for (const id of defaultsToCheck) {
-          if (!candidateMap.has(id)) {
-            const fId = toFoundationModelId(id);
-            const fm = foundationModels.get(fId);
-            const prof = activeProfiles.get(id);
-            const catalogEntry = BEDROCK_MODEL_CATALOG.find((m) => m.id === id);
-            const provider = fm?.providerName || catalogEntry?.provider || inferProviderFromModelId(id);
-            const name = prof?.inferenceProfileName || fm?.modelName || catalogEntry?.name || inferModelNameFromId(id);
-            const description = prof?.description || catalogEntry?.description || `${provider} ${name} model`;
-            const role = fm?.responseStreamingSupported === false ? 'copywriter' : (catalogEntry?.role || 'both');
-            candidateMap.set(id, {
-              id,
-              name,
-              provider,
-              description,
-              role,
-            });
-          }
-        }
-
-        // 4. Reference catalog candidates
-        for (const model of BEDROCK_MODEL_CATALOG) {
-          if (!candidateMap.has(model.id)) {
-            candidateMap.set(model.id, { ...model });
-          }
-        }
-
-        // 5. Apply policy exclusions
+        // 3. Apply policy exclusions
         for (const candidateId of Array.from(candidateMap.keys())) {
           const fId = toFoundationModelId(candidateId);
           if (
@@ -496,55 +471,41 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
           }
         }
 
-        const candidates = Array.from(candidateMap.values()) as AiModelOption[];
-        let firstCheckError: Error | undefined;
+        const candidates = Array.from(candidateMap.values());
         const checks: Array<AiModelOption | null> = [];
-        // Bound control-plane concurrency to avoid throttling when a cold start checks the catalog.
         const batchSize = 5;
         for (let start = 0; start < candidates.length; start += batchSize) {
           const batch = candidates.slice(start, start + batchSize);
           const batchResults = await Promise.all(
             batch.map(async (model) => {
-              const foundationModelId = toFoundationModelId(model.id);
-              const isInferenceProfile = foundationModelId !== model.id;
+              const activeProfileEntry = activeProfiles.get(model.id);
+              const foundationModelId = activeProfileEntry ? activeProfileEntry.foundationId : toFoundationModelId(model.id);
+              const isInferenceProfile = activeProfileEntry !== undefined || foundationModelId !== model.id;
 
               if (isInferenceProfile && !activeProfiles.has(model.id)) {
                 return null;
               }
 
-              try {
-                const res = await this.controlClient!.send(
-                  new GetFoundationModelAvailabilityCommand({ modelId: foundationModelId })
-                );
-                const agreementStatus = res.agreementAvailability?.status;
-                const hasAgreement = agreementStatus === undefined || agreementStatus === 'AVAILABLE';
-                // Cross-region inference profiles route to another Region, so the local Region's
-                // availability flag does not apply to them.
-                const regionAvailable =
-                  isInferenceProfile || res.regionAvailability === 'AVAILABLE';
-                const isAvailable =
-                  res.authorizationStatus === 'AUTHORIZED' &&
-                  res.entitlementAvailability === 'AVAILABLE' &&
-                  hasAgreement &&
-                  regionAvailable;
-                return isAvailable ? model : null;
-              } catch (err: unknown) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                firstCheckError = firstCheckError ?? error;
-                console.warn(`[Bedrock] Availability check failed for ${model.id}: ${error.message}`);
-                return null;
-              }
+              // Operational failures (e.g. AccessDeniedException, network, throttling) propagate loudly (R2)
+              const res = await this.controlClient!.send(
+                new GetFoundationModelAvailabilityCommand({ modelId: foundationModelId })
+              );
+              const agreementStatus = res.agreementAvailability?.status;
+              const hasAgreement = agreementStatus === undefined || agreementStatus === 'AVAILABLE';
+              const regionAvailable =
+                isInferenceProfile || res.regionAvailability === 'AVAILABLE';
+              const isAvailable =
+                res.authorizationStatus === 'AUTHORIZED' &&
+                res.entitlementAvailability === 'AVAILABLE' &&
+                hasAgreement &&
+                regionAvailable;
+              return isAvailable ? model : null;
             })
           );
           checks.push(...batchResults);
         }
+
         const verified = checks.filter((m): m is AiModelOption => m !== null);
-        // A successful response with NOT_AUTHORIZED simply omits that model. If every check threw,
-        // the control plane itself is broken (IAM, credentials, throttling), so surface the error
-        // instead of reporting an empty catalog as a normal account limitation.
-        if (verified.length === 0 && firstCheckError) {
-          throw firstCheckError;
-        }
         this.availableModels = verified;
         this.availabilityCheckedAt = Date.now();
         return this.availableModels;
@@ -556,8 +517,32 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     return this.availabilityPromise;
   }
 
-  private async fetchActiveInferenceProfiles(): Promise<Map<string, InferenceProfileSummary>> {
-    const activeProfiles = new Map<string, InferenceProfileSummary>();
+  private checkModelCompatibility(fm?: FoundationModelSummary): {
+    eligible: boolean;
+    role: 'scout' | 'copywriter' | 'both';
+    reason?: string;
+  } {
+    if (!fm) {
+      return { eligible: false, role: 'copywriter', reason: 'Missing foundation model metadata' };
+    }
+    if (fm.modelLifecycle?.status === 'LEGACY') {
+      return { eligible: false, role: 'copywriter', reason: 'Legacy foundation model status' };
+    }
+    const hasTextIn = fm.inputModalities?.includes('TEXT');
+    const hasTextOut = fm.outputModalities?.includes('TEXT');
+    if (!hasTextIn || !hasTextOut) {
+      return { eligible: false, role: 'copywriter', reason: 'Non-text foundation model modalities' };
+    }
+    // Only assign streaming capability if explicitly supported by AWS metadata (R3)
+    const role: 'scout' | 'copywriter' | 'both' =
+      fm.responseStreamingSupported === true ? 'both' : 'copywriter';
+    return { eligible: true, role };
+  }
+
+  private async fetchActiveInferenceProfiles(): Promise<
+    Map<string, { profile: InferenceProfileSummary; foundationId: string }>
+  > {
+    const activeProfiles = new Map<string, { profile: InferenceProfileSummary; foundationId: string }>();
     let nextToken: string | undefined;
 
     do {
@@ -565,9 +550,27 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         new ListInferenceProfilesCommand({ maxResults: 1000, nextToken })
       );
       for (const profile of res.inferenceProfileSummaries ?? []) {
-        if (profile.status === 'ACTIVE' && profile.inferenceProfileId) {
-          activeProfiles.set(profile.inferenceProfileId, profile);
+        if (profile.status !== 'ACTIVE' || !profile.inferenceProfileId) {
+          continue;
         }
+        // Exclude unsupported application profiles from M3 per R4 recommendation
+        const isSystemDefined =
+          profile.type === 'SYSTEM_DEFINED' ||
+          CROSS_REGION_PROFILE_PREFIXES.some((pfx) => profile.inferenceProfileId!.startsWith(pfx));
+        if (!isSystemDefined) {
+          continue;
+        }
+
+        let foundationId: string | undefined;
+        const firstModelArn = profile.models?.[0]?.modelArn;
+        if (firstModelArn && firstModelArn.includes('foundation-model/')) {
+          foundationId = firstModelArn.split('foundation-model/')[1]?.trim();
+        }
+        if (!foundationId) {
+          foundationId = toFoundationModelId(profile.inferenceProfileId);
+        }
+
+        activeProfiles.set(profile.inferenceProfileId, { profile, foundationId });
       }
       nextToken = res.nextToken;
     } while (nextToken);
@@ -575,25 +578,15 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     return activeProfiles;
   }
 
-  private async fetchTextFoundationModels(): Promise<Map<string, FoundationModelSummary>> {
+  private async fetchFoundationModels(): Promise<Map<string, FoundationModelSummary>> {
     const foundationModels = new Map<string, FoundationModelSummary>();
-    try {
-      const res = await this.controlClient!.send(
-        new ListFoundationModelsCommand({ byOutputModality: 'TEXT' })
-      );
-      for (const model of res.modelSummaries ?? []) {
-        if (!model.modelId) continue;
-        if (model.modelLifecycle?.status === 'LEGACY') continue;
-        const hasTextOut = model.outputModalities?.includes('TEXT');
-        const hasTextIn = model.inputModalities?.includes('TEXT');
-        if (hasTextOut && hasTextIn) {
-          foundationModels.set(model.modelId, model);
-        }
-      }
-    } catch (err: unknown) {
-      console.warn(
-        `[Bedrock] ListFoundationModels check failed: ${err instanceof Error ? err.message : String(err)}`
-      );
+    // Propagate ListFoundationModels failures loudly without swallowing (R2)
+    const res = await this.controlClient!.send(
+      new ListFoundationModelsCommand({ byOutputModality: 'TEXT' })
+    );
+    for (const model of res.modelSummaries ?? []) {
+      if (!model.modelId) continue;
+      foundationModels.set(model.modelId, model);
     }
     return foundationModels;
   }
@@ -608,7 +601,12 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     return this.refreshModelAvailability();
   }
 
-  validateModelId(modelId: string): string {
+  resolveCanonicalModelId(modelId: string): string {
+    const trimmed = modelId.trim();
+    return this.discoveredAliases.get(trimmed) || INFERENCE_PROFILE_ALIASES[trimmed] || trimmed;
+  }
+
+  async validateModelId(modelId: string, role?: 'scout' | 'copywriter'): Promise<string> {
     if (typeof modelId !== 'string') {
       throw new InvalidModelError('Model ID must not be empty');
     }
@@ -616,37 +614,31 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     if (!trimmed) {
       throw new InvalidModelError('Model ID must not be empty');
     }
-    const normalized = INFERENCE_PROFILE_ALIASES[trimmed] || trimmed;
+    const normalized = this.resolveCanonicalModelId(trimmed);
+    const foundationId = toFoundationModelId(normalized);
 
-    if (this.excludedModelIds.has(normalized) || this.excludedModelIds.has(trimmed)) {
+    if (
+      this.excludedModelIds.has(normalized) ||
+      this.excludedModelIds.has(trimmed) ||
+      this.excludedModelIds.has(foundationId)
+    ) {
       throw new InvalidModelError(`Bedrock model ID is excluded by policy: "${modelId}"`);
     }
 
-    if (this.availableModels !== null) {
-      const isAvailable = this.availableModels.some((m) => m.id === normalized);
-      if (!isAvailable) {
-        throw new InvalidModelError(`Unsupported or unavailable Bedrock model ID: "${modelId}"`);
-      }
-      return normalized;
+    // Always ensure fresh discovery eligibility (R1)
+    const available = await this.getAvailableModels();
+    const candidate = available.find((m) => m.id === normalized);
+    if (!candidate) {
+      throw new InvalidModelError(`Unsupported or unavailable Bedrock model ID: "${modelId}"`);
     }
 
-    const isCatalog = BEDROCK_MODEL_CATALOG.some((m) => m.id === normalized);
-    const isAdditional = ADDITIONAL_ALLOWED_MODEL_IDS.has(normalized);
-    const isConfiguredDefault =
-      normalized === this.defaultScoutModelId ||
-      normalized === this.defaultCopywriterModelId;
-    const envScout = process.env.BEDROCK_SCOUT_MODEL_ID
-      ? (INFERENCE_PROFILE_ALIASES[process.env.BEDROCK_SCOUT_MODEL_ID.trim()] || process.env.BEDROCK_SCOUT_MODEL_ID.trim())
-      : undefined;
-    const envCopywriter = process.env.BEDROCK_COPYWRITER_MODEL_ID
-      ? (INFERENCE_PROFILE_ALIASES[process.env.BEDROCK_COPYWRITER_MODEL_ID.trim()] || process.env.BEDROCK_COPYWRITER_MODEL_ID.trim())
-      : undefined;
-    const isEnv = normalized === envScout || normalized === envCopywriter;
-    const isValidFormat = /^[a-z0-9\-.]+\.[a-z0-9\-.:]+$/i.test(normalized);
-
-    if (!isCatalog && !isAdditional && !isConfiguredDefault && !isEnv && !isValidFormat) {
-      throw new InvalidModelError(`Unsupported Bedrock model ID: "${modelId}"`);
+    if (role === 'scout' && candidate.role !== 'scout' && candidate.role !== 'both') {
+      throw new InvalidModelError(`Bedrock model "${modelId}" does not support streaming/scout role`);
     }
+    if (role === 'copywriter' && candidate.role !== 'copywriter' && candidate.role !== 'both') {
+      throw new InvalidModelError(`Bedrock model "${modelId}" does not support copywriter role`);
+    }
+
     return normalized;
   }
 
@@ -655,10 +647,12 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     defaultScoutModelId: string;
     defaultCopywriterModelId: string;
   } {
+    const scoutDefault = this.resolveCanonicalModelId(this.defaultScoutModelId);
+    const copywriterDefault = this.resolveCanonicalModelId(this.defaultCopywriterModelId);
     return {
       models: this.availableModels ?? BEDROCK_MODEL_CATALOG,
-      defaultScoutModelId: this.defaultScoutModelId,
-      defaultCopywriterModelId: this.defaultCopywriterModelId,
+      defaultScoutModelId: scoutDefault,
+      defaultCopywriterModelId: copywriterDefault,
     };
   }
 
@@ -702,19 +696,13 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   }
 
   async generate(prompt: string, options?: GenerateOptions): Promise<string> {
-    let modelId = this.defaultCopywriterModelId;
-    let abortSignal: AbortSignal | undefined = undefined;
-
-    if (options) {
-      if (options.modelId) {
-        modelId = this.validateModelId(options.modelId);
-      }
-      abortSignal = options.abortSignal;
-    }
-
+    const abortSignal = options?.abortSignal;
     if (abortSignal?.aborted) {
       throw new Error('Request aborted');
     }
+
+    const rawModelId = options?.modelId || this.defaultCopywriterModelId;
+    const modelId = await this.validateModelId(rawModelId, 'copywriter');
 
     const command = new ConverseCommand({
       modelId,
@@ -757,9 +745,12 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     onChunk: (event: ScoutStreamEvent) => void,
     options?: GenerateOptions
   ): Promise<GenerateStreamWithToolsResult> {
-    const activeModelId = options?.modelId
-      ? this.validateModelId(options.modelId)
-      : this.defaultScoutModelId;
+    if (options?.abortSignal?.aborted) {
+      throw new Error('Request aborted');
+    }
+
+    const rawModelId = options?.modelId || this.defaultScoutModelId;
+    const activeModelId = await this.validateModelId(rawModelId, 'scout');
 
     const messages: Message[] = [{ role: 'user', content: [{ text: prompt }] }];
     const toolConfig: ToolConfiguration | undefined =
