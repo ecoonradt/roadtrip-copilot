@@ -43,6 +43,18 @@ Fastify implements `AwsBedrockHarnessAdapter` implementing `AiHarnessAdapter` vi
 * Blueprint: [route_scout_cloud_architecture.md](../route_scout_cloud_architecture.md#3-the-single-bill-ai-solution-amazon-bedrock--configurable-model-selection)
 * Adapter & tool services to build: `route-builder/server/services/bedrockService.ts`, `route-builder/server/services/scoutTools.ts`
 * Existing files to extend:
-  * `route-builder/server/services/aiService.ts` & `route-builder/server/types/ai.ts`: Extend `AiHarnessAdapter` and `AiEngineType` with `'bedrock'`, runtime model selection (`GET /api/ai/status`), and optional `generateStreamWithTools()` hook.
-  * `route-builder/server/services/scoutService.ts`: Route streaming tool-call execution through `generateStreamWithTools` alongside the existing `AgyHarnessAdapter` local path.
+  * `route-builder/server/services/aiService.ts` & `route-builder/server/types/ai.ts`: `AiHarnessAdapter` is the provider contract (see §6); `AiEngineId` is a string provider id resolved through the adapter registry, with runtime model selection via `GET /api/ai/status` and the optional `generateStreamWithTools()` hook.
+  * `route-builder/server/services/aiRegistry.ts`: Composition root that registers `AwsBedrockHarnessAdapter` as the primary provider.
+  * `route-builder/server/services/scoutService.ts`: Route streaming tool-call execution through the resolved adapter's `generateStreamWithTools`, with no direct concrete-adapter import and no local CLI path.
 * Environment variables: `BEDROCK_SCOUT_MODEL_ID`, `BEDROCK_COPYWRITER_MODEL_ID`, `AWS_REGION`
+
+---
+
+## 6. Amendment (2026-10-23): No Offline Copy Engine; Provider-Only Adapter Seam
+
+M3 briefly carried a `'template'` engine alongside `'bedrock'` as a residual of the old Bedrock → `agy` → `cloud` → template fallback chain. It has been removed, and this ADR is amended as follows:
+
+* **No offline AI copy engine.** The deterministic template generators and `AiEngineType` are deleted. A provider failure or unusable payload surfaces as an error (HTTP 502 for malformed output, HTTP 400 for an unknown provider/model); the studio never substitutes canned alert or Route Scout copy.
+* **Adapters model providers, not models or CLIs.** `AiHarnessAdapter` is a required-member contract (`id`, `name`, `isAvailable`, `generate`, `validateModelId`, `getAvailableModels`, `getModelCatalog`, `decorateScoutPrompt`, `sanitizeResponse`; only `generateStreamWithTools` is optional). A provider exposes a multi-model catalog at different price points.
+* **`AiService` is provider-agnostic.** `aiRegistry.ts` is the sole composition root binding `AwsBedrockHarnessAdapter` as primary; `preferredEngine`/`engine` use `AiEngineId = string` validated against the registry. Swapping providers is a registry change, not a change to generation, parsing, Scout, or UI code.
+* **Provider-neutral UI.** AI-disabled copy lives in `src/constants/aiCopy.ts` and names no vendor.

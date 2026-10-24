@@ -13,6 +13,7 @@ import {
 import {
   BedrockClient,
   GetFoundationModelAvailabilityCommand,
+  ListInferenceProfilesCommand,
 } from '@aws-sdk/client-bedrock';
 import type { DocumentType } from '@smithy/types';
 import type {
@@ -23,10 +24,30 @@ import type {
 } from '../types/ai.js';
 import type { ScoutStreamEvent } from '../types/scout.js';
 import type { AiHarnessAdapter } from './aiService.js';
+import { InvalidModelError } from './aiService.js';
+import { MalformedAiResponseError } from './schemaParser.js';
+
+export { InvalidModelError };
 
 export const DEFAULT_BEDROCK_SCOUT_MODEL_ID = 'us.moonshotai.kimi-k3';
 export const DEFAULT_BEDROCK_COPYWRITER_MODEL_ID = 'us.amazon.nova-2-lite-v1:0';
 export const MAX_TOOL_ITERATIONS = 5;
+export const MODEL_AVAILABILITY_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Cross-region inference profile prefixes. `GetFoundationModelAvailability` only accepts a
+ * foundation model ID, so the prefix must be removed before querying account availability.
+ */
+const CROSS_REGION_PROFILE_PREFIXES = ['global.', 'us-gov.', 'us.', 'eu.', 'apac.'];
+
+/**
+ * Maps a system-defined inference profile ID (e.g. `us.moonshotai.kimi-k3`) to the underlying
+ * foundation model ID (`moonshotai.kimi-k3`). Plain foundation model IDs are returned unchanged.
+ */
+export function toFoundationModelId(modelId: string): string {
+  const prefix = CROSS_REGION_PROFILE_PREFIXES.find((candidate) => modelId.startsWith(candidate));
+  return prefix ? modelId.slice(prefix.length) : modelId;
+}
 
 export const BEDROCK_MODEL_CATALOG: AiModelOption[] = [
   {
@@ -183,14 +204,6 @@ export const ADDITIONAL_ALLOWED_MODEL_IDS = new Set<string>([
   'us.meta.llama4-maverick-17b-instruct-v1:0',
 ]);
 
-export class InvalidModelError extends Error {
-  readonly statusCode = 400;
-  constructor(message: string) {
-    super(message);
-    this.name = 'InvalidModelError';
-  }
-}
-
 export interface BedrockAdapterOptions {
   client?: BedrockRuntimeClient;
   controlClient?: BedrockClient;
@@ -214,13 +227,13 @@ export function sanitizeBedrockResponse(rawText: string): string {
   // 3. Strip orphaned closing </thinking> or </think> (case-insensitive)
   cleaned = cleaned.replace(/<\/(?:thinking|think)>/gi, '');
 
-  // 3. Strip leading harness noise
+  // 4. Strip leading harness noise
   cleaned = cleaned.replace(
     /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi,
     ''
   );
 
-  // 4. Strip trailing meta-commentary narrating cards or JSON
+  // 5. Strip trailing meta-commentary narrating cards or JSON
   cleaned = cleaned.replace(
     /\n+(?:I have (?:framed|attached|included|provided|appended|added) this as a candidate (?:update|stop|suggestion)[^\n]*|I have (?:appended|included|generated|provided) the (?:JSON|structured|candidate)[^\n]*|See the candidate (?:card|update|suggestion) below[^\n]*)\.?\s*$/gi,
     ''
@@ -269,6 +282,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   private options: BedrockAdapterOptions;
   private availableModels: AiModelOption[] | null = null;
   private availabilityPromise: Promise<AiModelOption[]> | null = null;
+  private availabilityCheckedAt = 0;
 
   constructor(options: BedrockAdapterOptions = {}) {
     this.options = options;
@@ -291,60 +305,116 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     const rawCopywriter = options.copywriterModelId || process.env.BEDROCK_COPYWRITER_MODEL_ID || DEFAULT_BEDROCK_COPYWRITER_MODEL_ID;
     this.defaultCopywriterModelId = INFERENCE_PROFILE_ALIASES[rawCopywriter.trim()] || rawCopywriter.trim();
 
-    if (!this.hasCustomClient && this.controlClient && !this.availableModels) {
-      this.refreshModelAvailability().catch(() => {});
-    }
+    // Availability is resolved lazily on the first `getAvailableModels()` call (and cached for
+    // `MODEL_AVAILABILITY_TTL_MS`). Constructing an adapter never performs network I/O, so tests
+    // and callers that inject clients cannot accidentally hit Bedrock control-plane APIs.
   }
 
+  /**
+   * Rebuilds the verified model list from Amazon Bedrock control-plane APIs.
+   *
+   * Inference profile IDs (`us.*`, `eu.*`, `apac.*`, `global.*`) are validated against
+   * `ListInferenceProfiles` and their underlying foundation model's account availability.
+   * Plain foundation model IDs are validated against `GetFoundationModelAvailability`.
+   * Failures are thrown to the caller instead of silently restoring the unverified catalog.
+   */
   async refreshModelAvailability(): Promise<AiModelOption[]> {
-    if (this.availableModels && !this.controlClient) {
-      return this.availableModels;
-    }
     if (this.availabilityPromise) {
       return this.availabilityPromise;
     }
     if (!this.controlClient) {
-      this.availableModels = BEDROCK_MODEL_CATALOG;
-      return this.availableModels;
+      throw new Error(
+        'Bedrock control-plane client is unavailable; cannot verify model availability'
+      );
     }
 
     this.availabilityPromise = (async () => {
       try {
-        const checks = await Promise.all(
-          BEDROCK_MODEL_CATALOG.map(async (model) => {
-            try {
-              const res = await this.controlClient!.send(
-                new GetFoundationModelAvailabilityCommand({ modelId: model.id })
-              );
-              const isAvailable =
-                res.authorizationStatus === 'AUTHORIZED' &&
-                res.agreementAvailability?.status === 'AVAILABLE';
-              return isAvailable ? model : null;
-            } catch {
-              return null;
-            }
-          })
-        );
-        const verified = checks.filter((m): m is AiModelOption => m !== null);
-        if (verified.length > 0) {
-          this.availableModels = verified;
-        } else {
-          this.availableModels = BEDROCK_MODEL_CATALOG;
+        const activeProfiles = await this.fetchActiveInferenceProfiles();
+        let firstCheckError: Error | undefined;
+        const checks: Array<AiModelOption | null> = [];
+        // Bound control-plane concurrency to avoid throttling when a cold start checks the catalog.
+        const batchSize = 5;
+        for (let start = 0; start < BEDROCK_MODEL_CATALOG.length; start += batchSize) {
+          const batch = BEDROCK_MODEL_CATALOG.slice(start, start + batchSize);
+          const batchResults = await Promise.all(
+            batch.map(async (model) => {
+              const foundationModelId = toFoundationModelId(model.id);
+              const isInferenceProfile = foundationModelId !== model.id;
+
+              if (isInferenceProfile && !activeProfiles.has(model.id)) {
+                return null;
+              }
+
+              try {
+                const res = await this.controlClient!.send(
+                  new GetFoundationModelAvailabilityCommand({ modelId: foundationModelId })
+                );
+                const agreementStatus = res.agreementAvailability?.status;
+                const hasAgreement = agreementStatus === undefined || agreementStatus === 'AVAILABLE';
+                // Cross-region inference profiles route to another Region, so the local Region's
+                // availability flag does not apply to them.
+                const regionAvailable =
+                  isInferenceProfile || res.regionAvailability === 'AVAILABLE';
+                const isAvailable =
+                  res.authorizationStatus === 'AUTHORIZED' &&
+                  res.entitlementAvailability === 'AVAILABLE' &&
+                  hasAgreement &&
+                  regionAvailable;
+                return isAvailable ? model : null;
+              } catch (err: unknown) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                firstCheckError = firstCheckError ?? error;
+                console.warn(`[Bedrock] Availability check failed for ${model.id}: ${error.message}`);
+                return null;
+              }
+            })
+          );
+          checks.push(...batchResults);
         }
-      } catch {
-        this.availableModels = BEDROCK_MODEL_CATALOG;
+        const verified = checks.filter((m): m is AiModelOption => m !== null);
+        // A successful response with NOT_AUTHORIZED simply omits that model. If every check threw,
+        // the control plane itself is broken (IAM, credentials, throttling), so surface the error
+        // instead of reporting an empty catalog as a normal account limitation.
+        if (verified.length === 0 && firstCheckError) {
+          throw firstCheckError;
+        }
+        this.availableModels = verified;
+        this.availabilityCheckedAt = Date.now();
+        return this.availableModels;
       } finally {
         this.availabilityPromise = null;
       }
-      return this.availableModels;
     })();
 
     return this.availabilityPromise;
   }
 
+  private async fetchActiveInferenceProfiles(): Promise<Set<string>> {
+    const activeProfileIds = new Set<string>();
+    let nextToken: string | undefined;
+
+    do {
+      const res = await this.controlClient!.send(
+        new ListInferenceProfilesCommand({ maxResults: 1000, nextToken })
+      );
+      for (const profile of res.inferenceProfileSummaries ?? []) {
+        if (profile.status === 'ACTIVE' && profile.inferenceProfileId) {
+          activeProfileIds.add(profile.inferenceProfileId);
+        }
+      }
+      nextToken = res.nextToken;
+    } while (nextToken);
+
+    return activeProfileIds;
+  }
+
   async getAvailableModels(): Promise<AiModelOption[]> {
-    if (this.availableModels) {
-      return this.availableModels;
+    const isFresh =
+      this.availableModels !== null &&
+      Date.now() - this.availabilityCheckedAt < MODEL_AVAILABILITY_TTL_MS;
+    if (isFresh) {
+      return this.availableModels as AiModelOption[];
     }
     return this.refreshModelAvailability();
   }
@@ -428,15 +498,15 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     return sanitizeBedrockResponse(rawText);
   }
 
-  async generate(prompt: string, apiKeyOrOptions?: string | GenerateOptions): Promise<string> {
+  async generate(prompt: string, options?: GenerateOptions): Promise<string> {
     let modelId = this.defaultCopywriterModelId;
     let abortSignal: AbortSignal | undefined = undefined;
 
-    if (typeof apiKeyOrOptions === 'object' && apiKeyOrOptions !== null) {
-      if (apiKeyOrOptions.modelId) {
-        modelId = this.validateModelId(apiKeyOrOptions.modelId);
+    if (options) {
+      if (options.modelId) {
+        modelId = this.validateModelId(options.modelId);
       }
-      abortSignal = apiKeyOrOptions.abortSignal;
+      abortSignal = options.abortSignal;
     }
 
     if (abortSignal?.aborted) {
@@ -462,7 +532,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     const rawText = textPieces.join('');
     const cleaned = sanitizeBedrockResponse(rawText);
     if (!cleaned) {
-      throw new Error('No text content returned from Bedrock Converse');
+      throw new MalformedAiResponseError('AI provider returned an empty response');
     }
     return cleaned;
   }

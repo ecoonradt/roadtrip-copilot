@@ -1,3 +1,4 @@
+import { AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
@@ -352,7 +353,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               }`}
               title={
                 !aiAvailable
-                  ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                  ? AI_UNAVAILABLE_TOOLTIP
                   : "Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
               }
             >
@@ -378,7 +379,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               }`}
               title={
                 !aiAvailable
-                  ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                  ? AI_UNAVAILABLE_TOOLTIP
                   : 'Generate Co-Pilot audio alerts for all stops'
               }
             >
@@ -972,7 +973,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                               }`}
                               title={
                                 !aiAvailable
-                                  ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                                  ? AI_UNAVAILABLE_TOOLTIP
                                   : 'Ask Route Scout about this stop'
                               }
                             >

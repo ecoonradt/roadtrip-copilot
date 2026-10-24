@@ -3,7 +3,6 @@ import type {
   WaypointContext,
   GenerateAlertResult,
   BatchAlertResult,
-  AiEngineType,
   AiStatusResult,
 } from '../types/ai';
 import type {
@@ -18,7 +17,7 @@ export type { AiStatusResult, AiModelOption } from '../types/ai';
 
 export interface GenerateAlertRequestOptions {
   apiKey?: string;
-  preferredEngine?: AiEngineType | 'auto';
+  preferredEngine?: string;
   modelId?: string;
 }
 
@@ -420,7 +419,7 @@ export async function generateDayTitle(
   dayNumber: number,
   stops: Array<{ name: string; type?: string }>,
   options: GenerateAlertRequestOptions = {}
-): Promise<{ title: string; engine: AiEngineType }> {
+): Promise<{ title: string; engine: string }> {
   const res = await fetch('/api/copilot/day-title', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -436,7 +435,7 @@ export async function generateDayTitle(
     const errorData = (await res.json().catch(() => ({ error: 'Day title generation failed' }))) as { error?: string };
     throw new Error(errorData.error || `Day title generation failed with HTTP ${res.status}`);
   }
-  return (await res.json()) as { title: string; engine: AiEngineType };
+  return (await res.json()) as { title: string; engine: string };
 }
 
 export async function fetchAuthStatus(signal?: AbortSignal): Promise<AuthStatusResponse> {

@@ -19,7 +19,7 @@ OpenCode-only. Antigravity does not read `.opencode/`.
 ## Hard limits
 * No nesting, ever. `general` cannot launch subagents, and the worker profiles here also carry
   `permission: subagent -> deny`, so this is enforced rather than merely discouraged.
-* A worker's success report is not verification. Perform the Gate 2 7-point Adversarial Diff Audit in `WORKING_MODEL.md` and run both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser` yourself.
+* A worker's success report is not verification. Perform the Gate 2 8-point Adversarial Diff Audit in `WORKING_MODEL.md` and run both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser` yourself.
 
 ## Session rituals
 * `/kickoff` — read `DECISIONS.md` and the active Work Package, verify live cloud/SDK assumptions, then state scope.

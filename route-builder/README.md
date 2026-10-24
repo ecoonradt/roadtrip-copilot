@@ -59,6 +59,8 @@ To use the **AI Heads-Up Alert Copywriter** or the **Route Scout Conversational 
 
 * **Amazon Bedrock (Cloud & AWS Credentials):** Uses Amazon Bedrock's unified Converse / ConverseStream API (`@aws-sdk/client-bedrock-runtime`) with configurable multi-vendor model selection in the Route Scout drawer and Edit Waypoint modal. Defaults to **Moonshot Kimi K3** (`us.moonshotai.kimi-k3`) for Route Scout and **Amazon Nova 2 Lite** (`us.amazon.nova-2-lite-v1:0`) for alert copywriting, with support for Amazon Nova Pro, OpenAI GPT-OSS 120B/20B, DeepSeek V3.2, Mistral Large 3, and Moonshot Kimi K2.5.
 * **Authentication:** Authenticate via standard AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION="us-east-2"`) or an AWS profile (`AWS_PROFILE="your-profile"`). In production, execution roles authenticate automatically via IAM.
+* **Provider seam:** The backend talks to an AI *provider* through `AiHarnessAdapter`, registered in `server/services/aiRegistry.ts`. Amazon Bedrock is the provider that ships today; the studio UI names no vendor, so a different multi-model provider can be registered without touching the UI or Route Scout domain logic.
+* **No offline AI copy:** If the provider is unreachable or returns an unusable payload, AI actions are disabled or fail with an error. The studio never substitutes canned alert or Route Scout text. Map planning, timeline cascading, manual alert authoring, and device sync continue to work without AI.
 
 
 ---
@@ -102,7 +104,7 @@ Once your itinerary is ready, transfer it to your Android device using any of th
 
 ## Environment Variables & Configuration
 
-The application works with zero configuration by default in an AWS or Antigravity environment. You can customize behavior using the following environment variables:
+The application works with zero configuration by default in an AWS environment. You can customize behavior using the following environment variables:
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -114,9 +116,7 @@ The application works with zero configuration by default in an AWS or Antigravit
 | `JWT_SECRET` | *(None)* | Server HMAC-SHA256 secret for signing session cookies and Bearer JWTs (or resolved at runtime from SSM SecureString `/roadtrip-copilot/jwt-secret`). |
 | `BEDROCK_SCOUT_MODEL_ID` | `us.moonshotai.kimi-k3` | Default Amazon Bedrock model or inference profile ID for the Route Scout co-pilot. |
 | `BEDROCK_COPYWRITER_MODEL_ID` | `us.amazon.nova-2-lite-v1:0` | Default Amazon Bedrock model or inference profile ID for waypoint alert & day-title copywriting. |
-| `GEMINI_API_KEY` | *(None)* | Optional Google AI Studio developer API key. |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Explicit Gemini model ID for Google AI Studio cloud calls. |
-| `AGY_MODEL` | *(Auto-detected)* | Override the model passed to `agy` (by default auto-resolves the newest Flash model from `agy models`). |
+| `AWS_REGION` | *(SDK credential chain)* | AWS region for the Bedrock runtime and control-plane clients. Deployment uses `us-east-2`. |
 | `NODE_ENV` | `development` | Set to `production` for production builds. |
 
 ---

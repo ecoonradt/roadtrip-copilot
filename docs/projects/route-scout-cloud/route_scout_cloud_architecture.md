@@ -1,6 +1,6 @@
 # Cloud Architecture Blueprint: Next-Generation Route Studio, Auth, Billing & AWS Deployment
 
-This document defines the production cloud architecture for **Roadtrip Co-Pilot**. It evaluates the platform's transition from local CLI tooling (`agy`) to an ultra-fast, multi-provider cloud architecture hosted entirely on **Amazon Web Services (AWS)**—including **Amazon Bedrock** for single-bill AI routing, **Amazon S3** for zero-maintenance persistence, **zero-trust dual-mode authentication** (serving both the Web Studio and the Android app), **total-cost-recovery billing**, and **zero-idle-cost cloud deployment**.
+This document defines the production cloud architecture for **Roadtrip Co-Pilot**. It records the platform's transition from local CLI tooling to an ultra-fast, multi-provider cloud architecture hosted entirely on **Amazon Web Services (AWS)**—including **Amazon Bedrock** for single-bill AI routing, **Amazon S3** for zero-maintenance persistence, **zero-trust dual-mode authentication** (serving both the Web Studio and the Android app), **total-cost-recovery billing**, and **zero-idle-cost cloud deployment**.
 
 ---
 
@@ -53,7 +53,7 @@ flowchart LR
 1. **The In-Car Drive Loop (`app/`) Remains 100% Offline-Capable:**
    * Operates under **Rule 1**: *Never add cloud API dependencies to the Android in-car drive loop*. In national parks, mountain passes, and desert corridors, cellular connectivity drops to zero. Android Auto heads-up cards, audio ducking, GNSS location tracking, schedule telemetry, and Tier 1 on-the-fly route adjustments (deleting or skipping a stop, adjusting dwell time, and regenerating Google Maps links) run entirely on-device without internet access.
 2. **The Cloud Backend (`route-builder/server/`) Moves to AWS & Serves Both Web and Android:**
-   * **Web Client:** Planners design, edit, and audit multi-day road trips via desktop browsers, tablets, or mobile web without installing Node.js, Python, or the Antigravity CLI (`agy`).
+   * **Web Client:** Planners design, edit, and audit multi-day road trips via desktop browsers, tablets, or mobile web without installing Node.js, Python, or any local AI CLI tooling.
    * **Android Client (When Online):** When cellular or Wi-Fi connectivity is available, the Android app acts as a second native client to the same Fastify cloud API—enabling 2-way cloud itinerary sync from S3 and on-the-fly conversational Route Scout queries from the passenger seat, rest stop, or hotel. (See [android_route_editing_and_cloud_client.md](../android-route-client/android_route_editing_and_cloud_client.md) for the dedicated Android client specification.)
 
 ### Advanced Domain Capabilities Acquired by the App
@@ -192,7 +192,7 @@ flowchart TD
 ### Architectural Flexibility: Adapter Seam Preserved
 Because Fastify uses the `AiHarnessAdapter` pattern, the app maintains complete architectural freedom:
 * **Primary Cloud Adapter:** `AwsBedrockHarnessAdapter` (using `@aws-sdk/client-bedrock-runtime` for single-bill AWS deployment).
-* **Local / Alternative Adapters:** `AgyHarnessAdapter` / `GeminiStudioHarnessAdapter` / `OpenAiCompatibleHarnessAdapter` remain intact for local development or offline testing.
+* **Adapter Seam Preserved:** `AiHarnessAdapter` remains the extension point for additional providers. `AwsBedrockHarnessAdapter` is the only adapter that ships today, registered through the `aiRegistry.ts` composition root; the legacy local CLI (`agy`), Gemini Studio adapters, and deterministic template generator were removed in M3 under Rule 12 (no silent fallbacks, [ADR-0001 §6](decisions/0001-amazon-bedrock-single-bill-ai.md#6-amendment-2026-10-23-no-offline-copy-engine-provider-only-adapter-seam)). The Web Studio names no AI vendor in its UI copy.
 
 ---
 
@@ -347,7 +347,7 @@ To prevent local development instances from colliding with or mutating the produ
 | Subsystem | Local Feature Development (`npm run dev`) | Production Cloud Runtime (AWS) | Rationale |
 | :--- | :--- | :--- | :--- |
 | **Itinerary & State Persistence** | **Local Filesystem (`itineraries/*.json`)** | **Amazon S3 (`s3://.../users/{email}/...`)** | Guarantees strict data store isolation so local feature work never reads, overwrites, or races against production S3 data. |
-| **AI Inference (Scout & Copywriter)** | **Amazon Bedrock** (via local AWS CLI / SSO credentials, plus mock/local adapters for tests) | **Amazon Bedrock** (via Lambda IAM Execution Role) | `@aws-sdk/client-bedrock-runtime` transparently uses the ambient credential chain in both environments so AI behavior matches production. |
+| **AI Inference (Scout & Copywriter)** | **Amazon Bedrock** (via the ambient AWS credential chain; injected mock adapters in tests) | **Amazon Bedrock** (via Lambda IAM Execution Role) | `@aws-sdk/client-bedrock-runtime` transparently uses the ambient credential chain in both environments so AI behavior matches production. |
 | **Authentication & Wallet Gate** | **Local Dev Bypass** (`AUTH_ENABLED !== 'true'`, optional toggle when testing auth) | **Google OIDC + `ALLOWED_EMAILS` + S3 Wallet** | Eliminates OAuth redirect and billing friction during routine UI/engine feature development. |
 | **Routing, Cascade & Grounding Tools** | **Local Fastify Process** (OSRM, Nominatim, Places, Web Search) | **Lambda Fastify Container** | Stateless outbound discovery/grounding calls work identically in both environments. |
 
@@ -357,7 +357,7 @@ To prevent local development instances from colliding with or mutating the produ
 
 The cloud architecture on AWS is **10x to 30x faster** than the local CLI harness:
 
-| Performance Dimension | Local CLI Harness (`agy`) | Production Cloud Architecture on AWS | Improvement Factor |
+| Performance Dimension | Local CLI Harness (historical, removed in M3) | Production Cloud Architecture on AWS | Improvement Factor |
 | :--- | :--- | :--- | :--- |
 | **Process Startup & Init** | 1,500ms – 3,000ms (Spawns Node/Python child process, resolves paths) | **0ms** (Warm container instance) | **Instant** |
 | **Time to First Token (TTFT)** | 12,000ms – 25,000ms (CLI agent sets up ReAct environment) | **350ms – 600ms** (Immediate SSE `: ping` + Bedrock stream) | **20x–40x Faster** |

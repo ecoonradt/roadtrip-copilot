@@ -31,7 +31,7 @@ Subproject directory details are maintained locally in their respective handbook
 * **Android SDK:** Installed at `$ANDROID_HOME` or OS default (Linux: `$HOME/Android/Sdk`, macOS: `~/Library/Android/sdk`, Windows: `%LOCALAPPDATA%\Android\Sdk`).
 * **ADB:** Available in system PATH (`adb devices`).
 * **Node.js & npm:** Node v18+ (Node 20+ LTS recommended) and npm v9+.
-* **Antigravity CLI (`agy`):** Optional for zero-config local AI copywriting (`~/.local/bin/agy`).
+* **AWS CLI / Credentials:** Configured AWS credentials with Amazon Bedrock access in `us-east-2` (production uses the Lambda execution role; local development uses the ambient AWS credential chain).
 
 ### Android Native Commands
 * **Build Debug APK:**
@@ -116,7 +116,7 @@ Subproject directory details are maintained locally in their respective handbook
 9. **Maintain Directory Layout:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in [`docs/reference/directory-layout.md`](docs/reference/directory-layout.md) so that developers and agents can quickly navigate the codebase without scanning the entire tree.
 10. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused. Never leak harness-specific tool bans, terminal commands, or background task mechanics into the domain prompt. Implement all harness capabilities, tool allowlists, and response cleaning via the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
 11. **Adhere to the Project & Task Working Models (Section 6):** Frontier models act as orchestrators (authoring plans, conducting research, verifying code) and delegate implementation to cheaper worker subagents per the active harness adapter to optimize developer quota. For major initiatives in `docs/projects/`, never modify code without an active Work Package, and record all technical surprises in ADRs (`decisions/`) and `DECISIONS.md` before continuing.
-12. **No Silent Fallbacks or Mock Degradation:** Silent fallbacks (such as catching a failure in an external service or cloud API like Amazon Bedrock, OSRM, or Google OIDC and silently falling back to mock templates, client-side mocks, or local CLI tools like `agy`) are strictly forbidden. Silent fallbacks mask critical operational failures, break in cloud environments (e.g. `agy` does not exist in containerized Lambda), and circumvent proper error handling. Any failure in external APIs or internal dependencies must fail loudly, transparently, and deterministically with accurate HTTP status codes and clear error messages surfaced to the caller and UI. **Silent fallbacks are almost always wrong. Always check with the user and obtain explicit approval before designing or implementing any fallback mechanism.**
+12. **No Silent Fallbacks or Mock Degradation:** Silent fallbacks (such as catching a failure in an external service or cloud API like Amazon Bedrock, OSRM, or Google OIDC and silently falling back to mock templates, client-side mocks, or local CLI tools) are strictly forbidden. Silent fallbacks mask critical operational failures, break in cloud environments, and circumvent proper error handling. Any failure in external APIs or internal dependencies must fail loudly, transparently, and deterministically with accurate HTTP status codes and clear error messages surfaced to the caller and UI. **Silent fallbacks are almost always wrong. Always check with the user and obtain explicit approval before designing or implementing any fallback mechanism.**
 
 ---
 

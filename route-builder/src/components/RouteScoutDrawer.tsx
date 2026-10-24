@@ -1,3 +1,4 @@
+import { AI_UNAVAILABLE_SCOUT_MESSAGE, AI_UNAVAILABLE_TOOLTIP, AI_UNAVAILABLE_SHORT } from '../constants/aiCopy';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -523,7 +524,6 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
-      engine: 'agy',
     };
 
     // Update conversation with user message and placeholder assistant message
@@ -1051,7 +1051,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             <div>
               <span className="font-semibold text-white">Route Scout Unavailable</span>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                An active AI engine or API key is required to use Route Scout. Timeline cascading, manual waypoint editing, and device sync remain fully functional.
+                {AI_UNAVAILABLE_SCOUT_MESSAGE}
               </p>
             </div>
           </div>
@@ -1099,7 +1099,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       }`}
                       title={
                         !aiAvailable
-                          ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                          ? AI_UNAVAILABLE_TOOLTIP
                           : undefined
                       }
                     >
@@ -1138,7 +1138,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       </span>
                       {msg.engine && (
                         <span className="text-[9px] font-mono px-1.5 py-0.2 rounded border bg-slate-800 text-slate-300 border-slate-700">
-                          {msg.engine === 'template' ? 'Offline' : 'AI Assistant'}
+                          AI Assistant
                         </span>
                       )}
                     </div>
@@ -1436,7 +1436,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               }}
               placeholder={
                 !aiAvailable
-                  ? 'AI features unavailable (no AI engine or API key configured)'
+                  ? AI_UNAVAILABLE_SHORT
                   : scope.type === 'day'
                   ? 'Ask about stops, food, fuel, or pacing along this leg...'
                   : `Ask about accessibility, photo spots, or dwell time for ${
@@ -1461,7 +1461,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             }`}
             title={
               !aiAvailable
-                ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                ? AI_UNAVAILABLE_TOOLTIP
                 : 'Send message to Route Scout'
             }
           >

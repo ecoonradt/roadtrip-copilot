@@ -212,12 +212,7 @@ describe('RoadtripCopilotCloudStack', () => {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: [
-              'bedrock:InvokeModel',
-              'bedrock:InvokeModelWithResponseStream',
-              'bedrock:GetFoundationModelAvailability',
-              'bedrock:ListInferenceProfiles',
-            ],
+            Action: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
             Effect: 'Allow',
             Resource: [
               {
@@ -240,8 +235,24 @@ describe('RoadtripCopilotCloudStack', () => {
                   ],
                 ],
               },
-              '*',
             ],
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('grants FastifyApiFunction read-only Bedrock availability permissions without widening invoke scope', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['bedrock:GetFoundationModelAvailability', 'bedrock:ListInferenceProfiles'],
+            Effect: 'Allow',
+            Resource: '*',
           }),
         ]),
       },

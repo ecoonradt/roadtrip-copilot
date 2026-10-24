@@ -9,8 +9,10 @@ import {
   DEFAULT_BEDROCK_SCOUT_MODEL_ID,
   DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
   MAX_TOOL_ITERATIONS,
+  MODEL_AVAILABILITY_TTL_MS,
   sanitizeBedrockResponse,
   formatBedrockToolLabel,
+  toFoundationModelId,
 } from '../../server/services/bedrockService.js';
 import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
@@ -476,7 +478,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         });
 
         await expect(adapter.generate('Prompt')).rejects.toThrow(
-          'No text content returned from Bedrock Converse'
+          'AI provider returned an empty response'
         );
       });
     });
@@ -841,13 +843,32 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
   });
 
   describe('2. Fastify Endpoints, AiService & ScoutService Integration Tests', () => {
-    it('GET /api/ai/status returns available: true, engine: "bedrock", 14 models, and ADR-0010 defaults', async () => {
+    it('GET /api/ai/status returns available: true, engine: "bedrock", 18 models, and ADR-0010 defaults', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: BEDROCK_MODEL_CATALOG.map((model) => ({
+                inferenceProfileId: model.id,
+                status: 'ACTIVE',
+              })),
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
       const mockBedrockAdapter = new AwsBedrockHarnessAdapter({
         available: true,
+        controlClient: mockControlClient as unknown as BedrockClient,
         client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
       });
 
-      const aiService = new AiService({ bedrockAdapter: mockBedrockAdapter });
+      const aiService = new AiService({ adapters: [mockBedrockAdapter] });
       const app = createApp({ logger: false, aiService });
 
       const res = await app.inject({
@@ -877,6 +898,14 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
         isAvailable: vi.fn().mockResolvedValue(true),
         generate: mockGenerate,
         validateModelId: (m: string) =>
@@ -949,6 +978,14 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
         isAvailable: vi.fn().mockResolvedValue(true),
         generate: mockGenerate,
         validateModelId: (m: string) =>
@@ -1094,6 +1131,14 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
         isAvailable: vi.fn().mockResolvedValue(true),
         generate: vi.fn(),
         validateModelId: (m: string) =>
@@ -1124,6 +1169,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         scoutService,
         keepAliveIntervalMs: 15,
       });
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 
       const res = await app.inject({
         method: 'POST',
@@ -1153,12 +1199,24 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       // 4. Must contain done event with engine: "bedrock"
       expect(body).toContain('event: done\n');
       expect(body).toContain('"engine":"bedrock"');
+
+      // 5. Keep-alive timer is cleared when the stream completes
+      expect(clearIntervalSpy).toHaveBeenCalled();
+      clearIntervalSpy.mockRestore();
     });
 
     it('POST /api/ai/scout/chat/stream emits a single event: error without duplication on failure', async () => {
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
         isAvailable: vi.fn().mockResolvedValue(true),
         generate: vi.fn(),
         validateModelId: (m: string) =>
@@ -1169,22 +1227,117 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const aiService = new AiService({ adapters: [mockBedrockAdapter] });
       const scoutService = new ScoutService(aiService);
       const app = createApp({ logger: false, scoutService });
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/ai/scout/chat/stream',
-        payload: {
-          scope: { type: 'day', dayNumber: 1 },
-          messages: [{ role: 'user', content: 'Audit Sedona stops' }],
-          tripContext: sampleTripContext,
-        },
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/ai/scout/chat/stream',
+          payload: {
+            scope: { type: 'day', dayNumber: 1 },
+            messages: [{ role: 'user', content: 'Audit Sedona stops' }],
+            tripContext: sampleTripContext,
+          },
+        });
+
+        expect(res.statusCode).toBe(200);
+        const body = res.body;
+        const errorMatches = body.match(/event: error/g);
+        expect(errorMatches).toHaveLength(1);
+        expect(body).toContain('ValidationException: Error 002');
+        expect(clearIntervalSpy).toHaveBeenCalled();
+      } finally {
+        clearIntervalSpy.mockRestore();
+      }
+    });
+
+    it('aborts upstream work and clears the keep-alive timer when the client disconnects', async () => {
+      let capturedSignal: AbortSignal | undefined;
+      const mockBedrockAdapter: AiHarnessAdapter = {
+        id: 'bedrock',
+        name: 'Amazon Bedrock',
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
+        isAvailable: vi.fn().mockResolvedValue(true),
+        generate: vi.fn(),
+        validateModelId: (m: string) =>
+          new AwsBedrockHarnessAdapter({ available: true }).validateModelId(m),
+        generateStreamWithTools: vi.fn().mockImplementation(
+          (
+            _prompt: string,
+            _tools: unknown,
+            _dispatcher: unknown,
+            _onChunk: unknown,
+            options?: { abortSignal?: AbortSignal }
+          ) =>
+            new Promise((_resolve, reject) => {
+              capturedSignal = options?.abortSignal;
+              options?.abortSignal?.addEventListener('abort', () =>
+                reject(new Error('Request aborted'))
+              );
+            })
+        ),
+      };
+
+      const aiService = new AiService({ adapters: [mockBedrockAdapter] });
+      const scoutService = new ScoutService(aiService);
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+      const app = createApp({
+        logger: false,
+        aiService,
+        scoutService,
+        keepAliveIntervalMs: 10,
       });
+      await app.listen({ port: 0, host: '127.0.0.1' });
 
-      expect(res.statusCode).toBe(200);
-      const body = res.body;
-      const errorMatches = body.match(/event: error/g);
-      expect(errorMatches).toHaveLength(1);
-      expect(body).toContain('ValidationException: Error 002');
+      try {
+        const address = app.server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        const abortController = new AbortController();
+        const res = await fetch(`http://127.0.0.1:${port}/api/ai/scout/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scope: { type: 'day', dayNumber: 1 },
+            messages: [{ role: 'user', content: 'Audit Sedona stops' }],
+            tripContext: sampleTripContext,
+          }),
+          signal: abortController.signal,
+        });
+        expect(res.status).toBe(200);
+
+        const reader = res.body?.getReader();
+        expect(reader).toBeDefined();
+        await reader!.read(); // consume the immediate `: ping` frame
+
+        for (let i = 0; i < 100 && !capturedSignal; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        abortController.abort();
+        await reader!.read().catch(() => undefined);
+
+        for (let i = 0; i < 100 && !capturedSignal?.aborted; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(capturedSignal?.aborted).toBe(true);
+
+        for (let i = 0; i < 100 && clearIntervalSpy.mock.calls.length === 0; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(clearIntervalSpy).toHaveBeenCalled();
+      } finally {
+        clearIntervalSpy.mockRestore();
+        await app.close();
+      }
     });
 
     it('AwsBedrockHarnessAdapter halts immediately and does not retry when abortSignal is aborted', async () => {
@@ -1212,18 +1365,38 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       ).rejects.toThrow('Request aborted');
     });
 
-    it('dynamic model availability checking filters catalog using GetFoundationModelAvailabilityCommand', async () => {
+    it('maps inference profile IDs to foundation model IDs for availability checks', () => {
+      expect(toFoundationModelId('us.moonshotai.kimi-k3')).toBe('moonshotai.kimi-k3');
+      expect(toFoundationModelId('us.amazon.nova-2-lite-v1:0')).toBe('amazon.nova-2-lite-v1:0');
+      expect(toFoundationModelId('eu.anthropic.claude-sonnet-4-6')).toBe('anthropic.claude-sonnet-4-6');
+      expect(toFoundationModelId('apac.amazon.nova-pro-v1:0')).toBe('amazon.nova-pro-v1:0');
+      expect(toFoundationModelId('deepseek.v3.2')).toBe('deepseek.v3.2');
+    });
+
+    it('filters the catalog using active inference profiles and foundation model availability', async () => {
       const mockControlClient = {
         send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
           const modelId = cmd.input?.modelId;
-          if (modelId === 'us.moonshotai.kimi-k3' || modelId === 'us.amazon.nova-2-lite-v1:0') {
+          if (!modelId) {
+            return {
+              inferenceProfileSummaries: [
+                { inferenceProfileId: 'us.moonshotai.kimi-k3', status: 'ACTIVE' },
+                { inferenceProfileId: 'us.amazon.nova-2-lite-v1:0', status: 'ACTIVE' },
+              ],
+            };
+          }
+          if (modelId === 'moonshotai.kimi-k3' || modelId === 'amazon.nova-2-lite-v1:0') {
             return {
               authorizationStatus: 'AUTHORIZED',
+              entitlementAvailability: 'AVAILABLE',
+              regionAvailability: 'AVAILABLE',
               agreementAvailability: { status: 'AVAILABLE' },
             };
           }
           return {
             authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'NOT_AVAILABLE',
+            regionAvailability: 'AVAILABLE',
             agreementAvailability: { status: 'NOT_AVAILABLE' },
           };
         }),
@@ -1240,6 +1413,192 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         'us.amazon.nova-2-lite-v1:0',
       ]);
       expect(adapter.getModelCatalog().models).toHaveLength(2);
+
+      // Availability is queried with the underlying foundation model ID, never the profile ID.
+      const availabilityCalls = mockControlClient.send.mock.calls
+        .map(([cmd]) => (cmd as { input?: { modelId?: string } }).input?.modelId)
+        .filter((id): id is string => Boolean(id));
+      expect(availabilityCalls).toContain('moonshotai.kimi-k3');
+      expect(availabilityCalls).toContain('amazon.nova-2-lite-v1:0');
+      expect(availabilityCalls).not.toContain('us.moonshotai.kimi-k3');
+      expect(availabilityCalls).not.toContain('us.amazon.nova-2-lite-v1:0');
+    });
+
+    it('omits an inference profile that is missing from ListInferenceProfiles', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          const modelId = cmd.input?.modelId;
+          if (!modelId) {
+            return {
+              inferenceProfileSummaries: [
+                { inferenceProfileId: 'us.moonshotai.kimi-k3', status: 'ACTIVE' },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      const available = await adapter.getAvailableModels();
+      const ids = available.map((m) => m.id);
+      expect(ids).toContain('us.moonshotai.kimi-k3');
+      expect(ids).not.toContain('us.amazon.nova-2-lite-v1:0');
+      expect(ids).not.toContain('us.amazon.nova-pro-v1:0');
+    });
+
+    it('caches verified availability for the documented TTL', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                { inferenceProfileId: 'us.moonshotai.kimi-k3', status: 'ACTIVE' },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      await adapter.getAvailableModels();
+      const callCountAfterFirstCheck = mockControlClient.send.mock.calls.length;
+
+      await adapter.getAvailableModels();
+      expect(mockControlClient.send).toHaveBeenCalledTimes(callCountAfterFirstCheck);
+
+      const realNow = Date.now();
+      vi.spyOn(Date, 'now').mockReturnValue(realNow + MODEL_AVAILABILITY_TTL_MS + 1);
+      try {
+        await adapter.getAvailableModels();
+        expect(mockControlClient.send.mock.calls.length).toBeGreaterThan(callCountAfterFirstCheck);
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+
+    it('does not silently restore the hardcoded catalog when the availability API fails', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockRejectedValue(new Error('AccessDeniedException: not authorized')),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      await expect(adapter.getAvailableModels()).rejects.toThrow('AccessDeniedException');
+      expect(adapter.getModelCatalog().models).toHaveLength(18);
+    });
+
+    it('fails loudly when only a runtime client is injected and availability cannot be verified', async () => {
+      const adapter = new AwsBedrockHarnessAdapter({
+        client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
+      });
+
+      await expect(adapter.getAvailableModels()).rejects.toThrow(
+        'control-plane client is unavailable'
+      );
+
+      const aiService = new AiService({ adapters: [adapter] });
+      const app = createApp({ logger: false, aiService });
+      const res = await app.inject({ method: 'GET', url: '/api/ai/status' });
+      const data = res.json<{ available: boolean; models?: unknown[]; message?: string }>();
+      expect(data.available).toBe(false);
+      expect(data.models).toBeUndefined();
+      expect(data.message).toContain('control-plane client is unavailable');
+    });
+
+    it('surfaces the control-plane error when every availability check throws', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          if (!cmd.input?.modelId) {
+            return { inferenceProfileSummaries: [] };
+          }
+          throw new Error('ThrottlingException: too many requests');
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      try {
+        await expect(adapter.getAvailableModels()).rejects.toThrow('ThrottlingException');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('reports AI unavailable with the availability error instead of advertising unverified models', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockRejectedValue(new Error('AccessDeniedException: not authorized')),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+      const aiService = new AiService({ adapters: [adapter] });
+      const app = createApp({ logger: false, aiService });
+
+      const res = await app.inject({ method: 'GET', url: '/api/ai/status' });
+      expect(res.statusCode).toBe(200);
+      const data = res.json<{ available: boolean; models?: unknown[]; message?: string }>();
+      expect(data.available).toBe(false);
+      expect(data.models).toBeUndefined();
+      expect(data.message).toContain('AccessDeniedException');
+    });
+
+    it('reports AI unavailable when no catalog models are accessible for the account', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          if (!cmd.input?.modelId) {
+            return { inferenceProfileSummaries: [] };
+          }
+          return {
+            authorizationStatus: 'NOT_AUTHORIZED',
+            entitlementAvailability: 'NOT_AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'NOT_AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+      const aiService = new AiService({ adapters: [adapter] });
+      const app = createApp({ logger: false, aiService });
+
+      const res = await app.inject({ method: 'GET', url: '/api/ai/status' });
+      expect(res.statusCode).toBe(200);
+      const data = res.json<{ available: boolean; models?: unknown[]; message?: string }>();
+      expect(data.available).toBe(false);
+      expect(data.models).toBeUndefined();
+      expect(data.message).toContain('No Amazon Bedrock models are accessible');
     });
   });
 

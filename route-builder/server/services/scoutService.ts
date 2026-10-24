@@ -9,12 +9,16 @@ import type {
 import type { ToolDeclaration } from '../types/ai.js';
 import type { GenerationOptions, AiHarnessAdapter } from './aiService.js';
 import { AiService } from './aiService.js';
-import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from './bedrockService.js';
+import { createDefaultAiService } from './aiRegistry.js';
+import { MalformedAiResponseError } from './schemaParser.js';
 
 /**
  * Builds the comprehensive domain prompt for Route Scout (pure road-trip domain, harness-agnostic).
  */
-export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
+export function buildScoutDomainPrompt(
+  request: ScoutChatRequest,
+  sanitize: (value: string) => string = (value) => value
+): string {
   const { scope, messages, tripContext } = request;
 
   let contextBlock = `TRIP LEVEL CONTEXT:\n- Trip Name: ${tripContext.tripName}\n`;
@@ -107,7 +111,7 @@ export function buildScoutDomainPrompt(request: ScoutChatRequest): string {
     conversationHistory = `\nCONVERSATION HISTORY:\n`;
     messages.forEach((msg) => {
       const sender = msg.role === 'user' ? 'User' : 'Route Scout';
-      const cleanContent = msg.role === 'assistant' ? sanitizeScoutReply(msg.content) : msg.content;
+      const cleanContent = msg.role === 'assistant' ? sanitize(msg.content) : msg.content;
       conversationHistory += `${sender}: ${cleanContent}\n\n`;
     });
   }
@@ -239,29 +243,27 @@ Please respond to the latest User request.`;
 
 /**
  * Builds the default Route Scout prompt.
- * Decorates the domain prompt with active adapter directives if available.
+ * Decorates the domain prompt with the active provider's harness directives.
  */
 export function buildScoutPrompt(request: ScoutChatRequest, adapter?: AiHarnessAdapter): string {
-  const domainPrompt = buildScoutDomainPrompt(request);
-  if (adapter && typeof adapter.decorateScoutPrompt === 'function') {
+  const sanitize = adapter ? (value: string) => adapter.sanitizeResponse(value) : undefined;
+  const domainPrompt = buildScoutDomainPrompt(request, sanitize);
+  if (adapter) {
     return adapter.decorateScoutPrompt(domainPrompt);
   }
   return domainPrompt;
 }
 
 /**
- * Cleans internal agent harness noise, background task text, and meta-commentary from Route Scout responses.
- * Delegates to sanitizeBedrockResponse.
- */
-export function sanitizeScoutReply(text: string): string {
-  return sanitizeBedrockResponse(text);
-}
-
-/**
  * Separates intermediate tool-calling or reasoning preambles from the final answer.
+ * `sanitize` is supplied by the active provider adapter; the default is identity so
+ * this parser stays provider-agnostic.
  */
-export function separateThoughtAndReply(text: string): { thought?: string; reply: string } {
-  const sanitized = sanitizeScoutReply(text);
+export function separateThoughtAndReply(
+  text: string,
+  sanitize: (value: string) => string = (value) => value
+): { thought?: string; reply: string } {
+  const sanitized = sanitize(text);
 
   // Matches agent preambles (e.g. "I have launched a query...", "I will analyze...") before markdown heading or main body
   const multiLineRegex = /^((?:I (?:have launched|am checking|am inspecting|will analyze|will inspect|will check|have initiated|need to inspect)[^\n]+(?:\n+|$))+)\n*([\s\S]*)$/i;
@@ -269,7 +271,7 @@ export function separateThoughtAndReply(text: string): { thought?: string; reply
   if (match && match[1] && match[2] && match[2].trim().length > 0) {
     return {
       thought: match[1].trim(),
-      reply: sanitizeScoutReply(match[2]),
+      reply: sanitize(match[2]),
     };
   }
 
@@ -277,7 +279,7 @@ export function separateThoughtAndReply(text: string): { thought?: string; reply
   const singleMatch = sanitized.match(singlePreambleRegex);
   if (singleMatch && singleMatch[0]) {
     const thought = singleMatch[0].trim();
-    const reply = sanitizeScoutReply(sanitized.slice(singleMatch[0].length));
+    const reply = sanitize(sanitized.slice(singleMatch[0].length));
     if (reply.length > 0) {
       return { thought, reply };
     }
@@ -343,10 +345,10 @@ export function validateScoutPlaceId(
  */
 export function parseScoutResponse(
   rawOutput: string,
-  options?: { knownPlaceIds?: Set<string> }
+  options?: { knownPlaceIds?: Set<string>; sanitize?: (value: string) => string }
 ): { reply: string; suggestions: ScoutSuggestion[]; thought?: string } {
-  if (!rawOutput) {
-    return { reply: 'No response received from Route Scout.', suggestions: [] };
+  if (!rawOutput || rawOutput.trim().length === 0) {
+    throw new MalformedAiResponseError('AI provider returned an empty Route Scout response');
   }
 
   let reply = rawOutput.trim();
@@ -452,270 +454,11 @@ export function parseScoutResponse(
     }
   }
 
-  const separated = separateThoughtAndReply(reply);
+  const separated = separateThoughtAndReply(reply, options?.sanitize);
   return {
     reply: separated.reply,
     suggestions,
     thought: separated.thought,
-  };
-}
-
-/**
- * Deterministic offline fallback when AI models are unavailable.
- */
-export function generateTemplateScoutResponse(request: ScoutChatRequest): { reply: string; suggestions: ScoutSuggestion[] } {
-  const { scope, messages, tripContext } = request;
-  const lastMessage = messages[messages.length - 1]?.content.toLowerCase() || '';
-
-  if (scope.type === 'waypoint') {
-    const focused = tripContext.focusedWaypoint || tripContext.waypoints.find((w) => w.id === scope.waypointId);
-    const name = focused?.name || 'this waypoint';
-    const type = focused?.type || 'scenic_pull_off';
-    const dwell = focused?.dwell_minutes ?? 0;
-    const hasAddress = !!(focused?.address || focused?.google_place_id);
-
-    // 1. Google Maps navigation / address audit
-    if (
-      lastMessage.includes('google maps') ||
-      lastMessage.includes('address') ||
-      lastMessage.includes('entrance') ||
-      lastMessage.includes('place id')
-    ) {
-      if (!hasAddress && (type === 'lodging' || type === 'meal' || type === 'fuel' || dwell > 0)) {
-        return {
-          reply: `### Google Maps Navigation Audit: ${name}\n\nThis physical stop (${type}) currently relies solely on raw latitude/longitude coordinates without a verified street address or Google Place ID.\n\nIn consumer Google Maps and Android Auto, raw coordinates for commercial venues or lodging can cause navigation to snap to rear service alleys, loading docks, or neighboring parcels. Providing a verified street address or Google Place ID ensures the in-car navigation routes directly to the main guest entrance or parking facility.`,
-          suggestions: [
-            {
-              id: `scout_fallback_addr_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused?.id || 'wp_focus',
-              name,
-              type,
-              lat: focused?.lat ?? 0,
-              lng: focused?.lng ?? 0,
-              dwell_minutes: dwell,
-              trigger_radius_miles: focused?.trigger_radius_miles ?? 2.0,
-              address: `${name}, Main Entrance`,
-              reason: 'Adds street address hint to ensure accurate Google Maps entrance routing.',
-            },
-          ],
-        };
-      }
-
-      return {
-        reply: `### Google Maps Navigation: ${name}\n\n- **Category:** ${type}\n- **Address / Place:** ${focused?.address || 'Using verified coordinates'}\n- **Route Anchor:** ${focused?.is_route_anchor ? 'Yes (locks highway corridor in Google Maps)' : 'No (commentary or destination stop)'}\n\nThis waypoint is configured for navigation. If adjusting its alignment, ensure the coordinate sits at the road entrance rather than a pedestrian trail or back alley.`,
-        suggestions: [],
-      };
-    }
-
-    // 2. Alert copy / ID synchronization mismatch check
-    const hasFuelInText =
-      (focused?.id.toLowerCase().includes('fuel') ?? false) ||
-      (focused?.notification?.speech?.toLowerCase().includes('fuel') ?? false) ||
-      (focused?.notification?.title?.toLowerCase().includes('fuel') ?? false);
-    const isFuelType = type === 'fuel';
-
-    if (
-      (!isFuelType && hasFuelInText) ||
-      lastMessage.includes('mismatch') ||
-      lastMessage.includes('alert') ||
-      lastMessage.includes('speech') ||
-      lastMessage.includes('sync')
-    ) {
-      if (!isFuelType && hasFuelInText) {
-        const cleanId = (focused?.id || 'waypoint').replace(/_fuel/g, `_${type}`);
-        return {
-          reply: `### Waypoint Copy & ID Synchronization: ${name}\n\nUpon auditing **${name}**, there is a mismatch between the current stop category (**${type}**) and its saved properties:\n\n- **Waypoint ID:** The ID is currently \`${focused?.id}\`, which references a fuel stop.\n- **Heads-Up Alert & Voice:** The alert or speech copy mentions fuel, which conflicts with this **${type}** stop.\n\nI have generated an update card below to synchronize the ID and refresh the heads-up notification and voice copy.`,
-          suggestions: [
-            {
-              id: `scout_fallback_sync_${Date.now()}`,
-              action: 'update_waypoint',
-              targetWaypointId: focused?.id || 'wp_sync',
-              newId: cleanId,
-              name,
-              type,
-              lat: focused?.lat ?? 0,
-              lng: focused?.lng ?? 0,
-              dwell_minutes: dwell,
-              trigger_radius_miles: focused?.trigger_radius_miles ?? 2.0,
-              reason: `Synchronizes waypoint ID and notification copy with the ${type} category.`,
-              notification: {
-                title: name.slice(0, 30),
-                message: `Arriving at ${name}. Recommended ${dwell > 0 ? `${dwell}-minute ` : ''}stop.`,
-                speech: `Arriving at ${name}. ${dwell > 0 ? `Recommended ${dwell} minute stop.` : 'Enjoy the scenery.'}`,
-              },
-            },
-          ],
-        };
-      }
-    }
-
-    // 3. Drive-by dwell time check
-    if (type === 'scenic_drive_by' && dwell > 0) {
-      return {
-        reply: `### In-Transit Drive-By Configuration: ${name}\n\nThis waypoint is marked as a **scenic drive-by**, but has a scheduled dwell time of **${dwell} minutes**.\n\nIn-transit drive-by waypoints exist purely to trigger in-car spoken announcements as you drive past at highway speed. A non-zero dwell time causes the schedule cascade to allocate stopping time on the shoulder. Setting dwell to **0 minutes** keeps your timeline accurate.`,
-        suggestions: [
-          {
-            id: `scout_fallback_dwell_${Date.now()}`,
-            action: 'update_waypoint',
-            targetWaypointId: focused?.id || 'wp_dwell',
-            name,
-            type: 'scenic_drive_by',
-            lat: focused?.lat ?? 0,
-            lng: focused?.lng ?? 0,
-            dwell_minutes: 0,
-            trigger_radius_miles: focused?.trigger_radius_miles ?? 2.0,
-            reason: 'Resets in-transit drive-by dwell to 0 minutes for audio-only highway trigger.',
-          },
-        ],
-      };
-    }
-
-    // 4. Accessibility & parking
-    if (lastMessage.includes('park') || lastMessage.includes('access') || lastMessage.includes('road')) {
-      return {
-        reply: `### Waypoint Accessibility: ${name}\n\n- **Category:** ${type}\n- **Coordinates:** \`${(focused?.lat ?? 0).toFixed(4)}, ${(focused?.lng ?? 0).toFixed(4)}\`\n- **Dwell Time:** ${dwell} minutes\n\nFor highway pull-offs and commercial stops, ensure the pin is located on paved road access or authorized parking aprons rather than on hiking trails or dirt service tracks.`,
-        suggestions: [],
-      };
-    }
-
-    // 5. Default generic waypoint overview
-    return {
-      reply: `### Route Scout Audit: ${name}\n\n- **Category:** ${type}\n- **Target Arrival:** ${focused?.target_time || 'Dynamic schedule'}\n- **Dwell:** ${dwell} minutes\n- **Trigger Distance:** ${focused?.trigger_radius_miles ?? 2.0} miles\n${focused?.address ? `- **Address:** ${focused.address}\n` : ''}${focused?.is_route_anchor ? '- **Route Anchor:** Yes (forces scenic highway routing)\n' : ''}\nThis waypoint is positioned on your active driving leg. To adjust alert parameters, use the **Edit Alert & Voice** button in the timeline.`,
-      suggestions: [],
-    };
-  }
-
-  // Day Scope
-  const origin = tripContext.origin || 'Start';
-  const dest = tripContext.destination || 'End';
-
-  // Audit / coordinate verification / off-highway detours / fuel stop checks / copy sync / google maps
-  if (
-    lastMessage.includes('audit') ||
-    lastMessage.includes('google maps') ||
-    lastMessage.includes('navigation') ||
-    lastMessage.includes('highway') ||
-    lastMessage.includes('detour') ||
-    lastMessage.includes('fuel') ||
-    lastMessage.includes('mismatch') ||
-    lastMessage.includes('alert') ||
-    lastMessage.includes('voice') ||
-    lastMessage.includes('rule') ||
-    lastMessage.includes('fix')
-  ) {
-    const auditSuggestions: ScoutSuggestion[] = [];
-    const auditNotes: string[] = [];
-
-    tripContext.waypoints.forEach((w) => {
-      const dwell = w.dwell_minutes ?? 0;
-
-      // Check 1: Category vs notification copy / ID mismatch
-      const hasFuelText =
-        w.id.toLowerCase().includes('fuel') ||
-        (w.notification?.speech?.toLowerCase().includes('fuel') ?? false) ||
-        (w.notification?.title?.toLowerCase().includes('fuel') ?? false);
-      if (w.type !== 'fuel' && hasFuelText) {
-        const cleanId = w.id.replace(/_fuel/g, `_${w.type}`);
-        auditSuggestions.push({
-          id: `scout_audit_sync_${w.id}_${Date.now()}`,
-          action: 'update_waypoint',
-          targetWaypointId: w.id,
-          newId: cleanId,
-          name: w.name,
-          type: w.type,
-          lat: w.lat,
-          lng: w.lng,
-          dwell_minutes: dwell,
-          trigger_radius_miles: w.trigger_radius_miles,
-          reason: `Synchronizes waypoint ID and replaces obsolete fuel alert copy with text matching ${w.type} category.`,
-          notification: {
-            title: w.name.slice(0, 30),
-            message: `Arriving at ${w.name}. Recommended ${dwell > 0 ? `${dwell}-min ` : ''}stop.`,
-            speech: `Arriving at ${w.name}. ${dwell > 0 ? `Recommended ${dwell} minute break.` : 'Enjoy the view.'}`,
-          },
-        });
-        auditNotes.push(`**${w.name}**: Synchronized waypoint ID and updated notification copy to remove outdated fuel references.`);
-      }
-
-      // Check 2: Scenic drive-by with non-zero dwell
-      if (w.type === 'scenic_drive_by' && dwell > 0) {
-        auditSuggestions.push({
-          id: `scout_audit_dwell_${w.id}_${Date.now()}`,
-          action: 'update_waypoint',
-          targetWaypointId: w.id,
-          name: w.name,
-          type: 'scenic_drive_by',
-          lat: w.lat,
-          lng: w.lng,
-          dwell_minutes: 0,
-          trigger_radius_miles: w.trigger_radius_miles,
-          reason: 'Resets in-transit drive-by dwell time to 0 minutes for audio-only highway announcement.',
-        });
-        auditNotes.push(`**${w.name}**: Reset in-transit scenic drive-by dwell from ${dwell}m to 0m.`);
-      }
-
-      // Check 3: Physical stops missing street address / Place ID
-      if (
-        (w.type === 'lodging' || w.type === 'meal' || (w.type === 'fuel' && !w.address)) &&
-        !w.address &&
-        !w.google_place_id
-      ) {
-        auditSuggestions.push({
-          id: `scout_audit_nav_${w.id}_${Date.now()}`,
-          action: 'update_waypoint',
-          targetWaypointId: w.id,
-          name: w.name,
-          type: w.type,
-          lat: w.lat,
-          lng: w.lng,
-          dwell_minutes: dwell,
-          trigger_radius_miles: w.trigger_radius_miles,
-          address: `${w.name}`,
-          reason: 'Adds entity name as address query to prevent Google Maps from snapping to back alleys or adjacent lots.',
-        });
-        auditNotes.push(`**${w.name}**: Configured entity name address query to ensure precise Google Maps entrance navigation.`);
-      }
-    });
-
-    if (auditSuggestions.length > 0) {
-      return {
-        reply: `### Route Audit & Navigation Report\n\nI have reviewed the waypoints along the **${origin} → ${dest}** corridor. Here are the issues identified and corrected:\n\n${auditNotes.map((n) => `- ${n}`).join('\n')}\n\nYou can click **Preview** on each card below or **Update** to apply the fixes directly to your timeline.`,
-        suggestions: auditSuggestions,
-      };
-    }
-
-    return {
-      reply: `### Route Audit & Navigation Report\n\nI have audited the ${tripContext.waypoints.length} waypoints along the **${origin} → ${dest}** corridor:\n\n- **Google Maps Navigation:** Physical stops have valid target locations, and in-transit triggers are configured for highway travel.\n- **Highway Alignment:** All scenic drive-by waypoints have 0m dwell for seamless audio announcements without off-highway detours.\n- **Notification Synchronization:** Waypoint IDs, heads-up cards, and voice audio match their assigned categories.\n\nYour route is clean and ready for navigation.`,
-      suggestions: [],
-    };
-  }
-
-  if (lastMessage.includes('lunch') || lastMessage.includes('food') || lastMessage.includes('eat') || lastMessage.includes('dine')) {
-    const midwayLat = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lat + tripContext.waypoints[tripContext.waypoints.length - 1].lat) / 2 : 35.0;
-    const midwayLng = tripContext.waypoints.length > 0 ? (tripContext.waypoints[0].lng + tripContext.waypoints[tripContext.waypoints.length - 1].lng) / 2 : -110.0;
-
-    return {
-      reply: `### Mid-Route Dining Recommendations\n\nAlong the drive from **${origin}** to **${dest}**, timing lunch approximately halfway into your drive keeps driver fatigue low. Consider established highway trading posts or downtown plazas for reliable dining and clean restrooms.`,
-      suggestions: [
-        {
-          id: `scout_fallback_lunch_${Date.now()}`,
-          action: 'add_waypoint',
-          name: 'Recommended Corridor Lunch Stop',
-          type: 'meal',
-          lat: Number(midwayLat.toFixed(4)),
-          lng: Number(midwayLng.toFixed(4)),
-          dwell_minutes: 45,
-          trigger_radius_miles: 2.0,
-          reason: 'Midway meal break recommendation along the planned travel route.',
-        },
-      ],
-    };
-  }
-
-  return {
-    reply: `### Day ${scope.dayNumber ?? 1} Route Scout Overview\n\n- **Leg:** ${origin} → ${dest}\n- **Current stops:** ${tripContext.waypoints.length}\n- **Departure:** ${tripContext.departureTime || '09:00 AM'}\n\nYou can ask Route Scout to investigate specific viewpoints, find fuel and meal stops, or inspect any waypoint's road access.`,
-    suggestions: [],
   };
 }
 
@@ -764,18 +507,18 @@ export class ScoutService {
       this.tools = [];
       this.toolDispatcher = async () => ({});
     } else if (aiServiceOrOptions && typeof aiServiceOrOptions === 'object') {
-      this.aiService = aiServiceOrOptions.aiService || new AiService();
+      this.aiService = aiServiceOrOptions.aiService || createDefaultAiService();
       this.tools = aiServiceOrOptions.tools || [];
       this.toolDispatcher = aiServiceOrOptions.toolDispatcher || (async () => ({}));
     } else {
-      this.aiService = new AiService();
+      this.aiService = createDefaultAiService();
       this.tools = [];
       this.toolDispatcher = async () => ({});
     }
   }
 
-  validateModelId(modelId?: string): string | undefined {
-    return this.aiService.validateModelId(modelId);
+  validateModelId(modelId?: string, preferredEngine?: string): string | undefined {
+    return this.aiService.validateModelId(modelId, preferredEngine);
   }
 
   /**
@@ -783,17 +526,13 @@ export class ScoutService {
    */
   async chat(request: ScoutChatRequest, options: GenerationOptions = {}): Promise<ScoutChatResponse> {
     const effectiveModelId = options.modelId !== undefined ? options.modelId : request.modelId;
-    const validatedModelId = this.aiService.validateModelId(effectiveModelId);
+    const preferredEngine = options.preferredEngine ?? request.preferredEngine;
+    const adapter = this.aiService.getAdapterFor(preferredEngine);
+    const validatedModelId = this.aiService.validateModelId(effectiveModelId, preferredEngine);
 
     const sessionId = request.sessionId || `scout_${Date.now()}`;
-    const preferredEngine = options.preferredEngine || 'auto';
-
-    if (preferredEngine === 'template') {
-      const { reply, suggestions } = generateTemplateScoutResponse(request);
-      return { reply, suggestions, sessionId, engine: 'template' };
-    }
-
-    const domainPrompt = buildScoutDomainPrompt(request);
+    const sanitize = (text: string) => adapter.sanitizeResponse(text);
+    const domainPrompt = adapter.decorateScoutPrompt(buildScoutDomainPrompt(request, sanitize));
 
     const knownPlaceIds = new Set<string>(
       (request.tripContext?.waypoints || [])
@@ -801,55 +540,51 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    // Bedrock adapter is the sole AI engine
-    const bedrock = this.aiService.getAdapter('bedrock') as AwsBedrockHarnessAdapter | undefined;
-    if (!bedrock) {
-      throw new Error('Amazon Bedrock adapter is not registered');
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
     }
 
-    const isAvail = await bedrock.isAvailable();
-    if (!isAvail) {
-      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
-    }
-
-    const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
-    if (typeof bedrock.generateStreamWithTools === 'function') {
-      const streamRes = await bedrock.generateStreamWithTools(
+    const activeModelId = validatedModelId || adapter.getModelCatalog().defaultScoutModelId;
+    if (adapter.generateStreamWithTools) {
+      const streamRes = await adapter.generateStreamWithTools(
         domainPrompt,
         this.tools,
         this.toolDispatcher,
         () => {},
         { modelId: validatedModelId, abortSignal: options.abortSignal }
       );
-      const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
-      const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+      const { reply, suggestions, thought } = parseScoutResponse(
+        adapter.sanitizeResponse(streamRes.text),
+        { knownPlaceIds, sanitize }
+      );
       return {
         reply,
         suggestions,
         sessionId,
-        engine: 'bedrock',
+        engine: adapter.id,
         thought,
         modelId: activeModelId,
         inputTokens: streamRes.inputTokens,
         outputTokens: streamRes.outputTokens,
       };
-    } else {
-      const prompt = bedrock.decorateScoutPrompt ? bedrock.decorateScoutPrompt(domainPrompt) : domainPrompt;
-      const rawOutput = await bedrock.generate(prompt, {
-        modelId: validatedModelId,
-        abortSignal: options.abortSignal,
-      });
-      const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(rawOutput) : rawOutput;
-      const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-      return {
-        reply,
-        suggestions,
-        sessionId,
-        engine: 'bedrock',
-        thought,
-        modelId: activeModelId,
-      };
     }
+
+    const rawOutput = await adapter.generate(domainPrompt, {
+      modelId: validatedModelId,
+      abortSignal: options.abortSignal,
+    });
+    const { reply, suggestions, thought } = parseScoutResponse(
+      adapter.sanitizeResponse(rawOutput),
+      { knownPlaceIds, sanitize }
+    );
+    return {
+      reply,
+      suggestions,
+      sessionId,
+      engine: adapter.id,
+      thought,
+      modelId: activeModelId,
+    };
   }
 
   /**
@@ -861,23 +596,13 @@ export class ScoutService {
     options: GenerationOptions = {}
   ): Promise<ScoutChatResponse> {
     const effectiveModelId = options.modelId !== undefined ? options.modelId : request.modelId;
-    const validatedModelId = this.aiService.validateModelId(effectiveModelId);
+    const preferredEngine = options.preferredEngine ?? request.preferredEngine;
+    const adapter = this.aiService.getAdapterFor(preferredEngine);
+    const validatedModelId = this.aiService.validateModelId(effectiveModelId, preferredEngine);
 
     const sessionId = request.sessionId || `scout_${Date.now()}`;
-    const preferredEngine = options.preferredEngine || 'auto';
-
-    if (preferredEngine === 'template') {
-      const { reply, suggestions } = generateTemplateScoutResponse(request);
-      onEvent({ event: 'delta', data: { text: reply } });
-      if (suggestions.length > 0) {
-        onEvent({ event: 'suggestions', data: { suggestions } });
-      }
-      const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'template' };
-      onEvent({ event: 'done', data: doneResponse });
-      return doneResponse;
-    }
-
-    const domainPrompt = buildScoutDomainPrompt(request);
+    const sanitize = (text: string) => adapter.sanitizeResponse(text);
+    const domainPrompt = adapter.decorateScoutPrompt(buildScoutDomainPrompt(request, sanitize));
 
     const knownPlaceIds = new Set<string>(
       (request.tripContext?.waypoints || [])
@@ -885,20 +610,17 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    // Bedrock adapter is the sole AI engine
-    const bedrock = this.aiService.getAdapter('bedrock') as AwsBedrockHarnessAdapter | undefined;
-    if (!bedrock) {
-      throw new Error('Amazon Bedrock adapter is not registered');
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
     }
 
-    const isAvail = await bedrock.isAvailable();
-    if (!isAvail) {
-      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
+    if (!adapter.generateStreamWithTools) {
+      throw new Error(`${adapter.name} does not support streaming responses`);
     }
 
-    const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
+    const activeModelId = validatedModelId || adapter.getModelCatalog().defaultScoutModelId;
     const activities: ScoutActivity[] = [];
-    const streamRes = await bedrock.generateStreamWithTools(
+    const streamRes = await adapter.generateStreamWithTools(
       domainPrompt,
       this.tools,
       this.toolDispatcher,
@@ -923,8 +645,10 @@ export class ScoutService {
       throw new Error('Request aborted');
     }
 
-    const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
-    const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+    const { reply, suggestions, thought } = parseScoutResponse(
+      adapter.sanitizeResponse(streamRes.text),
+      { knownPlaceIds, sanitize }
+    );
     if (suggestions.length > 0) {
       onEvent({ event: 'suggestions', data: { suggestions } });
     }
@@ -932,7 +656,7 @@ export class ScoutService {
       reply,
       suggestions,
       sessionId,
-      engine: 'bedrock',
+      engine: adapter.id,
       thought,
       activities: activities.length > 0 ? activities : undefined,
       modelId: activeModelId,

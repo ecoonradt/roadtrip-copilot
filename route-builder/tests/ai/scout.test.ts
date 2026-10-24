@@ -3,19 +3,18 @@ import {
   buildScoutDomainPrompt,
   buildScoutPrompt,
   parseScoutResponse,
-  generateTemplateScoutResponse,
   getQuickPrompts,
   ScoutService,
-  sanitizeScoutReply,
   validateScoutPlaceId,
   isValidGooglePlaceId,
 } from '../../server/services/scoutService.js';
-import { AiService } from '../../server/services/aiService.js';
-import { AwsBedrockHarnessAdapter } from '../../server/services/bedrockService.js';
+import { AiService, type AiHarnessAdapter } from '../../server/services/aiService.js';
+import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from '../../server/services/bedrockService.js';
 import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { vi } from 'vitest';
 import { createApp } from '../../server/app.js';
-import type { ScoutChatRequest, ScoutScope, ScoutTripContext } from '../../server/types/scout.js';
+import type { ToolDeclaration, GenerateStreamWithToolsResult } from '../../server/types/ai.js';
+import type { ScoutChatRequest, ScoutScope, ScoutTripContext, ScoutStreamEvent } from '../../server/types/scout.js';
 
 describe('Route Scout Service & Prompts', () => {
   const sampleTripContext: ScoutTripContext = {
@@ -537,7 +536,7 @@ My top recommendation is Red Rock Park, situated just about 6 miles east of Gall
 
 I have framed this as a candidate update below to convert your focused Gallup fuel waypoint into a 35-minute scenic lunch and restroom stop.`;
 
-      const cleaned = sanitizeScoutReply(dirtyOutput);
+      const cleaned = sanitizeBedrockResponse(dirtyOutput);
       expect(cleaned).not.toContain('Wait for the background task to complete');
       expect(cleaned).not.toContain('I have framed this as a candidate update below');
       expect(cleaned).toContain('That makes total sense.');
@@ -557,7 +556,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
           send: vi.fn().mockRejectedValue(new Error('Bedrock connection timeout')),
         } as unknown as BedrockRuntimeClient,
       });
-      const aiService = new AiService({ bedrockAdapter: mockBedrock });
+      const aiService = new AiService({ adapters: [mockBedrock] });
       const scout = new ScoutService(aiService);
       await expect(
         scout.chat(
@@ -572,189 +571,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
     });
   });
 
-  describe('Deterministic Fallback & Quick Prompts', () => {
-    it('provides regional dining fallback for day scope', () => {
-      const request: ScoutChatRequest = {
-        scope: { type: 'day', dayNumber: 2 },
-        messages: [{ role: 'user', content: 'Where can we eat lunch?' }],
-        tripContext: sampleTripContext,
-      };
-
-      const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Mid-Route Dining Recommendations');
-      expect(result.suggestions).toHaveLength(1);
-      expect(result.suggestions[0].type).toBe('meal');
-    });
-
-    it('provides accessibility guidance fallback for waypoint scope', () => {
-      const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: 'wp_shiprock' },
-        messages: [{ role: 'user', content: 'What is parking like here?' }],
-        tripContext: sampleTripContext,
-      };
-
-      const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Waypoint Accessibility: Shiprock Peak');
-    });
-
-    it('provides multi-stop route audit fallback for day scope detecting missing addresses, copy mismatches, and drive-by dwell', () => {
-      const problematicTripContext: ScoutTripContext = {
-        tripName: 'Summer Road Trip',
-        origin: 'Origin City',
-        destination: 'Destination City',
-        waypoints: [
-          {
-            id: 'scenic_overlook_driveby',
-            name: 'Scenic Mountain Overlook',
-            type: 'scenic_drive_by',
-            lat: 34.981,
-            lng: -110.0545,
-            dwell_minutes: 15, // error: drive-by should have 0 dwell
-          },
-          {
-            id: 'park_fuel',
-            name: 'State Park Picnic Area',
-            type: 'meal',
-            lat: 35.5458,
-            lng: -108.6255,
-            dwell_minutes: 30,
-            address: '100 State Park Rd',
-            notification: {
-              title: 'Park Fuel Stop',
-              message: 'Target 11:30 AM. Fuel stop.',
-              speech: 'Arriving at Park. Fuel stop recommended.',
-            },
-          },
-          {
-            id: 'lodge_arrival',
-            name: 'Valley Mountain Lodge',
-            type: 'lodging',
-            lat: 36.8748,
-            lng: -106.5835,
-            dwell_minutes: 0,
-            // error: physical stop without address or google_place_id
-          },
-        ],
-      };
-
-      const request: ScoutChatRequest = {
-        scope: { type: 'day', dayNumber: 1 },
-        messages: [{ role: 'user', content: 'Audit route for Google Maps navigation, detours & stop accuracy' }],
-        tripContext: problematicTripContext,
-      };
-
-      const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Route Audit & Navigation Report');
-      expect(result.suggestions.length).toBe(3);
-
-      const dwellSug = result.suggestions.find((s) => s.targetWaypointId === 'scenic_overlook_driveby');
-      expect(dwellSug).toBeDefined();
-      expect(dwellSug?.dwell_minutes).toBe(0);
-
-      const syncSug = result.suggestions.find((s) => s.targetWaypointId === 'park_fuel');
-      expect(syncSug).toBeDefined();
-      expect(syncSug?.newId).toBe('park_meal');
-      expect(syncSug?.type).toBe('meal');
-      expect(syncSug?.notification?.speech).not.toContain('Fuel stop');
-
-      const navSug = result.suggestions.find((s) => s.targetWaypointId === 'lodge_arrival');
-      expect(navSug).toBeDefined();
-      expect(navSug?.address).toBe('Valley Mountain Lodge');
-    });
-
-    it('provides waypoint copy and ID synchronization fallback when meal stop has fuel ID and speech', () => {
-      const mealWaypoint = {
-        id: 'picnic_fuel',
-        name: 'Valley Park (Picnic & Stretch)',
-        type: 'meal',
-        lat: 35.5458,
-        lng: -108.6255,
-        dwell_minutes: 30,
-        notification: {
-          title: 'Valley Park - Fuel & Stretch',
-          message: 'Target 11:30 AM. Turn north next.',
-          speech: 'Arriving in Valley Park. Fuel stop recommended before heading north.',
-        },
-      };
-      const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: mealWaypoint.id, waypointName: mealWaypoint.name },
-        messages: [{ role: 'user', content: 'Why does the alert and voice say fuel stop when this is a picnic lunch stop at a park?' }],
-        tripContext: {
-          tripName: 'Test Trip',
-          waypoints: [mealWaypoint],
-          focusedWaypoint: mealWaypoint,
-        },
-      };
-
-      const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Waypoint Copy & ID Synchronization');
-      expect(result.suggestions).toHaveLength(1);
-      expect(result.suggestions[0].action).toBe('update_waypoint');
-      expect(result.suggestions[0].targetWaypointId).toBe('picnic_fuel');
-      expect(result.suggestions[0].newId).toBe('picnic_meal');
-      expect(result.suggestions[0].type).toBe('meal');
-      expect(result.suggestions[0].notification?.title).toBe('Valley Park (Picnic & Stretch)');
-      expect(result.suggestions[0].notification?.speech).not.toContain('Fuel stop');
-    });
-
-    it('provides Google Maps navigation audit fallback for waypoint scope missing street address', () => {
-      const lodgingWaypoint = {
-        id: 'hotel_downtown',
-        name: 'Historic Grand Hotel',
-        type: 'lodging',
-        lat: 35.1901,
-        lng: -111.6207,
-        dwell_minutes: 0,
-      };
-      const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: lodgingWaypoint.id, waypointName: lodgingWaypoint.name },
-        messages: [{ role: 'user', content: 'Check Google Maps navigation & address for Historic Grand Hotel' }],
-        tripContext: {
-          tripName: 'Test Trip',
-          waypoints: [lodgingWaypoint],
-          focusedWaypoint: lodgingWaypoint,
-        },
-      };
-
-      const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('Google Maps Navigation Audit');
-      expect(result.suggestions).toHaveLength(1);
-      expect(result.suggestions[0].action).toBe('update_waypoint');
-      expect(result.suggestions[0].address).toBe('Historic Grand Hotel, Main Entrance');
-    });
-
-    it('provides in-transit drive-by dwell correction fallback for waypoint scope', () => {
-      const driveByWaypoint = {
-        id: 'mountain_pass',
-        name: 'High Mountain Pass',
-        type: 'scenic_drive_by',
-        lat: 36.9335,
-        lng: -106.9919,
-        dwell_minutes: 20, // non-zero dwell on drive-by
-        notification: {
-          title: 'High Mountain Pass',
-          message: 'Approaching the summit.',
-          speech: 'Approaching the mountain pass summit on the highway.',
-        },
-      };
-      const request: ScoutChatRequest = {
-        scope: { type: 'waypoint', waypointId: driveByWaypoint.id, waypointName: driveByWaypoint.name },
-        messages: [{ role: 'user', content: 'Is our planned dwell time appropriate for High Mountain Pass?' }],
-        tripContext: {
-          tripName: 'Test Trip',
-          waypoints: [driveByWaypoint],
-          focusedWaypoint: driveByWaypoint,
-        },
-      };
-
-      const result = generateTemplateScoutResponse(request);
-      expect(result.reply).toContain('In-Transit Drive-By Configuration');
-      expect(result.suggestions).toHaveLength(1);
-      expect(result.suggestions[0].action).toBe('update_waypoint');
-      expect(result.suggestions[0].type).toBe('scenic_drive_by');
-      expect(result.suggestions[0].dwell_minutes).toBe(0);
-    });
-
+  describe('Quick Prompts', () => {
     it('returns quick prompts appropriate to the scope', () => {
       const dayPrompts = getQuickPrompts({ type: 'day', dayNumber: 1 });
       expect(dayPrompts).toHaveLength(5);
@@ -768,7 +585,37 @@ I have framed this as a candidate update below to convert your focused Gallup fu
   });
 
   describe('Route Scout HTTP API Routes', () => {
-    const app = createApp();
+    function createScoutApp() {
+      const adapter: AiHarnessAdapter = {
+        id: 'bedrock',
+        name: 'Test Provider',
+        isAvailable: async () => true,
+        generate: async () => 'Day 2 looks well paced. Consider a lunch stop in Gallup.',
+        validateModelId: (modelId: string) => modelId,
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
+        generateStreamWithTools: async (
+          _prompt: string,
+          _tools: ToolDeclaration[],
+          _dispatcher: (name: string, args: Record<string, unknown>) => Promise<unknown>,
+          onChunk: (event: ScoutStreamEvent) => void
+        ): Promise<GenerateStreamWithToolsResult> => {
+          const text = 'Day 2 looks well paced. Consider a lunch stop in Gallup.';
+          onChunk({ event: 'delta', data: { text } });
+          return { text, inputTokens: 10, outputTokens: 5 };
+        },
+      };
+      const scoutService = new ScoutService(new AiService({ adapters: [adapter] }));
+      return createApp({ logger: false, scoutService });
+    }
+
+    const app = createScoutApp();
 
     it('POST /api/ai/scout/chat returns 200 with reply and suggestions', async () => {
       const response = await app.inject({
@@ -778,7 +625,6 @@ I have framed this as a candidate update below to convert your focused Gallup fu
           scope: { type: 'day', dayNumber: 2 },
           messages: [{ role: 'user', content: 'Where should we eat lunch?' }],
           tripContext: sampleTripContext,
-          preferredEngine: 'template',
         },
       });
 
@@ -787,7 +633,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(data).toHaveProperty('reply');
       expect(data).toHaveProperty('suggestions');
       expect(data).toHaveProperty('sessionId');
-      expect(data.engine).toBe('template');
+      expect(data.engine).toBe('bedrock');
     });
 
     it('POST /api/ai/scout/chat rejects invalid payload with 400', async () => {
@@ -799,6 +645,57 @@ I have framed this as a candidate update below to convert your focused Gallup fu
         },
       });
       expect(response.statusCode).toBe(400);
+    });
+
+    it('POST /api/ai/scout/chat rejects an unregistered engine with 400', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {
+          scope: { type: 'day', dayNumber: 2 },
+          messages: [{ role: 'user', content: 'Where should we eat lunch?' }],
+          tripContext: sampleTripContext,
+          preferredEngine: 'template',
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toContain('not registered');
+    });
+
+    it('POST /api/ai/scout/chat returns 502 when the provider returns an empty reply', async () => {
+      const emptyAdapter: AiHarnessAdapter = {
+        id: 'bedrock',
+        name: 'Test Provider',
+        isAvailable: async () => true,
+        generate: async () => '   ',
+        validateModelId: (modelId: string) => modelId,
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'test-scout-model',
+          defaultCopywriterModelId: 'test-copywriter-model',
+        }),
+        decorateScoutPrompt: (prompt: string) => prompt,
+        sanitizeResponse: (text: string) => text,
+      };
+      const emptyApp = createApp({
+        logger: false,
+        scoutService: new ScoutService(new AiService({ adapters: [emptyAdapter] })),
+      });
+
+      const response = await emptyApp.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {
+          scope: { type: 'day', dayNumber: 2 },
+          messages: [{ role: 'user', content: 'Where should we eat lunch?' }],
+          tripContext: sampleTripContext,
+        },
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json().error).toContain('empty Route Scout response');
     });
 
     it('GET /api/ai/scout/quick-prompts returns contextual prompt suggestions', async () => {
@@ -833,14 +730,13 @@ I have framed this as a candidate update below to convert your focused Gallup fu
           scope: { type: 'waypoint', waypointId: 'wp_shiprock' },
           messages: [{ role: 'user', content: 'Can we park and hike here or is it sacred Navajo land?' }],
           tripContext: sampleTripContext,
-          preferredEngine: 'template',
         },
       });
 
       expect(response.statusCode).toBe(200);
       const data = response.json();
       expect(data.reply).toBeTruthy();
-      expect(data.engine).toBe('template');
+      expect(data.engine).toBe('bedrock');
     });
 
     it('POST /api/ai/scout/chat/stream streams SSE events with delta and done', async () => {
@@ -851,7 +747,6 @@ I have framed this as a candidate update below to convert your focused Gallup fu
           scope: { type: 'day', dayNumber: 2 },
           messages: [{ role: 'user', content: 'Where can we stop for lunch?' }],
           tripContext: sampleTripContext,
-          preferredEngine: 'template',
         },
       });
 
@@ -860,7 +755,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       const body = response.body;
       expect(body).toContain('event: delta');
       expect(body).toContain('event: done');
-      expect(body).toContain('Mid-Route Dining Recommendations');
+      expect(body).toContain('lunch stop in Gallup');
     });
 
     it('POST /api/ai/scout/chat/stream returns 400 for missing scope or messages', async () => {

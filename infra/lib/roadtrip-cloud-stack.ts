@@ -148,20 +148,23 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
       }),
     );
 
-    // Grant least-privilege Amazon Bedrock permissions for model invocation & availability check (ADR-0001, ADR-0010)
+    // Grant least-privilege Amazon Bedrock permissions for model invocation (ADR-0001, ADR-0010)
     this.fastifyApiFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: [
-          'bedrock:InvokeModel',
-          'bedrock:InvokeModelWithResponseStream',
-          'bedrock:GetFoundationModelAvailability',
-          'bedrock:ListInferenceProfiles',
-        ],
+        actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
         resources: [
           `arn:${cdk.Aws.PARTITION}:bedrock:*::foundation-model/*`,
           `arn:${cdk.Aws.PARTITION}:bedrock:*:${this.account}:inference-profile/*`,
-          '*',
         ],
+      }),
+    );
+
+    // Read-only control-plane calls for dynamic model availability (ADR-0010). These list/describe
+    // actions do not support resource-level scoping, so they are isolated from the invoke actions.
+    this.fastifyApiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock:GetFoundationModelAvailability', 'bedrock:ListInferenceProfiles'],
+        resources: ['*'],
       }),
     );
 
