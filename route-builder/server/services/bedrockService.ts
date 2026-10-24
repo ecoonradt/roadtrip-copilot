@@ -10,6 +10,10 @@ import {
   type ToolConfiguration,
   type ToolResultStatus,
 } from '@aws-sdk/client-bedrock-runtime';
+import {
+  BedrockClient,
+  GetFoundationModelAvailabilityCommand,
+} from '@aws-sdk/client-bedrock';
 import type { DocumentType } from '@smithy/types';
 import type {
   AiModelOption,
@@ -123,6 +127,34 @@ export const BEDROCK_MODEL_CATALOG: AiModelOption[] = [
     description: 'Long-horizon agentic workflow engine (requires AWS account opt-in)',
     role: 'both',
   },
+  {
+    id: 'amazon.nova-lite-v1:0',
+    name: 'Amazon Nova Lite',
+    provider: 'Amazon',
+    description: 'Cost-effective multimodal model for high-volume turns',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6.1-sol',
+    name: 'OpenAI GPT-6.1 Sol',
+    provider: 'OpenAI',
+    description: 'Advanced frontier co-pilot & corridor logistics (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-sonnet-4-6',
+    name: 'Anthropic Claude Sonnet 4.6',
+    provider: 'Anthropic',
+    description: 'High-precision corridor analysis & reasoning (requires Anthropic account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    name: 'Anthropic Claude Haiku 4.5',
+    provider: 'Anthropic',
+    description: 'High-speed, lightweight alert copywriting (requires Anthropic account opt-in)',
+    role: 'copywriter',
+  },
 ];
 
 export const INFERENCE_PROFILE_ALIASES: Record<string, string> = {
@@ -161,10 +193,12 @@ export class InvalidModelError extends Error {
 
 export interface BedrockAdapterOptions {
   client?: BedrockRuntimeClient;
+  controlClient?: BedrockClient;
   region?: string;
   scoutModelId?: string;
   copywriterModelId?: string;
   available?: boolean;
+  availableModels?: AiModelOption[];
 }
 
 export function sanitizeBedrockResponse(rawText: string): string {
@@ -176,6 +210,9 @@ export function sanitizeBedrockResponse(rawText: string): string {
 
   // 2. Strip unclosed trailing <thinking>... or <think>... (case-insensitive)
   cleaned = cleaned.replace(/<(?:thinking|think)>[\s\S]*$/i, '');
+
+  // 3. Strip orphaned closing </thinking> or </think> (case-insensitive)
+  cleaned = cleaned.replace(/<\/(?:thinking|think)>/gi, '');
 
   // 3. Strip leading harness noise
   cleaned = cleaned.replace(
@@ -227,8 +264,11 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   public readonly defaultScoutModelId: string;
   public readonly defaultCopywriterModelId: string;
   private client: BedrockRuntimeClient;
+  private controlClient: BedrockClient | null;
   private hasCustomClient: boolean;
   private options: BedrockAdapterOptions;
+  private availableModels: AiModelOption[] | null = null;
+  private availabilityPromise: Promise<AiModelOption[]> | null = null;
 
   constructor(options: BedrockAdapterOptions = {}) {
     this.options = options;
@@ -236,11 +276,77 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     this.client = options.client ?? new BedrockRuntimeClient(region ? { region } : {});
     this.hasCustomClient = Boolean(options.client);
 
+    this.availableModels = options.availableModels ?? null;
+    if (options.controlClient) {
+      this.controlClient = options.controlClient;
+    } else if (this.hasCustomClient) {
+      this.controlClient = null;
+    } else {
+      this.controlClient = new BedrockClient(region ? { region } : {});
+    }
+
     const rawScout = options.scoutModelId || process.env.BEDROCK_SCOUT_MODEL_ID || DEFAULT_BEDROCK_SCOUT_MODEL_ID;
     this.defaultScoutModelId = INFERENCE_PROFILE_ALIASES[rawScout.trim()] || rawScout.trim();
 
     const rawCopywriter = options.copywriterModelId || process.env.BEDROCK_COPYWRITER_MODEL_ID || DEFAULT_BEDROCK_COPYWRITER_MODEL_ID;
     this.defaultCopywriterModelId = INFERENCE_PROFILE_ALIASES[rawCopywriter.trim()] || rawCopywriter.trim();
+
+    if (!this.hasCustomClient && this.controlClient && !this.availableModels) {
+      this.refreshModelAvailability().catch(() => {});
+    }
+  }
+
+  async refreshModelAvailability(): Promise<AiModelOption[]> {
+    if (this.availableModels && !this.controlClient) {
+      return this.availableModels;
+    }
+    if (this.availabilityPromise) {
+      return this.availabilityPromise;
+    }
+    if (!this.controlClient) {
+      this.availableModels = BEDROCK_MODEL_CATALOG;
+      return this.availableModels;
+    }
+
+    this.availabilityPromise = (async () => {
+      try {
+        const checks = await Promise.all(
+          BEDROCK_MODEL_CATALOG.map(async (model) => {
+            try {
+              const res = await this.controlClient!.send(
+                new GetFoundationModelAvailabilityCommand({ modelId: model.id })
+              );
+              const isAvailable =
+                res.authorizationStatus === 'AUTHORIZED' &&
+                res.agreementAvailability?.status === 'AVAILABLE';
+              return isAvailable ? model : null;
+            } catch {
+              return null;
+            }
+          })
+        );
+        const verified = checks.filter((m): m is AiModelOption => m !== null);
+        if (verified.length > 0) {
+          this.availableModels = verified;
+        } else {
+          this.availableModels = BEDROCK_MODEL_CATALOG;
+        }
+      } catch {
+        this.availableModels = BEDROCK_MODEL_CATALOG;
+      } finally {
+        this.availabilityPromise = null;
+      }
+      return this.availableModels;
+    })();
+
+    return this.availabilityPromise;
+  }
+
+  async getAvailableModels(): Promise<AiModelOption[]> {
+    if (this.availableModels) {
+      return this.availableModels;
+    }
+    return this.refreshModelAvailability();
   }
 
   validateModelId(modelId: string): string {
@@ -277,7 +383,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     defaultCopywriterModelId: string;
   } {
     return {
-      models: BEDROCK_MODEL_CATALOG,
+      models: this.availableModels ?? BEDROCK_MODEL_CATALOG,
       defaultScoutModelId: this.defaultScoutModelId,
       defaultCopywriterModelId: this.defaultCopywriterModelId,
     };
@@ -331,6 +437,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         modelId = this.validateModelId(apiKeyOrOptions.modelId);
       }
       abortSignal = apiKeyOrOptions.abortSignal;
+    }
+
+    if (abortSignal?.aborted) {
+      throw new Error('Request aborted');
     }
 
     const command = new ConverseCommand({
@@ -397,7 +507,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         modelId: activeModelId,
         messages,
         ...(toolConfig ? { toolConfig } : {}),
-        inferenceConfig: { maxTokens: 8192, temperature: 0.4 },
+        inferenceConfig: { maxTokens: 4096, temperature: 0.4 },
       });
 
       const response = await this.client.send(

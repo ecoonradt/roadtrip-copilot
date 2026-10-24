@@ -43,7 +43,7 @@ jobs:
       - name: Validate AWS configuration
         run: |
           if [ -z "${{ vars.AWS_REGION }}" ]; then
-            echo "::error::GitHub Actions variable 'AWS_REGION' is not set. In the new AWS experience, this must be set to your project's assigned Region (Settings > View all projects > Overview > Additional Info > Region)." >&2
+            echo "::error::GitHub Actions variable 'AWS_REGION' is not set. This must be set to your primary AWS Region (e.g. us-east-2)." >&2
             exit 1
           fi
           if [ -z "${{ vars.AWS_ROLE_ARN }}" ] && [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then

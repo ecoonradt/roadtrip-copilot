@@ -150,6 +150,8 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   // Synchronize state when modal opens with a new waypoint
   useEffect(() => {
     genSeqRef.current += 1;
+    setIsLoading(false);
+    setError(null);
     if (!waypoint || !isOpen) return;
 
     setActiveTab(initialTab);

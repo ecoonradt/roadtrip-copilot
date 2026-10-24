@@ -10,7 +10,10 @@ import {
   validateScoutPlaceId,
   isValidGooglePlaceId,
 } from '../../server/services/scoutService.js';
-import { AgyHarnessAdapter, GeminiStudioHarnessAdapter } from '../../server/services/aiService.js';
+import { AiService } from '../../server/services/aiService.js';
+import { AwsBedrockHarnessAdapter } from '../../server/services/bedrockService.js';
+import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
+import { vi } from 'vitest';
 import { createApp } from '../../server/app.js';
 import type { ScoutChatRequest, ScoutScope, ScoutTripContext } from '../../server/types/scout.js';
 
@@ -143,22 +146,10 @@ describe('Route Scout Service & Prompts', () => {
       expect(domainPrompt).toContain('[Route Anchor]');
     });
 
-    it('AgyHarnessAdapter decorates domain prompt with green tool permissions and guardrails', () => {
-      const agy = new AgyHarnessAdapter();
+    it('AwsBedrockHarnessAdapter leaves domain prompt clean without Antigravity noise', () => {
+      const bedrock = new AwsBedrockHarnessAdapter({ available: false });
       const domainPrompt = 'Test domain prompt content';
-      const decorated = agy.decorateScoutPrompt(domainPrompt);
-
-      expect(decorated).toContain('CRITICAL OPERATIONAL HARNESS DIRECTIVES:');
-      expect(decorated).toContain('search_web');
-      expect(decorated).toContain('read_url_content');
-      expect(decorated).toContain('DO NOT launch background tasks');
-      expect(decorated).toContain(domainPrompt);
-    });
-
-    it('GeminiStudioHarnessAdapter leaves domain prompt clean without Antigravity noise', () => {
-      const cloud = new GeminiStudioHarnessAdapter();
-      const domainPrompt = 'Test domain prompt content';
-      const decorated = cloud.decorateScoutPrompt(domainPrompt);
+      const decorated = bedrock.decorateScoutPrompt(domainPrompt);
 
       expect(decorated).toBe(domainPrompt);
       expect(decorated).not.toContain('CRITICAL OPERATIONAL HARNESS DIRECTIVES');
@@ -560,8 +551,14 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(suggestions).toEqual([]);
     });
 
-    it('chat throws friendly error when engine fails rather than returning silent template', async () => {
-      const scout = new ScoutService();
+    it('chat throws loud error when engine fails rather than returning silent template', async () => {
+      const mockBedrock = new AwsBedrockHarnessAdapter({
+        client: {
+          send: vi.fn().mockRejectedValue(new Error('Bedrock connection timeout')),
+        } as unknown as BedrockRuntimeClient,
+      });
+      const aiService = new AiService({ bedrockAdapter: mockBedrock });
+      const scout = new ScoutService(aiService);
       await expect(
         scout.chat(
           {
@@ -569,9 +566,9 @@ I have framed this as a candidate update below to convert your focused Gallup fu
             messages: [{ role: 'user', content: 'hello' }],
             tripContext: sampleTripContext,
           },
-          { preferredEngine: 'cloud', apiKey: 'invalid-key' }
+          { preferredEngine: 'bedrock' }
         )
-      ).rejects.toThrow(/Route Scout/);
+      ).rejects.toThrow(/Bedrock connection timeout/);
     });
   });
 

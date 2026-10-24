@@ -8,8 +8,8 @@ import type {
 } from '../types/scout.js';
 import type { ToolDeclaration } from '../types/ai.js';
 import type { GenerationOptions, AiHarnessAdapter } from './aiService.js';
-import { AiService, AgyHarnessAdapter } from './aiService.js';
-import { AwsBedrockHarnessAdapter } from './bedrockService.js';
+import { AiService } from './aiService.js';
+import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from './bedrockService.js';
 
 /**
  * Builds the comprehensive domain prompt for Route Scout (pure road-trip domain, harness-agnostic).
@@ -239,23 +239,22 @@ Please respond to the latest User request.`;
 
 /**
  * Builds the default Route Scout prompt.
- * Decorates the domain prompt with active adapter directives (defaults to agy).
+ * Decorates the domain prompt with active adapter directives if available.
  */
 export function buildScoutPrompt(request: ScoutChatRequest, adapter?: AiHarnessAdapter): string {
   const domainPrompt = buildScoutDomainPrompt(request);
   if (adapter && typeof adapter.decorateScoutPrompt === 'function') {
     return adapter.decorateScoutPrompt(domainPrompt);
   }
-  const agy = new AgyHarnessAdapter();
-  return agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
+  return domainPrompt;
 }
 
 /**
  * Cleans internal agent harness noise, background task text, and meta-commentary from Route Scout responses.
- * Delegates to AgyHarnessAdapter.sanitizeAgyResponse.
+ * Delegates to sanitizeBedrockResponse.
  */
 export function sanitizeScoutReply(text: string): string {
-  return AgyHarnessAdapter.sanitizeAgyResponse(text);
+  return sanitizeBedrockResponse(text);
 }
 
 /**
@@ -795,7 +794,6 @@ export class ScoutService {
     }
 
     const domainPrompt = buildScoutDomainPrompt(request);
-    let lastError: string | null = null;
 
     const knownPlaceIds = new Set<string>(
       (request.tripContext?.waypoints || [])
@@ -803,105 +801,55 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    // 1. Try Bedrock adapter first if preferred or in auto mode
+    // Bedrock adapter is the sole AI engine
     const bedrock = this.aiService.getAdapter('bedrock') as AwsBedrockHarnessAdapter | undefined;
-    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
-      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable());
-      if (isAvail) {
-        try {
-          const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
-          if (typeof bedrock.generateStreamWithTools === 'function') {
-            const streamRes = await bedrock.generateStreamWithTools(
-              domainPrompt,
-              this.tools,
-              this.toolDispatcher,
-              () => {},
-              { modelId: validatedModelId, abortSignal: options.abortSignal }
-            );
-            const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
-            const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-            return {
-              reply,
-              suggestions,
-              sessionId,
-              engine: 'bedrock',
-              thought,
-              modelId: activeModelId,
-              inputTokens: streamRes.inputTokens,
-              outputTokens: streamRes.outputTokens,
-            };
-          } else {
-            const prompt = bedrock.decorateScoutPrompt ? bedrock.decorateScoutPrompt(domainPrompt) : domainPrompt;
-            const rawOutput = await bedrock.generate(prompt, {
-              modelId: validatedModelId,
-              abortSignal: options.abortSignal,
-            });
-            const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(rawOutput) : rawOutput;
-            const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-            return {
-              reply,
-              suggestions,
-              sessionId,
-              engine: 'bedrock',
-              thought,
-              modelId: activeModelId,
-            };
-          }
-        } catch (err: unknown) {
-          if (preferredEngine === 'bedrock') {
-            throw err;
-          }
-          const msg = err instanceof Error ? err.message : String(err);
-          lastError = msg;
-          console.warn(`[RouteScout] bedrock adapter generation failed (${msg})`);
-        }
-      }
+    if (!bedrock) {
+      throw new Error('Amazon Bedrock adapter is not registered');
     }
 
-    // 2. Try Primary: agy adapter
-    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
-      const agy = this.aiService.getAdapter('agy');
-      if (agy) {
-        try {
-          const prompt = agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
-          const rawOutput = await agy.generate(prompt);
-          const sanitized = agy.sanitizeResponse ? agy.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-          return { reply, suggestions, sessionId, engine: 'agy', thought };
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          lastError = msg;
-          console.warn(`[RouteScout] agy adapter generation failed (${msg})`);
-        }
-      }
+    const isAvail = await bedrock.isAvailable();
+    if (!isAvail) {
+      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
     }
 
-    // 3. Try Cloud Gemini API
-    if (preferredEngine !== 'bedrock') {
-      const cloud = this.aiService.getAdapter('cloud');
-      if (cloud) {
-        try {
-          const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-          if (apiKey && (await cloud.isAvailable(apiKey))) {
-            const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
-            const rawOutput = await cloud.generate(prompt, apiKey);
-            const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
-            const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-            return { reply, suggestions, sessionId, engine: 'cloud', thought };
-          }
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          lastError = msg;
-          console.warn(`[RouteScout] cloud adapter generation failed (${msg})`);
-        }
-      }
+    const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
+    if (typeof bedrock.generateStreamWithTools === 'function') {
+      const streamRes = await bedrock.generateStreamWithTools(
+        domainPrompt,
+        this.tools,
+        this.toolDispatcher,
+        () => {},
+        { modelId: validatedModelId, abortSignal: options.abortSignal }
+      );
+      const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
+      const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+      return {
+        reply,
+        suggestions,
+        sessionId,
+        engine: 'bedrock',
+        thought,
+        modelId: activeModelId,
+        inputTokens: streamRes.inputTokens,
+        outputTokens: streamRes.outputTokens,
+      };
+    } else {
+      const prompt = bedrock.decorateScoutPrompt ? bedrock.decorateScoutPrompt(domainPrompt) : domainPrompt;
+      const rawOutput = await bedrock.generate(prompt, {
+        modelId: validatedModelId,
+        abortSignal: options.abortSignal,
+      });
+      const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(rawOutput) : rawOutput;
+      const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+      return {
+        reply,
+        suggestions,
+        sessionId,
+        engine: 'bedrock',
+        thought,
+        modelId: activeModelId,
+      };
     }
-
-    throw new Error(
-      lastError?.includes('timed out')
-        ? 'Route Scout timed out while analyzing your request. Please click Retry.'
-        : `Route Scout error: ${lastError || 'unable to connect to an AI engine. Please verify your AI engine configuration or API key.'}`
-    );
   }
 
   /**
@@ -930,7 +878,6 @@ export class ScoutService {
     }
 
     const domainPrompt = buildScoutDomainPrompt(request);
-    let lastError: string | null = null;
 
     const knownPlaceIds = new Set<string>(
       (request.tripContext?.waypoints || [])
@@ -938,143 +885,62 @@ export class ScoutService {
         .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     );
 
-    // 1. Try Bedrock adapter streaming first if preferred or auto
+    // Bedrock adapter is the sole AI engine
     const bedrock = this.aiService.getAdapter('bedrock') as AwsBedrockHarnessAdapter | undefined;
-    if (bedrock && (preferredEngine === 'bedrock' || preferredEngine === 'auto')) {
-      const isAvail = preferredEngine === 'bedrock' || (await bedrock.isAvailable());
-      if (isAvail) {
-        try {
-          const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
-          const activities: ScoutActivity[] = [];
-          const streamRes = await bedrock.generateStreamWithTools(
-            domainPrompt,
-            this.tools,
-            this.toolDispatcher,
-            (streamEvt) => {
-              if (streamEvt.event === 'activity') {
-                const existingIdx = activities.findIndex((a) => a.id === streamEvt.data.id);
-                if (existingIdx >= 0) {
-                  activities[existingIdx] = streamEvt.data;
-                } else {
-                  activities.push(streamEvt.data);
-                }
-                onEvent(streamEvt);
-              } else if (streamEvt.event === 'thought' || streamEvt.event === 'delta') {
-                onEvent(streamEvt);
-              }
-            },
-            { modelId: validatedModelId, abortSignal: options.abortSignal }
-          );
-
-          const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-          if (suggestions.length > 0) {
-            onEvent({ event: 'suggestions', data: { suggestions } });
-          }
-          const doneResponse: ScoutChatResponse = {
-            reply,
-            suggestions,
-            sessionId,
-            engine: 'bedrock',
-            thought,
-            activities: activities.length > 0 ? activities : undefined,
-            modelId: activeModelId,
-            inputTokens: streamRes.inputTokens,
-            outputTokens: streamRes.outputTokens,
-          };
-          onEvent({ event: 'done', data: doneResponse });
-          return doneResponse;
-        } catch (err: unknown) {
-          if (preferredEngine === 'bedrock') {
-            const msg = err instanceof Error ? err.message : String(err);
-            onEvent({ event: 'error', data: { error: msg } });
-            throw err;
-          }
-          const msg = err instanceof Error ? err.message : String(err);
-          lastError = msg;
-          console.warn(`[RouteScout] bedrock adapter streaming failed (${msg})`);
-        }
-      }
+    if (!bedrock) {
+      throw new Error('Amazon Bedrock adapter is not registered');
     }
 
-    // 2. Try Primary: agy adapter streaming
-    if (preferredEngine !== 'cloud' && preferredEngine !== 'bedrock') {
-      const agy = this.aiService.getAdapter('agy') as (AgyHarnessAdapter | undefined);
-      if (agy && typeof agy.generateStream === 'function') {
-        try {
-          const prompt = agy.decorateScoutPrompt ? agy.decorateScoutPrompt(domainPrompt) : domainPrompt;
-          const activities: ScoutActivity[] = [];
-          const rawOutput = await agy.generateStream(prompt, (chunk) => {
-            if (chunk.type === 'activity' && chunk.activity) {
-              const existingIdx = activities.findIndex((a) => a.id === chunk.activity!.id);
-              if (existingIdx >= 0) {
-                activities[existingIdx] = chunk.activity;
-              } else {
-                activities.push(chunk.activity);
-              }
-              onEvent({ event: 'activity', data: chunk.activity });
-            } else if (chunk.type === 'thought') {
-              onEvent({ event: 'thought', data: { text: chunk.text } });
-            } else if (chunk.type === 'delta') {
-              onEvent({ event: 'delta', data: { text: chunk.text } });
-            }
-          });
-
-          const sanitized = agy.sanitizeResponse ? agy.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-          if (suggestions.length > 0) {
-            onEvent({ event: 'suggestions', data: { suggestions } });
-          }
-          const doneResponse: ScoutChatResponse = {
-            reply,
-            suggestions,
-            sessionId,
-            engine: 'agy',
-            thought,
-            activities: activities.length > 0 ? activities : undefined,
-          };
-          onEvent({ event: 'done', data: doneResponse });
-          return doneResponse;
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          lastError = msg;
-          console.warn(`[RouteScout] agy adapter streaming failed (${msg})`);
-        }
-      }
+    const isAvail = await bedrock.isAvailable();
+    if (!isAvail) {
+      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
     }
 
-    // 3. Try Cloud Gemini API
-    if (preferredEngine !== 'bedrock') {
-      const cloud = this.aiService.getAdapter('cloud');
-      const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-      if (cloud && apiKey) {
-        try {
-          const prompt = cloud.decorateScoutPrompt ? cloud.decorateScoutPrompt(domainPrompt) : domainPrompt;
-          const rawOutput = await cloud.generate(prompt, apiKey);
-          const sanitized = cloud.sanitizeResponse ? cloud.sanitizeResponse(rawOutput) : rawOutput;
-          const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
-          onEvent({ event: 'delta', data: { text: reply } });
-          if (suggestions.length > 0) {
-            onEvent({ event: 'suggestions', data: { suggestions } });
+    const activeModelId = validatedModelId || bedrock.defaultScoutModelId;
+    const activities: ScoutActivity[] = [];
+    const streamRes = await bedrock.generateStreamWithTools(
+      domainPrompt,
+      this.tools,
+      this.toolDispatcher,
+      (streamEvt) => {
+        if (options.abortSignal?.aborted) return;
+        if (streamEvt.event === 'activity') {
+          const existingIdx = activities.findIndex((a) => a.id === streamEvt.data.id);
+          if (existingIdx >= 0) {
+            activities[existingIdx] = streamEvt.data;
+          } else {
+            activities.push(streamEvt.data);
           }
-          const doneResponse: ScoutChatResponse = { reply, suggestions, sessionId, engine: 'cloud', thought };
-          onEvent({ event: 'done', data: doneResponse });
-          return doneResponse;
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          lastError = msg;
-          console.warn(`[RouteScout] cloud adapter fallback failed (${msg})`);
+          onEvent(streamEvt);
+        } else if (streamEvt.event === 'thought' || streamEvt.event === 'delta') {
+          onEvent(streamEvt);
         }
-      }
+      },
+      { modelId: validatedModelId, abortSignal: options.abortSignal }
+    );
+
+    if (options.abortSignal?.aborted) {
+      throw new Error('Request aborted');
     }
 
-    // Friendly error handling
-    const friendlyError = lastError?.includes('timed out')
-      ? 'Route Scout timed out while analyzing your request. Please click Retry.'
-      : `Route Scout error: ${lastError || 'unable to generate a response. Please retry.'}`;
-
-    onEvent({ event: 'error', data: { error: friendlyError } });
-    throw new Error(friendlyError);
+    const sanitized = bedrock.sanitizeResponse ? bedrock.sanitizeResponse(streamRes.text) : streamRes.text;
+    const { reply, suggestions, thought } = parseScoutResponse(sanitized, { knownPlaceIds });
+    if (suggestions.length > 0) {
+      onEvent({ event: 'suggestions', data: { suggestions } });
+    }
+    const doneResponse: ScoutChatResponse = {
+      reply,
+      suggestions,
+      sessionId,
+      engine: 'bedrock',
+      thought,
+      activities: activities.length > 0 ? activities : undefined,
+      modelId: activeModelId,
+      inputTokens: streamRes.inputTokens,
+      outputTokens: streamRes.outputTokens,
+    };
+    onEvent({ event: 'done', data: doneResponse });
+    return doneResponse;
   }
 
   /**
