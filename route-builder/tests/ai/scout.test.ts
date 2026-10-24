@@ -10,6 +10,7 @@ import {
 } from '../../server/services/scoutService.js';
 import { AiService, type AiHarnessAdapter } from '../../server/services/aiService.js';
 import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from '../../server/services/bedrockService.js';
+import { MalformedAiResponseError } from '../../server/services/schemaParser.js';
 import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { vi } from 'vitest';
 import { createApp } from '../../server/app.js';
@@ -550,6 +551,18 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(suggestions).toEqual([]);
     });
 
+    it('throws MalformedAiResponseError when json:suggestions block is incomplete or truncated', () => {
+      const truncatedOutput = `I recommend this stop:\n\n\`\`\`json:suggestions\n[\n  {"action": "add_waypoint", "name": "Broken Stop"`;
+      expect(() => parseScoutResponse(truncatedOutput)).toThrow(MalformedAiResponseError);
+      expect(() => parseScoutResponse(truncatedOutput)).toThrow(/incomplete or truncated suggestions block/);
+    });
+
+    it('throws MalformedAiResponseError when json:suggestions contains invalid JSON', () => {
+      const invalidJsonOutput = `Here are suggestions:\n\n\`\`\`json:suggestions\n[{"action": "add_waypoint", invalid json}\n\`\`\``;
+      expect(() => parseScoutResponse(invalidJsonOutput)).toThrow(MalformedAiResponseError);
+      expect(() => parseScoutResponse(invalidJsonOutput)).toThrow(/unparseable suggestions block/);
+    });
+
     it('chat throws loud error when engine fails rather than returning silent template', async () => {
       const mockBedrock = new AwsBedrockHarnessAdapter({
         client: {
@@ -771,6 +784,66 @@ I have framed this as a candidate update below to convert your focused Gallup fu
       expect(response.statusCode).toBe(400);
       const data = JSON.parse(response.body);
       expect(data.error).toContain('Invalid request payload');
+    });
+
+    it('POST /api/ai/scout/chat/stream returns 400 synchronously for unregistered provider without modelId', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: { type: 'day', dayNumber: 2 },
+          messages: [{ role: 'user', content: 'Where can we stop?' }],
+          tripContext: sampleTripContext,
+          preferredEngine: 'unregistered-provider',
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.headers['content-type']).toContain('application/json');
+      const data = response.json();
+      expect(data.error).toContain('AI provider "unregistered-provider" is not registered');
+    });
+
+    it('non-streaming provider seam passes resolved activeModelId to generate() when modelId is omitted', async () => {
+      const generateSpy = vi.fn().mockResolvedValue('Non-streaming reply from mock adapter');
+      const nonStreamingAdapter: AiHarnessAdapter = {
+        id: 'mock-non-streaming',
+        name: 'Mock Non-Streaming Adapter',
+        isAvailable: async () => true,
+        generate: generateSpy,
+        validateModelId: (m: string) => m,
+        getAvailableModels: async () => [],
+        getModelCatalog: () => ({
+          models: [],
+          defaultScoutModelId: 'custom-scout-model-id',
+          defaultCopywriterModelId: 'custom-copy-model-id',
+        }),
+        decorateScoutPrompt: (p: string) => p,
+        sanitizeResponse: (t: string) => t,
+      };
+
+      const testScoutService = new ScoutService(new AiService({ adapters: [nonStreamingAdapter] }));
+      const testApp = createApp({ logger: false, scoutService: testScoutService });
+
+      const response = await testApp.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {
+          scope: { type: 'day', dayNumber: 2 },
+          messages: [{ role: 'user', content: 'Tell me about the route' }],
+          tripContext: sampleTripContext,
+          preferredEngine: 'mock-non-streaming',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = response.json();
+      expect(data.modelId).toBe('custom-scout-model-id');
+      expect(generateSpy).toHaveBeenCalledTimes(1);
+      expect(generateSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ modelId: 'custom-scout-model-id' })
+      );
     });
   });
 });

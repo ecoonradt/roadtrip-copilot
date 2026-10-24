@@ -20,6 +20,7 @@ import {
   type AiHarnessAdapter,
 } from '../../server/services/aiService.js';
 import { ScoutService } from '../../server/services/scoutService.js';
+import { MalformedAiResponseError } from '../../server/services/schemaParser.js';
 import { createApp } from '../../server/app.js';
 import { chatWithScoutStream } from '../../src/services/api.js';
 import { RouteScoutDrawer } from '../../src/components/RouteScoutDrawer.js';
@@ -276,6 +277,25 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
           expect((err as InvalidModelError).message).toContain('Model ID must not be empty');
         }
       });
+
+      it('rejects model IDs excluded via options.excludedModelIds or BEDROCK_EXCLUDED_MODEL_IDS', () => {
+        const adapterWithOptions = new AwsBedrockHarnessAdapter({
+          excludedModelIds: ['us.amazon.nova-pro-v1:0'],
+        });
+        expect(() => adapterWithOptions.validateModelId('us.amazon.nova-pro-v1:0')).toThrow(InvalidModelError);
+        expect(() => adapterWithOptions.validateModelId('us.amazon.nova-pro-v1:0')).toThrow(/excluded by policy/);
+
+        const prevEnv = process.env.BEDROCK_EXCLUDED_MODEL_IDS;
+        try {
+          process.env.BEDROCK_EXCLUDED_MODEL_IDS = 'us.moonshotai.kimi-k3, custom.excluded-model';
+          const adapterWithEnv = new AwsBedrockHarnessAdapter();
+          expect(() => adapterWithEnv.validateModelId('us.moonshotai.kimi-k3')).toThrow(InvalidModelError);
+          expect(() => adapterWithEnv.validateModelId('us.moonshotai.kimi-k3')).toThrow(/excluded by policy/);
+        } finally {
+          if (prevEnv !== undefined) process.env.BEDROCK_EXCLUDED_MODEL_IDS = prevEnv;
+          else delete process.env.BEDROCK_EXCLUDED_MODEL_IDS;
+        }
+      });
     });
 
     describe('Region Resolution (Negative Constraint Verification)', () => {
@@ -480,6 +500,42 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         await expect(adapter.generate('Prompt')).rejects.toThrow(
           'AI provider returned an empty response'
         );
+      });
+
+      it('throws MalformedAiResponseError when stopReason is max_tokens', async () => {
+        const mockSend = vi.fn().mockResolvedValue({
+          stopReason: 'max_tokens',
+          output: {
+            message: {
+              content: [{ text: 'Truncated alert copy...' }],
+            },
+          },
+        });
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: mockSend } as unknown as BedrockRuntimeClient,
+        });
+
+        await expect(adapter.generate('Prompt')).rejects.toThrow(MalformedAiResponseError);
+        await expect(adapter.generate('Prompt')).rejects.toThrow(/max_tokens/);
+      });
+
+      it('throws MalformedAiResponseError when stopReason is content_filtered', async () => {
+        const mockSend = vi.fn().mockResolvedValue({
+          stopReason: 'content_filtered',
+          output: {
+            message: {
+              content: [{ text: 'Blocked content...' }],
+            },
+          },
+        });
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: mockSend } as unknown as BedrockRuntimeClient,
+        });
+
+        await expect(adapter.generate('Prompt')).rejects.toThrow(MalformedAiResponseError);
+        await expect(adapter.generate('Prompt')).rejects.toThrow(/content_filtered/);
       });
     });
 
@@ -838,6 +894,85 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
             { abortSignal: abortController.signal }
           )
         ).rejects.toThrow('Request aborted');
+      });
+
+      it('throws MalformedAiResponseError when messageStop.stopReason is max_tokens', async () => {
+        const streamChunks: ConverseStreamOutput[] = [
+          { contentBlockDelta: { delta: { text: 'Starting route analysis...' } } },
+          { messageStop: { stopReason: 'max_tokens' } },
+        ];
+        const mockSend = vi.fn().mockImplementation(() => ({
+          stream: createAsyncStream(streamChunks),
+        }));
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: mockSend } as unknown as BedrockRuntimeClient,
+        });
+
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(MalformedAiResponseError);
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(/max_tokens/);
+      });
+
+      it('throws MalformedAiResponseError when messageStop.stopReason is content_filtered', async () => {
+        const streamChunks: ConverseStreamOutput[] = [
+          { contentBlockDelta: { delta: { text: 'Inappropriate content...' } } },
+          { messageStop: { stopReason: 'content_filtered' } },
+        ];
+        const mockSend = vi.fn().mockImplementation(() => ({
+          stream: createAsyncStream(streamChunks),
+        }));
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: mockSend } as unknown as BedrockRuntimeClient,
+        });
+
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(MalformedAiResponseError);
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(/content_filtered/);
+      });
+
+      it('throws MalformedAiResponseError when stream ends without a terminal messageStop', async () => {
+        const streamChunks: ConverseStreamOutput[] = [
+          { contentBlockDelta: { delta: { text: 'Incomplete stream truncated abruptly' } } },
+        ];
+        const mockSend = vi.fn().mockImplementation(() => ({
+          stream: createAsyncStream(streamChunks),
+        }));
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: mockSend } as unknown as BedrockRuntimeClient,
+        });
+
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(MalformedAiResponseError);
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(/without a terminal message/);
+      });
+
+      it('throws MalformedAiResponseError when stopReason is tool_use but no tool calls were emitted', async () => {
+        const streamChunks: ConverseStreamOutput[] = [
+          { contentBlockDelta: { delta: { text: 'I will call a tool now.' } } },
+          { messageStop: { stopReason: 'tool_use' } },
+        ];
+        const mockSend = vi.fn().mockImplementation(() => ({
+          stream: createAsyncStream(streamChunks),
+        }));
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: mockSend } as unknown as BedrockRuntimeClient,
+        });
+
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(MalformedAiResponseError);
+        await expect(
+          adapter.generateStreamWithTools('Prompt', [], vi.fn(), vi.fn())
+        ).rejects.toThrow(/emitted no executable tool calls/);
       });
     });
   });
@@ -1600,6 +1735,187 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       expect(data.models).toBeUndefined();
       expect(data.message).toContain('No Amazon Bedrock models are accessible');
     });
+
+    it('discovers compatible models outside the static catalog via ListInferenceProfiles and ListFoundationModels', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'meta.llama3-8b-instruct-v1:0',
+                  modelName: 'Llama 3 8B Instruct',
+                  providerName: 'Meta',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  modelLifecycle: { status: 'ACTIVE' },
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                {
+                  inferenceProfileId: 'us.meta.llama4-maverick-17b-instruct-v1:0',
+                  status: 'ACTIVE',
+                },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      const models = await adapter.getAvailableModels();
+      const modelIds = models.map((m) => m.id);
+      expect(modelIds).toContain('us.meta.llama4-maverick-17b-instruct-v1:0');
+      expect(modelIds).toContain('meta.llama3-8b-instruct-v1:0');
+
+      const llama4 = models.find((m) => m.id === 'us.meta.llama4-maverick-17b-instruct-v1:0');
+      expect(llama4?.provider).toBe('Meta');
+      expect(llama4?.role).toBe('both');
+
+      const llama3 = models.find((m) => m.id === 'meta.llama3-8b-instruct-v1:0');
+      expect(llama3?.name).toBe('Llama 3 8B Instruct');
+      expect(llama3?.provider).toBe('Meta');
+    });
+
+    it('filters out explicit model exclusions via options.excludedModelIds during discovery', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                { inferenceProfileId: 'us.moonshotai.kimi-k3', status: 'ACTIVE' },
+                { inferenceProfileId: 'us.amazon.nova-2-lite-v1:0', status: 'ACTIVE' },
+                { inferenceProfileId: 'us.amazon.nova-pro-v1:0', status: 'ACTIVE' },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+        excludedModelIds: ['us.amazon.nova-pro-v1:0'],
+      });
+
+      const models = await adapter.getAvailableModels();
+      const ids = models.map((m) => m.id);
+      expect(ids).toContain('us.moonshotai.kimi-k3');
+      expect(ids).toContain('us.amazon.nova-2-lite-v1:0');
+      expect(ids).not.toContain('us.amazon.nova-pro-v1:0');
+    });
+
+    it('verifies configured defaults outside catalog and advertises them in available models', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                { inferenceProfileId: 'us.custom-vendor.custom-model-v1:0', status: 'ACTIVE' },
+              ],
+            };
+          }
+          if (cmd.input.modelId === 'custom-vendor.custom-model-v1:0') {
+            return {
+              authorizationStatus: 'AUTHORIZED',
+              entitlementAvailability: 'AVAILABLE',
+              regionAvailability: 'AVAILABLE',
+              agreementAvailability: { status: 'AVAILABLE' },
+            };
+          }
+          return {
+            authorizationStatus: 'NOT_AUTHORIZED',
+            entitlementAvailability: 'NOT_AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'NOT_AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+        defaultScoutModelId: 'us.custom-vendor.custom-model-v1:0',
+      });
+
+      const models = await adapter.getAvailableModels();
+      expect(models.some((m) => m.id === 'us.custom-vendor.custom-model-v1:0')).toBe(true);
+      expect(adapter.getModelCatalog().defaultScoutModelId).toBe('us.custom-vendor.custom-model-v1:0');
+    });
+
+    it('excludes incompatible foundation models (legacy status or non-text input)', async () => {
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'legacy.model:1',
+                  modelName: 'Legacy Text Model',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  modelLifecycle: { status: 'LEGACY' },
+                },
+                {
+                  modelId: 'image.only.input:1',
+                  modelName: 'Image Only Input',
+                  inputModalities: ['IMAGE'],
+                  outputModalities: ['TEXT'],
+                  modelLifecycle: { status: 'ACTIVE' },
+                },
+                {
+                  modelId: 'valid.text.model:1',
+                  modelName: 'Valid Text Model',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  modelLifecycle: { status: 'ACTIVE' },
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return { inferenceProfileSummaries: [] };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: {} as unknown as BedrockRuntimeClient,
+      });
+
+      const models = await adapter.getAvailableModels();
+      const ids = models.map((m) => m.id);
+      expect(ids).toContain('valid.text.model:1');
+      expect(ids).not.toContain('legacy.model:1');
+      expect(ids).not.toContain('image.only.input:1');
+    });
   });
 
   describe('3. Client SSE Parser & UI Model Selector Tests', () => {
@@ -1811,6 +2127,310 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         expect(onSelectCopywriterModel).toHaveBeenCalledTimes(1);
         expect(onSelectCopywriterModel).toHaveBeenCalledWith('us.amazon.nova-pro-v1:0');
+      });
+
+      it('renders disabled "Select model..." option and does not silently fall back to first model when selectedModelId is empty', () => {
+        let app!: ReactTestRenderer;
+
+        act(() => {
+          app = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId=""
+            />
+          );
+        });
+        mounted.push(app);
+
+        const select = app.root.findByProps({ 'aria-label': 'Route Scout AI Model' });
+        expect(select.props.value).toBe('');
+        const options = select.findAllByType('option');
+        const placeholderOption = options.find((opt) => opt.props.value === '');
+        expect(placeholderOption).toBeDefined();
+        expect(placeholderOption?.props.disabled).toBe(true);
+      });
+
+      it('isolates conversations across itineraries: aborts in-flight stream and prevents Trip A results leaking into Trip B', async () => {
+        let capturedSignal: AbortSignal | undefined;
+        let resolveStreamPromise!: () => void;
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => ['Prompt 1', 'Prompt 2'],
+              });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              capturedSignal = init?.signal;
+              return new Promise((resolve) => {
+                resolveStreamPromise = () => {
+                  const encoder = new TextEncoder();
+                  const stream = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      controller.enqueue(
+                        encoder.encode('event: delta\ndata: {"text":"Advice intended solely for Trip A"}\n\n')
+                      );
+                      controller.enqueue(
+                        encoder.encode(
+                          'event: done\ndata: {"reply":"Advice intended solely for Trip A","suggestions":[],"sessionId":"s1"}\n\n'
+                        )
+                      );
+                      controller.close();
+                    },
+                  });
+                  resolve({
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'text/event-stream' }),
+                    body: stream,
+                  });
+                };
+              });
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        const tripA = { ...sampleTrip, fileName: 'trip-a.json', tripName: 'Trip A' };
+        const tripB = { ...sampleTrip, fileName: 'trip-b.json', tripName: 'Trip B' };
+
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={tripA}
+              itineraryId="trip-a"
+              activeDayIndex={0}
+              activeDay={tripA.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        // Start a turn for Trip A
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Recommend fuel stops along I-40 for Trip A' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        // Trip A stream is now deferred and in flight. Switch component props to Trip B:
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={tripB}
+              itineraryId="trip-b"
+              activeDayIndex={0}
+              activeDay={tripB.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        // 1. Verify Trip A's stream abort signal was triggered upon itinerary switch
+        expect(capturedSignal?.aborted).toBe(true);
+
+        // 2. Now let Trip A's deferred stream complete
+        await act(async () => {
+          resolveStreamPromise();
+        });
+
+        // 3. Verify Trip B does NOT render Trip A's deferred response
+        const jsonTree = JSON.stringify(drawer.toJSON());
+        expect(jsonTree).not.toContain('Advice intended solely for Trip A');
+      });
+
+      it('aborts active stream when drawer is closed (isOpen becomes false)', () => {
+        let capturedSignal: AbortSignal | undefined;
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({ ok: true, json: async () => [] });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              capturedSignal = init?.signal;
+              return new Promise(() => {}); // never resolves
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'In flight request' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        // Close the drawer
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={false}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        expect(capturedSignal?.aborted).toBe(true);
+      });
+
+      it('aborts active stream when scope is switched', () => {
+        let capturedSignal: AbortSignal | undefined;
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({ ok: true, json: async () => [] });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              capturedSignal = init?.signal;
+              return new Promise(() => {}); // never resolves
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'In flight request' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        // Switch scope to Day 2
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={1}
+              activeDay={sampleTrip.days[1] || sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 2 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        expect(capturedSignal?.aborted).toBe(true);
       });
     });
   });

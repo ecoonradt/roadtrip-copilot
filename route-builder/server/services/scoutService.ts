@@ -354,14 +354,28 @@ export function parseScoutResponse(
   let reply = rawOutput.trim();
   const suggestions: ScoutSuggestion[] = [];
 
-  // Match ```json:suggestions ... ``` or ```json ... ``` containing array with action field
-  const blockRegex = /```(?:json:suggestions|json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i;
-  const match = rawOutput.match(blockRegex);
+  const hasSuggestionsTag = /```(?:json:suggestions)\b/i.test(rawOutput);
+  const closedExplicitBlock = rawOutput.match(/```(?:json:suggestions)\s*([\s\S]*?)\s*```/i);
 
-  if (match && match[1]) {
+  if (hasSuggestionsTag && !closedExplicitBlock) {
+    throw new MalformedAiResponseError('AI response contained an incomplete or truncated suggestions block');
+  }
+
+  const genericMatch = !closedExplicitBlock
+    ? rawOutput.match(/```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/i)
+    : null;
+
+  const matchedBlockString = closedExplicitBlock ? closedExplicitBlock[0] : (genericMatch ? genericMatch[0] : '');
+  const rawJson = closedExplicitBlock ? closedExplicitBlock[1] : (genericMatch ? genericMatch[1] : null);
+
+  if (rawJson) {
     try {
-      const parsedArray = JSON.parse(match[1]);
-      if (Array.isArray(parsedArray)) {
+      const parsedArray = JSON.parse(rawJson);
+      if (!Array.isArray(parsedArray)) {
+        if (hasSuggestionsTag) {
+          throw new MalformedAiResponseError('AI response suggestions block did not contain a JSON array');
+        }
+      } else {
         parsedArray.forEach((item, index) => {
           if (
             typeof item === 'object' &&
@@ -448,9 +462,13 @@ export function parseScoutResponse(
         });
       }
       // Strip the code block from the user-facing text
-      reply = rawOutput.replace(blockRegex, '').trim();
-    } catch {
-      // If parsing fails, preserve raw output
+      reply = (matchedBlockString ? rawOutput.replace(matchedBlockString, '') : rawOutput).trim();
+    } catch (err: unknown) {
+      if (err instanceof MalformedAiResponseError) throw err;
+      if (hasSuggestionsTag) {
+        throw new MalformedAiResponseError('AI response contained an unparseable suggestions block');
+      }
+      // If parsing fails on generic json block, preserve raw output
     }
   }
 
@@ -521,6 +539,10 @@ export class ScoutService {
     return this.aiService.validateModelId(modelId, preferredEngine);
   }
 
+  validateProvider(preferredEngine?: string): AiHarnessAdapter {
+    return this.aiService.getAdapterFor(preferredEngine);
+  }
+
   /**
    * Executes a multi-turn chat interaction with Route Scout.
    */
@@ -551,7 +573,7 @@ export class ScoutService {
         this.tools,
         this.toolDispatcher,
         () => {},
-        { modelId: validatedModelId, abortSignal: options.abortSignal }
+        { modelId: activeModelId, abortSignal: options.abortSignal }
       );
       const { reply, suggestions, thought } = parseScoutResponse(
         adapter.sanitizeResponse(streamRes.text),
@@ -570,7 +592,7 @@ export class ScoutService {
     }
 
     const rawOutput = await adapter.generate(domainPrompt, {
-      modelId: validatedModelId,
+      modelId: activeModelId,
       abortSignal: options.abortSignal,
     });
     const { reply, suggestions, thought } = parseScoutResponse(
@@ -638,7 +660,7 @@ export class ScoutService {
           onEvent(streamEvt);
         }
       },
-      { modelId: validatedModelId, abortSignal: options.abortSignal }
+      { modelId: activeModelId, abortSignal: options.abortSignal }
     );
 
     if (options.abortSignal?.aborted) {

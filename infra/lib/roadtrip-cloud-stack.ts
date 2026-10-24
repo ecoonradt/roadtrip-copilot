@@ -159,11 +159,15 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
       }),
     );
 
-    // Read-only control-plane calls for dynamic model availability (ADR-0010). These list/describe
+    // Read-only control-plane calls for dynamic model availability (ADR-0010, ADR-0011). These list/describe
     // actions do not support resource-level scoping, so they are isolated from the invoke actions.
     this.fastifyApiFunction.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ['bedrock:GetFoundationModelAvailability', 'bedrock:ListInferenceProfiles'],
+        actions: [
+          'bedrock:GetFoundationModelAvailability',
+          'bedrock:ListInferenceProfiles',
+          'bedrock:ListFoundationModels',
+        ],
         resources: ['*'],
       }),
     );

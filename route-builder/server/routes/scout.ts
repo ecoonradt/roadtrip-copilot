@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { ScoutService } from '../services/scoutService.js';
-import { InvalidModelError } from '../services/aiService.js';
+import { InvalidModelError, UnknownAiProviderError } from '../services/aiService.js';
 import { MalformedAiResponseError } from '../services/schemaParser.js';
 import type { ScoutChatRequest, ScoutScope } from '../types/scout.js';
 
@@ -32,15 +32,20 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
   fastify.post<{ Body: ChatBody }>('/api/ai/scout/chat', async (request, reply) => {
     const { scope, messages, tripContext, sessionId, apiKey, preferredEngine, modelId } = request.body || {};
 
-    if (modelId !== undefined && modelId !== null) {
-      try {
+    try {
+      scoutService.validateProvider(preferredEngine);
+      if (modelId !== undefined && modelId !== null) {
         scoutService.validateModelId(modelId, preferredEngine);
-      } catch (err: unknown) {
-        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
-          return reply.status(400).send({ error: (err as Error).message });
-        }
-        throw err;
       }
+    } catch (err: unknown) {
+      if (
+        err instanceof InvalidModelError ||
+        err instanceof UnknownAiProviderError ||
+        (err as { statusCode?: number })?.statusCode === 400
+      ) {
+        return reply.status(400).send({ error: (err as Error).message });
+      }
+      throw err;
     }
 
     if (!scope || !scope.type) {
@@ -85,15 +90,20 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
   fastify.post<{ Body: ChatBody }>('/api/ai/scout/chat/stream', async (request, reply) => {
     const { scope, messages, tripContext, sessionId, apiKey, preferredEngine, modelId } = request.body || {};
 
-    if (modelId !== undefined && modelId !== null) {
-      try {
+    try {
+      scoutService.validateProvider(preferredEngine);
+      if (modelId !== undefined && modelId !== null) {
         scoutService.validateModelId(modelId, preferredEngine);
-      } catch (err: unknown) {
-        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
-          return reply.status(400).send({ error: (err as Error).message });
-        }
-        throw err;
       }
+    } catch (err: unknown) {
+      if (
+        err instanceof InvalidModelError ||
+        err instanceof UnknownAiProviderError ||
+        (err as { statusCode?: number })?.statusCode === 400
+      ) {
+        return reply.status(400).send({ error: (err as Error).message });
+      }
+      throw err;
     }
 
     if (!scope || !scope.type || !Array.isArray(messages) || messages.length === 0 || !tripContext) {

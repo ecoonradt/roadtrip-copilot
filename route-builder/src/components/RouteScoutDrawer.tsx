@@ -57,6 +57,7 @@ export interface RouteScoutDrawerProps {
   aiModels?: AiModelOption[];
   selectedModelId?: string;
   onSelectModel?: (modelId: string) => void;
+  itineraryId?: string;
 }
 
 const DEFAULT_DRAWER_WIDTH = 400;
@@ -281,6 +282,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   aiModels = [],
   selectedModelId,
   onSelectModel,
+  itineraryId,
 }) => {
   // Drawer width with localStorage persistence
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
@@ -304,21 +306,11 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const activeStreamAbortRef = useRef<AbortController | null>(null);
   const streamSeqRef = useRef<number>(0);
 
-  // Unmount cleanup
-  useEffect(() => {
-    return () => {
-      streamSeqRef.current += 1;
-      activeStreamAbortRef.current?.abort();
-      activeStreamAbortRef.current = null;
-    };
-  }, []);
+  // Derive stable itinerary identity
+  const currentItineraryId = itineraryId ?? trip.fileName ?? trip.tripName ?? 'default-itinerary';
+  const lastItineraryIdRef = useRef(currentItineraryId);
 
-  const scoutModels = useMemo(
-    () => (aiModels || []).filter((m) => m.role === 'scout' || m.role === 'both'),
-    [aiModels]
-  );
-
-  // Multi-turn conversations keyed by scope (`day:N` or `wp:ID`)
+  // Multi-turn conversations keyed by itinerary and scope (`<itinerary>:<scope>`)
   const [conversations, setConversations] = useState<Record<string, ScoutMessage[]>>({});
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -379,13 +371,67 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     }
   };
 
+  // Invalidate in-flight streams and reset conversation state on itinerary replacement
+  useEffect(() => {
+    if (lastItineraryIdRef.current !== currentItineraryId) {
+      lastItineraryIdRef.current = currentItineraryId;
+      streamSeqRef.current += 1;
+      activeStreamAbortRef.current?.abort();
+      activeStreamAbortRef.current = null;
+      setIsLoading(false);
+      setConversations({});
+      setErrorMessage(null);
+      setAddedSuggestionIds(new Set());
+      setUpdatedSuggestionIds(new Set());
+    }
+  }, [currentItineraryId]);
+
+  // Drawer close cleanup: abort in-flight work and reset loading
+  useEffect(() => {
+    if (!isOpen) {
+      streamSeqRef.current += 1;
+      activeStreamAbortRef.current?.abort();
+      activeStreamAbortRef.current = null;
+      setIsLoading(false);
+    }
+  }, [isOpen]);
+
+  // Unmount cleanup
+  useEffect(() => {
+    return () => {
+      streamSeqRef.current += 1;
+      activeStreamAbortRef.current?.abort();
+      activeStreamAbortRef.current = null;
+    };
+  }, []);
+
+  const scoutModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'scout' || m.role === 'both'),
+    [aiModels]
+  );
+
   const currentScopeKey = useMemo(
     () => getScopeKey(scope, activeDayIndex),
     [scope, activeDayIndex]
   );
+  const lastScopeKeyRef = useRef(currentScopeKey);
+
+  // Scope switch cleanup: abort in-flight work and reset loading
+  useEffect(() => {
+    if (lastScopeKeyRef.current !== currentScopeKey) {
+      lastScopeKeyRef.current = currentScopeKey;
+      streamSeqRef.current += 1;
+      activeStreamAbortRef.current?.abort();
+      activeStreamAbortRef.current = null;
+      setIsLoading(false);
+      setErrorMessage(null);
+    }
+  }, [currentScopeKey]);
+
+  const conversationKey = `${currentItineraryId}:${currentScopeKey}`;
   const currentMessages = useMemo(
-    () => conversations[currentScopeKey] || [],
-    [conversations, currentScopeKey]
+    () => conversations[conversationKey] || [],
+    [conversations, conversationKey]
   );
 
   // Load quick prompts when scope changes
@@ -526,11 +572,14 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       timestamp: Date.now(),
     };
 
+    const startedItineraryId = currentItineraryId;
+    const targetConvKey = conversationKey;
+
     // Update conversation with user message and placeholder assistant message
     const updatedHistory = [...currentMessages, userMessage];
     setConversations((prev) => ({
       ...prev,
-      [currentScopeKey]: [...updatedHistory, initialAssistantMessage],
+      [targetConvKey]: [...updatedHistory, initialAssistantMessage],
     }));
 
     setIsLoading(true);
@@ -677,7 +726,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           content: m.content,
         })),
         tripContext,
-        sessionId: `scout_${currentScopeKey}`,
+        sessionId: `scout_${startedItineraryId}_${currentScopeKey}`,
         ...(selectedModelId ? { modelId: selectedModelId } : {}),
       };
 
@@ -688,15 +737,15 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       await chatWithScoutStream(
         request,
         (event) => {
-          if (seq !== streamSeqRef.current) return;
+          if (seq !== streamSeqRef.current || currentItineraryId !== startedItineraryId) return;
           if (event.event === 'activity') {
           const act = event.data;
           currentThought = act.label;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) => {
+              [targetConvKey]: list.map((m) => {
                 if (m.id !== assistantMsgId) return m;
                 const existing = m.activities || [];
                 const idx = existing.findIndex((a) => a.id === act.id);
@@ -718,10 +767,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         } else if (event.event === 'thought') {
           currentThought = event.data.text;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId ? { ...m, thought: currentThought } : m
               ),
             };
@@ -733,10 +782,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           const effectiveThought = detectedThought || currentThought;
 
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId
                   ? {
                       ...m,
@@ -750,10 +799,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         } else if (event.event === 'suggestions') {
           accumulatedSuggestions = event.data.suggestions;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId
                   ? { ...m, suggestions: accumulatedSuggestions }
                   : m
@@ -763,10 +812,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         } else if (event.event === 'done') {
           const finalResp = event.data;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId
                   ? {
                       ...m,
@@ -788,22 +837,22 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       abortController.signal
     );
     } catch (err: unknown) {
-      if (seq !== streamSeqRef.current) return;
+      if (seq !== streamSeqRef.current || currentItineraryId !== startedItineraryId) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Route Scout request failed';
       setErrorMessage(msg);
       // Remove empty assistant message if it failed before receiving content
       setConversations((prev) => {
-        const list = prev[currentScopeKey] || [];
+        const list = prev[targetConvKey] || [];
         return {
           ...prev,
-          [currentScopeKey]: list.filter(
+          [targetConvKey]: list.filter(
             (m) => !(m.id === assistantMsgId && !m.content.trim())
           ),
         };
       });
     } finally {
-      if (seq === streamSeqRef.current) {
+      if (seq === streamSeqRef.current && currentItineraryId === startedItineraryId) {
         setIsLoading(false);
         if (activeStreamAbortRef.current === abortController) {
           activeStreamAbortRef.current = null;
@@ -820,7 +869,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     setIsLoading(false);
     setConversations((prev) => ({
       ...prev,
-      [currentScopeKey]: [],
+      [conversationKey]: [],
     }));
     setErrorMessage(null);
   };
@@ -1028,11 +1077,16 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             </span>
             <select
               aria-label="Route Scout AI Model"
-              value={selectedModelId || scoutModels[0]?.id || ''}
+              value={scoutModels.some((m) => m.id === selectedModelId) ? selectedModelId : ''}
               onChange={(e) => onSelectModel?.(e.target.value)}
               disabled={isLoading}
               className="bg-transparent text-xs font-medium text-cyan-300 focus:outline-none truncate cursor-pointer disabled:opacity-50"
             >
+              {!scoutModels.some((m) => m.id === selectedModelId) && (
+                <option value="" disabled className="bg-slate-900 text-slate-400">
+                  Select model...
+                </option>
+              )}
               {scoutModels.map((m) => (
                 <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
                   {m.name} ({m.provider})
