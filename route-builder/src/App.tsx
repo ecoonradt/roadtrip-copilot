@@ -152,15 +152,22 @@ export function App() {
               if (prev && scoutEligible.some((m) => m.id === prev)) {
                 return prev;
               }
-              const fallback =
-                (status.defaultScoutModelId && scoutEligible.some((m) => m.id === status.defaultScoutModelId)
-                  ? status.defaultScoutModelId
-                  : undefined) || scoutEligible[0].id;
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('copilot_scout_model_id', fallback);
+              if (status.defaultScoutModelId && scoutEligible.some((m) => m.id === status.defaultScoutModelId)) {
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('copilot_scout_model_id', status.defaultScoutModelId);
+                }
+                return status.defaultScoutModelId;
               }
-              return fallback;
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('copilot_scout_model_id');
+              }
+              return '';
             });
+          } else {
+            setSelectedScoutModelId('');
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('copilot_scout_model_id');
+            }
           }
 
           if (copywriterEligible.length > 0) {
@@ -168,15 +175,29 @@ export function App() {
               if (prev && copywriterEligible.some((m) => m.id === prev)) {
                 return prev;
               }
-              const fallback =
-                (status.defaultCopywriterModelId && copywriterEligible.some((m) => m.id === status.defaultCopywriterModelId)
-                  ? status.defaultCopywriterModelId
-                  : undefined) || copywriterEligible[0].id;
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('copilot_copywriter_model_id', fallback);
+              if (status.defaultCopywriterModelId && copywriterEligible.some((m) => m.id === status.defaultCopywriterModelId)) {
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('copilot_copywriter_model_id', status.defaultCopywriterModelId);
+                }
+                return status.defaultCopywriterModelId;
               }
-              return fallback;
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('copilot_copywriter_model_id');
+              }
+              return '';
             });
+          } else {
+            setSelectedCopywriterModelId('');
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('copilot_copywriter_model_id');
+            }
+          }
+        } else {
+          setSelectedScoutModelId('');
+          setSelectedCopywriterModelId('');
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('copilot_scout_model_id');
+            localStorage.removeItem('copilot_copywriter_model_id');
           }
         }
       }
@@ -1429,6 +1450,7 @@ export function App() {
           isOpen={isScoutOpen}
           onClose={() => setIsScoutOpen(false)}
           trip={trip}
+          itineraryId={trip.fileName || trip.tripName || 'default-itinerary'}
           activeDayIndex={activeDayIndex}
           activeDay={currentDay}
           waypoints={waypoints}

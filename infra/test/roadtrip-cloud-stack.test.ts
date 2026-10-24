@@ -250,7 +250,11 @@ describe('RoadtripCopilotCloudStack', () => {
       PolicyDocument: {
         Statement: Match.arrayWith([
           Match.objectLike({
-            Action: ['bedrock:GetFoundationModelAvailability', 'bedrock:ListInferenceProfiles'],
+            Action: [
+              'bedrock:GetFoundationModelAvailability',
+              'bedrock:ListInferenceProfiles',
+              'bedrock:ListFoundationModels',
+            ],
             Effect: 'Allow',
             Resource: '*',
           }),
