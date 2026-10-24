@@ -2761,6 +2761,111 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       expect(second).toBe('us.refresh-vendor.model-v2');
     });
 
+    it('succeeds on first unpinned request after alias-changing TTL refresh and rejects pinned old profile (P2 Finding 1)', async () => {
+      let activeProfile = 'us.refresh-vendor.model-v1:0';
+      const mockControlClient = {
+        send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
+          if (cmd.input?.byOutputModality === 'TEXT') {
+            return {
+              modelSummaries: [
+                {
+                  modelId: 'refresh-vendor.model-v1:0',
+                  modelName: 'Refresh Model',
+                  providerName: 'Refresh Vendor',
+                  inputModalities: ['TEXT'],
+                  outputModalities: ['TEXT'],
+                  responseStreamingSupported: true,
+                },
+              ],
+            };
+          }
+          if (!cmd.input?.modelId) {
+            return {
+              inferenceProfileSummaries: [
+                {
+                  inferenceProfileId: activeProfile,
+                  status: 'ACTIVE',
+                  type: 'SYSTEM_DEFINED',
+                  models: [{ modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/refresh-vendor.model-v1:0' }],
+                },
+              ],
+            };
+          }
+          return {
+            authorizationStatus: 'AUTHORIZED',
+            entitlementAvailability: 'AVAILABLE',
+            regionAvailability: 'AVAILABLE',
+            agreementAvailability: { status: 'AVAILABLE' },
+          };
+        }),
+      };
+
+      const capturedModelIds: string[] = [];
+      const mockRuntimeSend = vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string } }) => {
+        if (cmd.input?.modelId) {
+          capturedModelIds.push(cmd.input.modelId);
+        }
+        return {
+          output: {
+            message: {
+              role: 'assistant',
+              content: [{ text: JSON.stringify({ title: 'Sedona to Flagstaff' }) }],
+            },
+          },
+          stopReason: 'end_turn',
+        };
+      });
+
+      const adapter = new AwsBedrockHarnessAdapter({
+        controlClient: mockControlClient as unknown as BedrockClient,
+        client: { send: mockRuntimeSend } as unknown as BedrockRuntimeClient,
+        defaultCopywriterModelId: 'refresh-vendor.model-v1:0',
+      });
+      const aiService = new AiService({ adapters: [adapter] });
+      const app = createApp({ logger: false, aiService });
+
+      // Request 1: unpinned POST on fresh/cold instance succeeds with us. variant
+      const res1 = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/day-title',
+        payload: {
+          dayNumber: 1,
+          stops: ['Sedona', 'Flagstaff'],
+        },
+      });
+      expect(res1.statusCode).toBe(200);
+      expect(capturedModelIds[0]).toBe('us.refresh-vendor.model-v1:0');
+
+      // Change available profile to global variant and expire TTL
+      activeProfile = 'global.refresh-vendor.model-v1:0';
+      (adapter as unknown as { availabilityCheckedAt: number }).availabilityCheckedAt = 0;
+
+      // Request 2: FIRST unpinned POST after TTL refresh MUST succeed with HTTP 200 using global variant
+      const res2 = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/day-title',
+        payload: {
+          dayNumber: 1,
+          stops: ['Sedona', 'Flagstaff'],
+        },
+      });
+      expect(res2.statusCode).toBe(200);
+      expect(capturedModelIds[1]).toBe('global.refresh-vendor.model-v1:0');
+
+      // Request 3: explicitly pinned request with the old/unavailable US profile MUST be rejected with HTTP 400
+      const res3 = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/day-title',
+        payload: {
+          dayNumber: 1,
+          stops: ['Sedona', 'Flagstaff'],
+          modelId: 'us.refresh-vendor.model-v1:0',
+        },
+      });
+      expect(res3.statusCode).toBe(400);
+      expect(res3.json().error).toContain('Unsupported or unavailable Bedrock model ID: "us.refresh-vendor.model-v1:0"');
+    });
+
     it('pre-heartbeat disconnect: does not invoke inference if client disconnects during pre-stream model discovery (P2 Finding 3)', async () => {
       let resolveDiscovery!: () => void;
       const discoveryPromise = new Promise<void>((resolve) => {
@@ -3664,6 +3769,172 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         });
         jsonStr = JSON.stringify(drawer.toJSON());
         expect(jsonStr).toContain('Completed Scenic Vista');
+      });
+
+      it('preserves completed cards-only answer without duplicate loading indicator during follow-up turn (P3 Finding 2)', async () => {
+        let streamCount = 0;
+        let resolveFirstStream: () => void = () => {};
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => [],
+              });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              streamCount++;
+              if (streamCount === 1) {
+                return new Promise((resolve) => {
+                  resolveFirstStream = () => {
+                    const encoder = new TextEncoder();
+                    const stream = new ReadableStream<Uint8Array>({
+                      start(controller) {
+                        const suggestionsBlock = JSON.stringify({
+                          reply: '',
+                          suggestions: [
+                            {
+                              id: 'sug-scenic-1',
+                              action: 'add_waypoint',
+                              name: 'Completed Scenic Vista',
+                              type: 'scenic',
+                              lat: 34.8697,
+                              lng: -111.761,
+                              notes: 'Must-see red rocks vista',
+                              reason: 'Iconic panoramic viewpoint along corridor',
+                            },
+                          ],
+                          sessionId: 's_test_123',
+                          engine: 'bedrock',
+                        });
+                        controller.enqueue(
+                          encoder.encode(`event: done\ndata: ${suggestionsBlock}\n\n`)
+                        );
+                        controller.close();
+                      },
+                    });
+                    resolve({
+                      ok: true,
+                      status: 200,
+                      headers: new Headers({ 'content-type': 'text/event-stream' }),
+                      body: stream,
+                    });
+                  };
+                });
+              }
+              // Second stream (follow-up turn) stays deferred / in flight
+              return new Promise(() => {});
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        // Turn 1
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Suggest scenic spots' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        // Resolve Turn 1 stream
+        await act(async () => {
+          resolveFirstStream();
+        });
+
+        // Completed card is rendered, no loading indicators
+        let jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+        expect(jsonStr).not.toContain('Route Scout is analyzing route geometry & corridor');
+
+        // Start Turn 2 (deferred follow-up turn)
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Any coffee spots nearby?' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        // Assert: Turn 2 in-flight turn renders EXACTLY ONE loading indicator, and Turn 1's completed card remains
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+        const matches = jsonStr.match(/Route Scout is analyzing route geometry & corridor/g);
+        expect(matches).toHaveLength(1);
+
+        // Close the drawer to cancel the active turn
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={false}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        // Reopen drawer: Turn 2's placeholder was removed, Turn 1's completed card is preserved, and 0 loading indicators
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={BEDROCK_MODEL_CATALOG}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+        expect(jsonStr).not.toContain('Route Scout is analyzing route geometry & corridor');
       });
 
       it('gates Route Scout input, send button, and quick prompts when selectedModelId is empty (R5)', () => {

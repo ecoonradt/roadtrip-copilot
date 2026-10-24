@@ -317,6 +317,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const [conversations, setConversations] = useState<Record<string, ScoutMessage[]>>({});
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [activeAssistantMsgId, setActiveAssistantMsgId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -326,6 +327,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     activeStreamAbortRef.current?.abort();
     activeStreamAbortRef.current = null;
     setIsLoading(false);
+    setActiveAssistantMsgId(null);
 
     const activeTurn = activeTurnRef.current;
     activeTurnRef.current = null;
@@ -608,6 +610,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     const startedItineraryId = currentItineraryId;
     const targetConvKey = conversationKey;
     activeTurnRef.current = { convKey: targetConvKey, assistantMsgId };
+    setActiveAssistantMsgId(assistantMsgId);
 
     // Update conversation with user message and placeholder assistant message
     const updatedHistory = [...currentMessages, userMessage];
@@ -845,6 +848,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           });
         } else if (event.event === 'done') {
           activeTurnRef.current = null;
+          setActiveAssistantMsgId(null);
           const finalResp = event.data;
           setConversations((prev) => {
             const list = prev[targetConvKey] || [];
@@ -874,6 +878,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     } catch (err: unknown) {
       if (seq !== streamSeqRef.current || currentItineraryId !== startedItineraryId) return;
       activeTurnRef.current = null;
+      setActiveAssistantMsgId(null);
       if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Route Scout request failed';
       setErrorMessage(msg);
@@ -896,6 +901,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       if (seq === streamSeqRef.current && currentItineraryId === startedItineraryId) {
         setIsLoading(false);
         activeTurnRef.current = null;
+        setActiveAssistantMsgId(null);
         if (activeStreamAbortRef.current === abortController) {
           activeStreamAbortRef.current = null;
         }
@@ -1271,7 +1277,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
                   {msg.content ? (
                     <FormattedAssistantText text={msg.content} />
-                  ) : isLoading ? (
+                  ) : isLoading && (activeAssistantMsgId === msg.id || activeTurnRef.current?.assistantMsgId === msg.id) ? (
                     <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400 shrink-0" />
                       <span>

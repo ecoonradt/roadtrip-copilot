@@ -341,6 +341,8 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   readonly name = 'Amazon Bedrock';
   public readonly defaultScoutModelId: string;
   public readonly defaultCopywriterModelId: string;
+  private readonly rawConfiguredScoutModelId: string;
+  private readonly rawConfiguredCopywriterModelId: string;
   private client: BedrockRuntimeClient;
   private controlClient: BedrockClient | null;
   private hasCustomClient: boolean;
@@ -386,6 +388,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       process.env.BEDROCK_SCOUT_MODEL_ID ||
       DEFAULT_BEDROCK_SCOUT_MODEL_ID;
     const cleanScout = typeof rawScout === 'string' ? rawScout.trim() : '';
+    this.rawConfiguredScoutModelId = cleanScout;
     this.defaultScoutModelId = getStaticInferenceProfileAlias(cleanScout) || cleanScout;
 
     const rawCopywriter =
@@ -394,6 +397,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       process.env.BEDROCK_COPYWRITER_MODEL_ID ||
       DEFAULT_BEDROCK_COPYWRITER_MODEL_ID;
     const cleanCopywriter = typeof rawCopywriter === 'string' ? rawCopywriter.trim() : '';
+    this.rawConfiguredCopywriterModelId = cleanCopywriter;
     this.defaultCopywriterModelId = getStaticInferenceProfileAlias(cleanCopywriter) || cleanCopywriter;
   }
 
@@ -712,8 +716,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     defaultScoutModelId: string;
     defaultCopywriterModelId: string;
   } {
-    const scoutDefault = this.resolveCanonicalModelId(this.defaultScoutModelId);
-    const copywriterDefault = this.resolveCanonicalModelId(this.defaultCopywriterModelId);
+    const rawScout = this.rawConfiguredScoutModelId || this.defaultScoutModelId;
+    const rawCopywriter = this.rawConfiguredCopywriterModelId || this.defaultCopywriterModelId;
+    const scoutDefault = this.resolveCanonicalModelId(rawScout);
+    const copywriterDefault = this.resolveCanonicalModelId(rawCopywriter);
     return {
       models: this.availableModels ?? BEDROCK_MODEL_CATALOG,
       defaultScoutModelId: scoutDefault,
@@ -766,7 +772,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       throw new Error('Request aborted');
     }
 
-    const rawModelId = options?.modelId || this.defaultCopywriterModelId;
+    const rawModelId = options?.modelId || this.rawConfiguredCopywriterModelId || this.defaultCopywriterModelId;
     const modelId = await this.validateModelId(rawModelId, 'copywriter');
 
     const command = new ConverseCommand({
@@ -814,7 +820,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       throw new Error('Request aborted');
     }
 
-    const rawModelId = options?.modelId || this.defaultScoutModelId;
+    const rawModelId = options?.modelId || this.rawConfiguredScoutModelId || this.defaultScoutModelId;
     const activeModelId = await this.validateModelId(rawModelId, 'scout');
 
     const messages: Message[] = [{ role: 'user', content: [{ text: prompt }] }];

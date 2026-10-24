@@ -175,6 +175,8 @@ export class AiService {
       }
       return adapter.validateModelId(modelId, role);
     }
+    // Ensure discovery/default metadata is fresh before selecting an unpinned role default
+    await adapter.getAvailableModels();
     const catalog = adapter.getModelCatalog();
     const candidateId =
       role === 'scout'
