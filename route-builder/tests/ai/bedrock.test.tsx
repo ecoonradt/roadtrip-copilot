@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   AwsBedrockHarnessAdapter,
   InvalidModelError,
-  BEDROCK_MODEL_CATALOG,
   DEFAULT_BEDROCK_SCOUT_MODEL_ID,
   DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
   MAX_TOOL_ITERATIONS,
@@ -29,6 +28,7 @@ import { createItinerarySessionId } from '../../src/utils/itinerarySession.js';
 import type {
   WaypointContext,
   ToolDeclaration,
+  AiModelOption,
 } from '../../server/types/ai.js';
 import type {
   ScoutChatRequest,
@@ -167,6 +167,135 @@ const sampleTools: ToolDeclaration[] = [
   },
 ];
 
+const TEST_MOCK_MODELS: AiModelOption[] = [
+  {
+    id: 'us.moonshotai.kimi-k3',
+    name: 'Moonshot Kimi K3',
+    provider: 'Moonshot AI',
+    description: 'Flagship 2.8T MoE corridor & agentic reasoning engine (1M context)',
+    role: 'both',
+  },
+  {
+    id: 'us.amazon.nova-2-lite-v1:0',
+    name: 'Amazon Nova 2 Lite',
+    provider: 'Amazon',
+    description: 'Fast, low-latency reasoning & alert copywriter',
+    role: 'both',
+  },
+  {
+    id: 'us.amazon.nova-pro-v1:0',
+    name: 'Amazon Nova Pro',
+    provider: 'Amazon',
+    description: 'Balanced multimodal & agentic route co-pilot',
+    role: 'both',
+  },
+  {
+    id: 'openai.gpt-oss-120b-1:0',
+    name: 'OpenAI GPT-OSS 120B',
+    provider: 'OpenAI',
+    description: 'Frontier open-weights deep reasoning & tool-use model',
+    role: 'both',
+  },
+  {
+    id: 'openai.gpt-oss-20b-1:0',
+    name: 'OpenAI GPT-OSS 20B',
+    provider: 'OpenAI',
+    description: 'High-speed, low-cost alert copywriting & chat',
+    role: 'both',
+  },
+  {
+    id: 'deepseek.v3.2',
+    name: 'DeepSeek V3.2',
+    provider: 'DeepSeek',
+    description: 'High-efficiency corridor analysis & structured JSON generation',
+    role: 'both',
+  },
+  {
+    id: 'mistral.mistral-large-3-675b-instruct',
+    name: 'Mistral Large 3 (675B)',
+    provider: 'Mistral AI',
+    description: 'Heavyweight 675B instruct model for multi-stop auditing',
+    role: 'both',
+  },
+  {
+    id: 'moonshotai.kimi-k2.5',
+    name: 'Moonshot Kimi K2.5',
+    provider: 'Moonshot AI',
+    description: 'Fast on-demand conversational & tool-use model',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6-luna',
+    name: 'OpenAI GPT-6 Luna',
+    provider: 'OpenAI',
+    description: 'Ultra-fast frontier model for copywriting & daily turns (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-sonnet-5-5',
+    name: 'Anthropic Claude Sonnet 5.5',
+    provider: 'Anthropic',
+    description: 'Frontier agentic tool use & stylist (requires Anthropic account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6-sol',
+    name: 'OpenAI GPT-6 Sol',
+    provider: 'OpenAI',
+    description: 'Standard frontier co-pilot & corridor logistics (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6-astra',
+    name: 'OpenAI GPT-6 Astra',
+    provider: 'OpenAI',
+    description: 'Heavyweight multi-day corridor audit engine (requires AWS account opt-in)',
+    role: 'scout',
+  },
+  {
+    id: 'us.anthropic.claude-opus-5-5',
+    name: 'Anthropic Claude Opus 5.5',
+    provider: 'Anthropic',
+    description: 'Flagship multi-day architect (requires Anthropic account opt-in)',
+    role: 'scout',
+  },
+  {
+    id: 'us.xai.grok-4.7',
+    name: 'xAI Grok 4.7',
+    provider: 'xAI',
+    description: 'Long-horizon agentic workflow engine (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'amazon.nova-lite-v1:0',
+    name: 'Amazon Nova Lite',
+    provider: 'Amazon',
+    description: 'Cost-effective multimodal model for high-volume turns',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6.1-sol',
+    name: 'OpenAI GPT-6.1 Sol',
+    provider: 'OpenAI',
+    description: 'Advanced frontier co-pilot & corridor logistics (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-sonnet-4-6',
+    name: 'Anthropic Claude Sonnet 4.6',
+    provider: 'Anthropic',
+    description: 'High-precision corridor analysis & reasoning (requires Anthropic account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    name: 'Anthropic Claude Haiku 4.5',
+    provider: 'Anthropic',
+    description: 'High-speed, lightweight alert copywriting (requires Anthropic account opt-in)',
+    role: 'copywriter',
+  },
+];
+
 describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () => {
   describe('1. AwsBedrockHarnessAdapter Unit Tests (server/services/bedrockService.ts)', () => {
     describe('Catalog & Defaults (ADR-0010)', () => {
@@ -176,43 +305,27 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         expect(MAX_TOOL_ITERATIONS).toBe(5);
       });
 
-      it('verifies BEDROCK_MODEL_CATALOG contains 18 models with valid id, name, provider, description, and role', () => {
-        expect(BEDROCK_MODEL_CATALOG).toHaveLength(18);
-
-        for (const model of BEDROCK_MODEL_CATALOG) {
-          expect(typeof model.id).toBe('string');
-          expect(model.id.length).toBeGreaterThan(0);
-
-          expect(typeof model.name).toBe('string');
-          expect(model.name.length).toBeGreaterThan(0);
-
-          expect(typeof model.provider).toBe('string');
-          expect(model.provider.length).toBeGreaterThan(0);
-
-          expect(typeof model.description).toBe('string');
-          expect(model.description.length).toBeGreaterThan(0);
-
-          expect(['scout', 'copywriter', 'both']).toContain(model.role);
-        }
-
-        // Verify key flagship defaults are present in catalog
-        const scoutModel = BEDROCK_MODEL_CATALOG.find((m) => m.id === DEFAULT_BEDROCK_SCOUT_MODEL_ID);
-        expect(scoutModel).toBeDefined();
-        expect(scoutModel?.provider).toBe('Moonshot AI');
-
-        const copywriterModel = BEDROCK_MODEL_CATALOG.find((m) => m.id === DEFAULT_BEDROCK_COPYWRITER_MODEL_ID);
-        expect(copywriterModel).toBeDefined();
-        expect(copywriterModel?.provider).toBe('Amazon');
-      });
-
-      it('getModelCatalog() returns complete catalog and active configured defaults', () => {
+      it('getModelCatalog() returns empty models when availableModels is not populated (no static fallback)', () => {
         const adapter = new AwsBedrockHarnessAdapter({
           scoutModelId: 'us.amazon.nova-pro-v1:0',
           copywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         });
 
         const catalog = adapter.getModelCatalog();
-        expect(catalog.models).toEqual(BEDROCK_MODEL_CATALOG);
+        expect(catalog.models).toEqual([]);
+        expect(catalog.defaultScoutModelId).toBe('us.amazon.nova-pro-v1:0');
+        expect(catalog.defaultCopywriterModelId).toBe('us.amazon.nova-2-lite-v1:0');
+      });
+
+      it('getModelCatalog() returns injected availableModels and active configured defaults', () => {
+        const adapter = new AwsBedrockHarnessAdapter({
+          availableModels: TEST_MOCK_MODELS,
+          scoutModelId: 'us.amazon.nova-pro-v1:0',
+          copywriterModelId: 'us.amazon.nova-2-lite-v1:0',
+        });
+
+        const catalog = adapter.getModelCatalog();
+        expect(catalog.models).toEqual(TEST_MOCK_MODELS);
         expect(catalog.defaultScoutModelId).toBe('us.amazon.nova-pro-v1:0');
         expect(catalog.defaultCopywriterModelId).toBe('us.amazon.nova-2-lite-v1:0');
       });
@@ -239,7 +352,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
     describe('Model Allowlist & Alias Normalization (validateModelId)', () => {
       const adapter = new AwsBedrockHarnessAdapter({
         available: true,
-        availableModels: BEDROCK_MODEL_CATALOG,
+        availableModels: TEST_MOCK_MODELS,
       });
 
       it('normalizes bare foundation model IDs to their us. inference profiles', async () => {
@@ -285,7 +398,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       it('rejects model IDs excluded via options.excludedModelIds or BEDROCK_EXCLUDED_MODEL_IDS', async () => {
         const adapterWithOptions = new AwsBedrockHarnessAdapter({
           available: true,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
           excludedModelIds: ['us.amazon.nova-pro-v1:0'],
         });
         await expect(adapterWithOptions.validateModelId('us.amazon.nova-pro-v1:0')).rejects.toThrow(InvalidModelError);
@@ -296,7 +409,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
           process.env.BEDROCK_EXCLUDED_MODEL_IDS = 'us.moonshotai.kimi-k3, custom.excluded-model';
           const adapterWithEnv = new AwsBedrockHarnessAdapter({
             available: true,
-            availableModels: BEDROCK_MODEL_CATALOG,
+            availableModels: TEST_MOCK_MODELS,
           });
           await expect(adapterWithEnv.validateModelId('us.moonshotai.kimi-k3')).rejects.toThrow(InvalidModelError);
           await expect(adapterWithEnv.validateModelId('us.moonshotai.kimi-k3')).rejects.toThrow(/excluded by policy/);
@@ -309,7 +422,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       it('rejects inherited object-property names (constructor, __proto__, toString) safely as InvalidModelError (P2 Finding 5)', async () => {
         const adapter = new AwsBedrockHarnessAdapter({
           available: true,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(adapter.validateModelId('constructor')).rejects.toThrow(InvalidModelError);
@@ -594,7 +707,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         const mockClient = { send: mockSend } as unknown as BedrockRuntimeClient;
         const adapter = new AwsBedrockHarnessAdapter({
           client: mockClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         // 1. Default model call
@@ -628,7 +741,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         const res = await adapter.generate('Alert prompt');
@@ -648,7 +761,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(adapter.generate('Prompt')).rejects.toThrow(
@@ -668,7 +781,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(adapter.generate('Prompt')).rejects.toThrow(MalformedAiResponseError);
@@ -687,7 +800,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(adapter.generate('Prompt')).rejects.toThrow(MalformedAiResponseError);
@@ -736,7 +849,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         const emittedEvents: ScoutStreamEvent[] = [];
@@ -824,7 +937,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         const mockDispatcher = vi.fn().mockImplementation(async (name: string, args: Record<string, unknown>) => {
@@ -949,7 +1062,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         const failingDispatcher = vi.fn().mockRejectedValue(new Error('Search API 503'));
@@ -1010,7 +1123,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         const mockDispatcher = vi.fn().mockResolvedValue({ status: 'ok' });
@@ -1043,7 +1156,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(
@@ -1067,7 +1180,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         }));
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(
@@ -1088,7 +1201,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         }));
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(
@@ -1108,7 +1221,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         }));
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(
@@ -1129,7 +1242,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         }));
         const adapter = new AwsBedrockHarnessAdapter({
           client: { send: mockSend } as unknown as BedrockRuntimeClient,
-          availableModels: BEDROCK_MODEL_CATALOG,
+          availableModels: TEST_MOCK_MODELS,
         });
 
         await expect(
@@ -1148,7 +1261,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string; typeEquals?: string } }) => {
           if (cmd.input?.byOutputModality === 'TEXT') {
             return {
-              modelSummaries: BEDROCK_MODEL_CATALOG.map((model) => ({
+              modelSummaries: TEST_MOCK_MODELS.map((model) => ({
                 modelId: toFoundationModelId(model.id),
                 modelName: model.name,
                 providerName: model.provider,
@@ -1161,7 +1274,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
           }
           if (cmd.input?.typeEquals === 'SYSTEM_DEFINED' || !cmd.input?.modelId) {
             return {
-              inferenceProfileSummaries: BEDROCK_MODEL_CATALOG.map((model) => ({
+              inferenceProfileSummaries: TEST_MOCK_MODELS.map((model) => ({
                 inferenceProfileId: model.id,
                 status: 'ACTIVE',
                 type: 'SYSTEM_DEFINED',
@@ -1213,9 +1326,9 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
-        getAvailableModels: async () => BEDROCK_MODEL_CATALOG,
+        getAvailableModels: async () => TEST_MOCK_MODELS,
         getModelCatalog: () => ({
-          models: BEDROCK_MODEL_CATALOG,
+          models: TEST_MOCK_MODELS,
           defaultScoutModelId: 'us.moonshotai.kimi-k3',
           defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         }),
@@ -1226,7 +1339,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         validateModelId: (m: string) =>
           new AwsBedrockHarnessAdapter({
             available: true,
-            availableModels: BEDROCK_MODEL_CATALOG,
+            availableModels: TEST_MOCK_MODELS,
           }).validateModelId(m),
       };
 
@@ -1296,9 +1409,9 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
-        getAvailableModels: async () => BEDROCK_MODEL_CATALOG,
+        getAvailableModels: async () => TEST_MOCK_MODELS,
         getModelCatalog: () => ({
-          models: BEDROCK_MODEL_CATALOG,
+          models: TEST_MOCK_MODELS,
           defaultScoutModelId: 'us.moonshotai.kimi-k3',
           defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         }),
@@ -1309,7 +1422,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         validateModelId: (m: string) =>
           new AwsBedrockHarnessAdapter({
             available: true,
-            availableModels: BEDROCK_MODEL_CATALOG,
+            availableModels: TEST_MOCK_MODELS,
           }).validateModelId(m),
       };
 
@@ -1341,7 +1454,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
     it('POST /api/copilot/generate and /day-title return HTTP 400 when modelId is unknown or empty', async () => {
       const mockBedrockAdapter = new AwsBedrockHarnessAdapter({
         available: true,
-        availableModels: BEDROCK_MODEL_CATALOG,
+        availableModels: TEST_MOCK_MODELS,
       });
       const aiService = new AiService({ adapters: [mockBedrockAdapter] });
       const app = createApp({ logger: false, aiService });
@@ -1397,7 +1510,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
     it('POST /api/ai/scout/chat and chat/stream return HTTP 400 when modelId is unknown or empty', async () => {
       const mockBedrockAdapter = new AwsBedrockHarnessAdapter({
         available: true,
-        availableModels: BEDROCK_MODEL_CATALOG,
+        availableModels: TEST_MOCK_MODELS,
       });
       const aiService = new AiService({ adapters: [mockBedrockAdapter] });
       const scoutService = new ScoutService(aiService);
@@ -1463,9 +1576,9 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
-        getAvailableModels: async () => BEDROCK_MODEL_CATALOG,
+        getAvailableModels: async () => TEST_MOCK_MODELS,
         getModelCatalog: () => ({
-          models: BEDROCK_MODEL_CATALOG,
+          models: TEST_MOCK_MODELS,
           defaultScoutModelId: 'us.moonshotai.kimi-k3',
           defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         }),
@@ -1476,7 +1589,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         validateModelId: (m: string) =>
           new AwsBedrockHarnessAdapter({
             available: true,
-            availableModels: BEDROCK_MODEL_CATALOG,
+            availableModels: TEST_MOCK_MODELS,
           }).validateModelId(m),
         generateStreamWithTools: vi.fn().mockImplementation(
           async (_prompt, _tools, _dispatcher, onChunk) => {
@@ -1544,9 +1657,9 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
-        getAvailableModels: async () => BEDROCK_MODEL_CATALOG,
+        getAvailableModels: async () => TEST_MOCK_MODELS,
         getModelCatalog: () => ({
-          models: BEDROCK_MODEL_CATALOG,
+          models: TEST_MOCK_MODELS,
           defaultScoutModelId: 'us.moonshotai.kimi-k3',
           defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         }),
@@ -1557,7 +1670,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         validateModelId: (m: string) =>
           new AwsBedrockHarnessAdapter({
             available: true,
-            availableModels: BEDROCK_MODEL_CATALOG,
+            availableModels: TEST_MOCK_MODELS,
           }).validateModelId(m),
         generateStreamWithTools: vi.fn().mockRejectedValue(new Error('ValidationException: Error 002')),
       };
@@ -1594,9 +1707,9 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       const mockBedrockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
-        getAvailableModels: async () => BEDROCK_MODEL_CATALOG,
+        getAvailableModels: async () => TEST_MOCK_MODELS,
         getModelCatalog: () => ({
-          models: BEDROCK_MODEL_CATALOG,
+          models: TEST_MOCK_MODELS,
           defaultScoutModelId: 'us.moonshotai.kimi-k3',
           defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         }),
@@ -1607,7 +1720,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
         validateModelId: (m: string) =>
           new AwsBedrockHarnessAdapter({
             available: true,
-            availableModels: BEDROCK_MODEL_CATALOG,
+            availableModels: TEST_MOCK_MODELS,
           }).validateModelId(m),
         generateStreamWithTools: vi.fn().mockImplementation(
           (
@@ -1922,7 +2035,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
       });
 
       await expect(adapter.getAvailableModels()).rejects.toThrow('AccessDeniedException');
-      expect(adapter.getModelCatalog().models).toHaveLength(18);
+      expect(adapter.getModelCatalog().models).toEqual([]);
     });
 
     it('fails loudly when only a runtime client is injected and availability cannot be verified', async () => {
@@ -2956,7 +3069,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
     it('returns HTTP 400 when modelId is an inherited object property like constructor, __proto__, toString (P2 Finding 5)', async () => {
       const adapter = new AwsBedrockHarnessAdapter({
         available: true,
-        availableModels: BEDROCK_MODEL_CATALOG,
+        availableModels: TEST_MOCK_MODELS,
       });
       const aiService = new AiService({ adapters: [adapter] });
       const app = createApp({ logger: false, aiService });
@@ -3149,7 +3262,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
               onSelectModel={onSelectScoutModel}
             />
@@ -3168,7 +3281,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         for (const opt of options) {
           const optModelId = opt.props.value;
-          const matchingCatalogModel = BEDROCK_MODEL_CATALOG.find((m) => m.id === optModelId);
+          const matchingCatalogModel = TEST_MOCK_MODELS.find((m) => m.id === optModelId);
           expect(matchingCatalogModel).toBeDefined();
           expect(['scout', 'both']).toContain(matchingCatalogModel?.role);
         }
@@ -3194,7 +3307,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               waypoint={sampleWaypointWithDetails}
               onClose={vi.fn()}
               onSave={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.amazon.nova-2-lite-v1:0"
               onSelectModel={onSelectCopywriterModel}
             />
@@ -3219,7 +3332,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
 
         for (const opt of options) {
           const optModelId = opt.props.value;
-          const matchingCatalogModel = BEDROCK_MODEL_CATALOG.find((m) => m.id === optModelId);
+          const matchingCatalogModel = TEST_MOCK_MODELS.find((m) => m.id === optModelId);
           expect(matchingCatalogModel).toBeDefined();
           expect(['copywriter', 'both']).toContain(matchingCatalogModel?.role);
         }
@@ -3250,7 +3363,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId=""
             />
           );
@@ -3328,7 +3441,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3364,7 +3477,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3416,7 +3529,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3451,7 +3564,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3475,7 +3588,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3518,7 +3631,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3553,7 +3666,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3577,7 +3690,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3657,7 +3770,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3698,7 +3811,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3718,7 +3831,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3742,7 +3855,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3762,7 +3875,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3847,7 +3960,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3904,7 +4017,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3926,7 +4039,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );
@@ -3954,7 +4067,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onAddWaypoint={vi.fn()}
               onUpdateWaypoint={vi.fn()}
               onPreviewCoordinate={vi.fn()}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId=""
             />
           );
@@ -3982,7 +4095,7 @@ describe('Adversarial Bedrock Adapter & Configurable Model Selection Suite', () 
               onClose={vi.fn()}
               onSave={vi.fn()}
               waypoint={sampleWaypointWithDetails}
-              aiModels={BEDROCK_MODEL_CATALOG}
+              aiModels={TEST_MOCK_MODELS}
               selectedModelId=""
             />
           );
