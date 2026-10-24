@@ -15,7 +15,29 @@ export interface CopilotAlert {
   recommended_trigger_radius_miles: number;
 }
 
-export type AiEngineType = 'agy' | 'cloud' | 'template';
+/**
+ * Identifier of the AI provider adapter that produced a result.
+ * Any registered `AiHarnessAdapter.id` is valid; unknown ids are rejected at runtime.
+ */
+export type AiEngineId = string;
+
+export interface AiModelOption {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  role: 'scout' | 'copywriter' | 'both';
+}
+
+export interface AiStatusResult {
+  available: boolean;
+  engine?: AiEngineId;
+  providerName?: string;
+  models?: AiModelOption[];
+  defaultScoutModelId?: string;
+  defaultCopywriterModelId?: string;
+  message?: string;
+}
 
 export interface GenerateAlertResult {
   alert: CopilotAlert;
@@ -23,11 +45,12 @@ export interface GenerateAlertResult {
   message: string;
   speech: string;
   recommended_trigger_radius_miles: number;
-  engine: AiEngineType;
+  engine: AiEngineId;
 }
 
 export interface BatchAlertResult {
   alerts: Record<string, CopilotAlert>;
   results: Array<{ id: string; alert: CopilotAlert }>;
-  engine: AiEngineType;
+  /** Omitted for an empty batch, where no provider was invoked. */
+  engine?: AiEngineId;
 }

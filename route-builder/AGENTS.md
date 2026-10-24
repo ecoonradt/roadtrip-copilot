@@ -25,10 +25,13 @@
 * **Single-Row Header:** Keep the trip title shrinkable and compact secondary controls at narrower widths. Account details and Sign out live in a click-to-open avatar/initials popover with keyboard support; never hide overflowing actions with clipping.
 
 ### D. Pluggable AI Harness Adapters
-* AI generation adheres to the `AiHarnessAdapter` interface (`server/services/aiService.ts`):
-  * `AgyHarnessAdapter`: Local Antigravity CLI dynamically resolving the latest Flash model.
-  * `GeminiStudioHarnessAdapter`: Cloud API defaulting to `gemini-3.8-flash`.
-  * Graceful UI Disabling: AI features (alert copywriting and Route Scout) require an active AI engine or API key; when unavailable, the studio gracefully disables all AI buttons with informative tooltips.
+* AI generation adheres to the `AiHarnessAdapter` provider contract (`server/services/aiService.ts`). Adapters model **providers that expose multiple models at different price/performance points**, never a single CLI or a single model ([ADR-0001 §6](../docs/projects/route-scout-cloud/decisions/0001-amazon-bedrock-single-bill-ai.md#6-amendment-2026-10-23-no-offline-copy-engine-provider-only-adapter-seam)).
+  * Required members: `id`, `name`, `isAvailable`, `generate`, `validateModelId`, `getAvailableModels`, `getModelCatalog`, `decorateScoutPrompt`, `sanitizeResponse`. Only `generateStreamWithTools` is optional.
+  * `AiService` is provider-agnostic: it owns the adapter registry and resolves `preferredEngine` (`'auto'`/undefined → the primary adapter; anything else must be registered, else HTTP 400). `server/services/aiRegistry.ts` is the sole composition root and registers `AwsBedrockHarnessAdapter` as the primary provider. Swapping providers is a registry change, not a change to generation, parsing, Scout, or UI code.
+  * `AwsBedrockHarnessAdapter` (`server/services/bedrockService.ts`): The only adapter that ships today. Uses Amazon Bedrock's unified `ConverseCommand` and `ConverseStreamCommand` (`@aws-sdk/client-bedrock-runtime`), defaults to `us.moonshotai.kimi-k3` for Route Scout and `us.amazon.nova-2-lite-v1:0` for alert copywriting (`ADR-0010`), normalizes bare foundation model IDs to system-defined `us.` inference profiles where required, and exposes an allowlisted multi-vendor model catalog filtered to account-verified models (`GET /api/ai/status`).
+  * Legacy local CLI (`agy`), Gemini Studio adapters, and the deterministic template generator were removed in M3 under Rule 12. There is no offline AI copy path: a provider failure or malformed payload surfaces as an error (HTTP 502), never as substitute content.
+  * Provider-neutral UI: all AI-disabled copy lives in `src/constants/aiCopy.ts` and names no vendor. Never hardcode a provider name in components.
+  * Graceful UI Disabling: AI features (alert copywriting and Route Scout) require the active provider to be reachable with an account that can invoke the selected model; when unavailable, the studio disables all AI buttons with informative tooltips. `/api/ai/status` reports `available: false` and the upstream error rather than advertising unverified models.
 * Enforces constraints: titles $\le 30$ chars, spoken messages 15–25 words ($\le 2$ lines), trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
 
 ### E. Route Scout Conversational Co-Pilot & Adapter Seam
@@ -36,11 +39,11 @@
   * **Day Scope:** Evaluates overall driving pace, scenic corridors, overlook opportunities, and meal/fuel deserts.
   * **Waypoint Scope:** Audits road accessibility (paved vs. dirt), parking pull-offs, lighting/golden hour timing, and coordinate precision.
 * **Pluggable Adapter Seam:** The core road-trip domain prompt (`buildScoutDomainPrompt`) is kept strictly pure and harness-agnostic. All harness-specific tool permissions and execution rules live behind the `AiHarnessAdapter` lifecycle hooks:
-  * `decorateScoutPrompt?(domainPrompt)`: In `AgyHarnessAdapter`, grants research and calculation tools (`search_web`, `read_url_content`, and `run_command` for fast coordinate math/network checks); strictly forbids background tasks, subagents, interactive questions (`ask_question`), browser sessions, and modifications to workspace files.
-  * `sanitizeResponse?(rawText)`: In `AgyHarnessAdapter`, strips internal harness preambles (e.g. background task yields) and trailing meta-commentary from driver-facing prose.
-  * Cloud and future adapters (Claude Code, OpenAI, Codex) plug into this seam with their respective tool declarations and prompt decorations.
+  * `AwsBedrockHarnessAdapter.generateStreamWithTools`: Executes multi-turn `ConverseStreamCommand` tool loops (`MAX_TOOL_ITERATIONS = 5`, parallel `Promise.all` tool dispatch) with `activity`, `thought`, and `delta` SSE streaming and `<thinking>`/`<think>` reasoning tag hygiene.
+  * `decorateScoutPrompt(domainPrompt)`: The Bedrock adapter returns the domain prompt unchanged. Harness-specific tool allowlists and execution rules live in the adapter/dispatcher seam, never in `buildScoutDomainPrompt`.
+  * `sanitizeResponse(rawText)`: Strips internal harness preambles, `<thinking>`/`<think>` XML blocks, and trailing meta-commentary from driver-facing prose. `ScoutService` passes it into `buildScoutDomainPrompt` / `parseScoutResponse` as an optional sanitizer, so the domain layer defaults to identity and stays provider-neutral.
 * **Interactive Suggestion Cards & Human-in-the-Loop Verification:** Emits actionable candidate blocks (`json:suggestions`) allowing 1-click **Add Waypoint** or **Update Waypoint** with dynamic map preview pins before driver approval. Operates under the principle that AI assistants are valuable discovery advisors but require human verification for real-world geometry. The UI supports an in-app "Test on Google Maps" query link, `place_name` vs `name` decoupling, and automatic Place ID extraction from pasted Maps URLs to lock in verified locations.
-* **SSE Streaming:** Streams tokens over `/api/ai/scout/chat-stream` with collapsible reasoning/tool thought capture.
+* **SSE Streaming & Keep-Alive Heartbeats:** Streams tokens over `/api/ai/scout/chat/stream` with immediate `: ping\n\n` and periodic `: keep-alive\n\n` SSE comments to keep CloudFront and Lambda Function URL streams alive during multi-turn tool calls.
 
 ### F. Timeline Cascade, Navigation Links & Device Handoff
 * **Timeline Schedule Cascade:** Recalculates arrival/departure times across waypoints; modifying dwell time on stop $k$ ripples through stops $k+1 \dots n$. Supports backward scheduling from destination deadlines ("Catch-up" mode) and timezone border offset jumps.
@@ -85,10 +88,10 @@ route-builder/
 │   ├── routes/
 │   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
-│   │   ├── ai.ts               # /api/copilot/generate & /api/ai/status
+│   │   ├── ai.ts               # /api/copilot/generate, /api/copilot/day-title & /api/ai/status
 │   │   ├── device.ts           # /api/device (network-info, staging, download)
 │   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
-│   │   └── scout.ts            # /api/ai/scout (conversational assistant & quick prompts)
+│   │   └── scout.ts            # /api/ai/scout (conversational assistant, SSE stream & quick prompts)
 │   ├── services/
 │   │   ├── authService.ts      # Google OIDC token verification, PKCE, HS256 JWT signing & SSM secret loader
 │   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
@@ -96,9 +99,11 @@ route-builder/
 │   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
 │   │   ├── promptBuilder.ts    # Prompt contract generator
 │   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
-│   │   ├── aiService.ts        # Pluggable AI adapters (Agy, Gemini API) & availability status
+│   │   ├── bedrockService.ts   # Amazon Bedrock Converse / ConverseStream adapter & model catalog
+│   │   ├── aiService.ts        # Provider-agnostic adapter registry, fail-loud generation paths & availability status
+│   │   ├── aiRegistry.ts       # Composition root registering the primary AI provider adapter
 │   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
-│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk storage
+│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk/S3 storage
 │   │   └── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
 │   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
 ├── src/
@@ -126,6 +131,8 @@ route-builder/
 │   ├── services/
 │   │   ├── api.ts              # Frontend API client
 │   │   └── aiQueue.ts          # Client-side concurrency limiter
+│   ├── constants/
+│   │   └── aiCopy.ts           # Provider-neutral copy for AI-disabled UI states
 │   └── types/                  # Frontend data models (auth, routing, ai, scout)
 └── tests/                      # Vitest regression suites
     ├── ai/                     # Harness adapters, alert/schema generation, Scout
@@ -177,3 +184,4 @@ npm run build
 3. **No URL-Encoding on OSRM Path Semicolons:** Always use literal `;` in coordinate path parameters.
 4. **Preserve Backward Compatibility:** Any changes to exported itinerary JSON must conform to the V2 schema expected by the Android native co-pilot service.
 5. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused without harness-specific tool bans or shell commands. All harness-specific tool permissions, guardrails, and response cleaning must be implemented through the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
+6. **No Silent Fallbacks or Mock Degradation:** Never implement silent fallbacks (such as catching a failure in Bedrock, S3, OSRM, or Google OIDC and falling back to mock templates, client-side mocks, or local CLI tools). Silent fallbacks mask real system failures and fail completely in cloud environments. External API failures must fail loudly, immediately, and transparently with proper HTTP status codes (`502 Bad Gateway`, `503 Service Unavailable`, `400 Bad Request`). Silent fallbacks are almost always wrong; check with the user and obtain explicit approval before building any fallback mechanism.

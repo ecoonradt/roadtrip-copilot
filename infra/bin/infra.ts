@@ -10,7 +10,7 @@ const account = process.env.CDK_DEFAULT_ACCOUNT;
 if (!selectedRegion) {
   throw new Error(
     'Missing required AWS region in CDK_DEFAULT_REGION or AWS_REGION. ' +
-      'In the new AWS experience, all regional resources must target the project\'s assigned Region. ' +
+      'All regional resources must target the primary Region (e.g. us-east-2). ' +
       'Please set AWS_REGION or CDK_DEFAULT_REGION before synthesizing or deploying this stack.',
   );
 }
@@ -72,6 +72,14 @@ const originVerifySecretSsmParam =
   process.env.ORIGIN_VERIFY_SECRET_SSM_PARAM ||
   (app.node.tryGetContext('originVerifySecretSsmParam') as string | undefined);
 
+const bedrockScoutModelId =
+  process.env.BEDROCK_SCOUT_MODEL_ID ||
+  (app.node.tryGetContext('bedrockScoutModelId') as string | undefined);
+
+const bedrockCopywriterModelId =
+  process.env.BEDROCK_COPYWRITER_MODEL_ID ||
+  (app.node.tryGetContext('bedrockCopywriterModelId') as string | undefined);
+
 new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   env: { account, region: selectedRegion },
   githubRepo,
@@ -88,5 +96,7 @@ new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   allowedHosts,
   publicBaseUrl,
   originVerifySecret,
+  bedrockScoutModelId,
+  bedrockCopywriterModelId,
 });
 

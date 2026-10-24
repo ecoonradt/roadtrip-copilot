@@ -1,3 +1,4 @@
+import { AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Compass,
@@ -474,7 +475,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             }`}
             title={
               !aiAvailable
-                ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                ? AI_UNAVAILABLE_TOOLTIP
                 : isScoutOpen
                 ? 'Close Route Scout assistant'
                 : 'Open Route Scout assistant'

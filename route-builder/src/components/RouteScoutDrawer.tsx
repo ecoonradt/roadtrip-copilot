@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { AI_UNAVAILABLE_SCOUT_MESSAGE, AI_UNAVAILABLE_TOOLTIP, AI_UNAVAILABLE_SHORT } from '../constants/aiCopy';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -31,6 +32,7 @@ import type {
   ScoutTripContext,
   ScoutChatRequest,
 } from '../types/scout';
+import type { AiModelOption } from '../types/ai';
 import type { ParsedTrip, ParsedDay } from '../engine/itineraryParser';
 import type { Waypoint, WaypointType } from '../types/routing';
 import type { ScheduledStop } from '../engine/types';
@@ -52,6 +54,10 @@ export interface RouteScoutDrawerProps {
   onPreviewCoordinate: (pin: ScoutPreviewPin | null) => void;
   activePreviewPin?: ScoutPreviewPin | null;
   aiAvailable?: boolean;
+  aiModels?: AiModelOption[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
+  itineraryId?: string;
 }
 
 const DEFAULT_DRAWER_WIDTH = 400;
@@ -66,7 +72,13 @@ function getScopeKey(scope: ScoutScope, activeDayIndex: number): string {
 }
 
 function cleanStreamingText(raw: string): { content: string; thought?: string } {
-  const withoutJson = raw.replace(/```(?:json:suggestions|json)?[\s\S]*?(?:```|$)/i, '').trim();
+  // Strip thinking/reasoning XML tags before stripping JSON blocks
+  const withoutThinking = raw
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<(?:thinking|think)>[\s\S]*$/gi, '');
+
+  const withoutJson = withoutThinking.replace(/```(?:json:suggestions|json)?[\s\S]*?(?:```|$)/i, '').trim();
 
   // Strip leading harness messages (e.g. "Wait for the background task to complete.")
   const leadingHarnessRegex = /^(?:Wait for the (?:background )?task to complete\.?|Waiting for (?:background )?task\.?|Wait for the command to finish\.?|Let me inspect[^.\n]*\.\s*)\s*/gi;
@@ -267,6 +279,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   onPreviewCoordinate,
   activePreviewPin,
   aiAvailable = true,
+  aiModels = [],
+  selectedModelId,
+  onSelectModel,
+  itineraryId,
 }) => {
   // Drawer width with localStorage persistence
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
@@ -286,12 +302,53 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   const dragStartXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(DEFAULT_DRAWER_WIDTH);
 
-  // Multi-turn conversations keyed by scope (`day:N` or `wp:ID`)
+  // Stream sequence & abort controller refs for async race and cancel safety
+  const activeStreamAbortRef = useRef<AbortController | null>(null);
+  const streamSeqRef = useRef<number>(0);
+
+  // Derive stable itinerary identity (R6)
+  const currentItineraryId = itineraryId || 'default-itinerary';
+  const lastItineraryIdRef = useRef(currentItineraryId);
+
+  // Active turn tracking for prompt cleanup on interrupt / scope-away / close (R7)
+  const activeTurnRef = useRef<{ convKey: string; assistantMsgId: string } | null>(null);
+
+  // Multi-turn conversations keyed by itinerary and scope (`<itinerary>:<scope>`)
   const [conversations, setConversations] = useState<Record<string, ScoutMessage[]>>({});
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Helper to abort in-flight work and prune empty assistant placeholder messages (R7)
+  const cancelActiveTurn = useCallback(() => {
+    streamSeqRef.current += 1;
+    activeStreamAbortRef.current?.abort();
+    activeStreamAbortRef.current = null;
+    setIsLoading(false);
+
+    const activeTurn = activeTurnRef.current;
+    activeTurnRef.current = null;
+
+    setConversations((prev) => {
+      let changed = false;
+      const next: Record<string, ScoutMessage[]> = {};
+      for (const [k, list] of Object.entries(prev)) {
+        const filtered = list.filter((m) => {
+          if (m.role === 'assistant' && !m.content.trim()) {
+            if (activeTurn && m.id === activeTurn.assistantMsgId) return false;
+            return false;
+          }
+          return true;
+        });
+        if (filtered.length !== list.length) {
+          changed = true;
+        }
+        next[k] = filtered;
+      }
+      return changed ? next : prev;
+    });
+  }, []);
 
   // Timer while analyzing to provide continuous feedback
   useEffect(() => {
@@ -347,13 +404,59 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     }
   };
 
+  // Invalidate in-flight streams and reset conversation state on itinerary replacement
+  useEffect(() => {
+    if (lastItineraryIdRef.current !== currentItineraryId) {
+      lastItineraryIdRef.current = currentItineraryId;
+      cancelActiveTurn();
+      setConversations({});
+      setErrorMessage(null);
+      setAddedSuggestionIds(new Set());
+      setUpdatedSuggestionIds(new Set());
+    }
+  }, [currentItineraryId, cancelActiveTurn]);
+
+  // Drawer close cleanup: abort in-flight work and prune empty assistant placeholder (R7)
+  useEffect(() => {
+    if (!isOpen) {
+      cancelActiveTurn();
+    }
+  }, [isOpen, cancelActiveTurn]);
+
+  // Unmount cleanup
+  useEffect(() => {
+    return () => {
+      cancelActiveTurn();
+    };
+  }, [cancelActiveTurn]);
+
+  const scoutModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'scout' || m.role === 'both'),
+    [aiModels]
+  );
+  const hasSelectedModel = Boolean(
+    selectedModelId && scoutModels.some((m) => m.id === selectedModelId)
+  );
+
   const currentScopeKey = useMemo(
     () => getScopeKey(scope, activeDayIndex),
     [scope, activeDayIndex]
   );
+  const lastScopeKeyRef = useRef(currentScopeKey);
+
+  // Scope switch cleanup: abort in-flight work and prune empty assistant placeholder (R7)
+  useEffect(() => {
+    if (lastScopeKeyRef.current !== currentScopeKey) {
+      lastScopeKeyRef.current = currentScopeKey;
+      cancelActiveTurn();
+      setErrorMessage(null);
+    }
+  }, [currentScopeKey, cancelActiveTurn]);
+
+  const conversationKey = `${currentItineraryId}:${currentScopeKey}`;
   const currentMessages = useMemo(
-    () => conversations[currentScopeKey] || [],
-    [conversations, currentScopeKey]
+    () => conversations[conversationKey] || [],
+    [conversations, conversationKey]
   );
 
   // Load quick prompts when scope changes
@@ -469,10 +572,15 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
   // Send message to Route Scout
   const handleSendMessage = async (textToSend?: string) => {
     const messageContent = (textToSend ?? inputText).trim();
-    if (!messageContent || isLoading) return;
+    if (!messageContent || isLoading || !hasSelectedModel || !aiAvailable) return;
 
     setErrorMessage(null);
     setInputText('');
+
+    const seq = ++streamSeqRef.current;
+    activeStreamAbortRef.current?.abort();
+    const abortController = new AbortController();
+    activeStreamAbortRef.current = abortController;
 
     const userMessage: ScoutMessage = {
       id: `msg_u_${Date.now()}`,
@@ -487,14 +595,17 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
-      engine: 'agy',
     };
+
+    const startedItineraryId = currentItineraryId;
+    const targetConvKey = conversationKey;
+    activeTurnRef.current = { convKey: targetConvKey, assistantMsgId };
 
     // Update conversation with user message and placeholder assistant message
     const updatedHistory = [...currentMessages, userMessage];
     setConversations((prev) => ({
       ...prev,
-      [currentScopeKey]: [...updatedHistory, initialAssistantMessage],
+      [targetConvKey]: [...updatedHistory, initialAssistantMessage],
     }));
 
     setIsLoading(true);
@@ -641,22 +752,26 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           content: m.content,
         })),
         tripContext,
-        sessionId: `scout_${currentScopeKey}`,
+        sessionId: `scout_${startedItineraryId}_${currentScopeKey}`,
+        modelId: selectedModelId,
       };
 
       let accumulatedRaw = '';
       let currentThought: string | undefined = undefined;
       let accumulatedSuggestions: ScoutSuggestion[] = [];
 
-      await chatWithScoutStream(request, (event) => {
-        if (event.event === 'activity') {
+      await chatWithScoutStream(
+        request,
+        (event) => {
+          if (seq !== streamSeqRef.current || currentItineraryId !== startedItineraryId) return;
+          if (event.event === 'activity') {
           const act = event.data;
           currentThought = act.label;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) => {
+              [targetConvKey]: list.map((m) => {
                 if (m.id !== assistantMsgId) return m;
                 const existing = m.activities || [];
                 const idx = existing.findIndex((a) => a.id === act.id);
@@ -678,10 +793,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         } else if (event.event === 'thought') {
           currentThought = event.data.text;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId ? { ...m, thought: currentThought } : m
               ),
             };
@@ -693,10 +808,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           const effectiveThought = detectedThought || currentThought;
 
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId
                   ? {
                       ...m,
@@ -710,10 +825,10 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
         } else if (event.event === 'suggestions') {
           accumulatedSuggestions = event.data.suggestions;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId
                   ? { ...m, suggestions: accumulatedSuggestions }
                   : m
@@ -721,12 +836,13 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             };
           });
         } else if (event.event === 'done') {
+          activeTurnRef.current = null;
           const finalResp = event.data;
           setConversations((prev) => {
-            const list = prev[currentScopeKey] || [];
+            const list = prev[targetConvKey] || [];
             return {
               ...prev,
-              [currentScopeKey]: list.map((m) =>
+              [targetConvKey]: list.map((m) =>
                 m.id === assistantMsgId
                   ? {
                       ...m,
@@ -744,30 +860,42 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             };
           });
         }
-      });
+      },
+      abortController.signal
+    );
     } catch (err: unknown) {
+      if (seq !== streamSeqRef.current || currentItineraryId !== startedItineraryId) return;
+      activeTurnRef.current = null;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Route Scout request failed';
       setErrorMessage(msg);
       // Remove empty assistant message if it failed before receiving content
       setConversations((prev) => {
-        const list = prev[currentScopeKey] || [];
+        const list = prev[targetConvKey] || [];
         return {
           ...prev,
-          [currentScopeKey]: list.filter(
+          [targetConvKey]: list.filter(
             (m) => !(m.id === assistantMsgId && !m.content.trim())
           ),
         };
       });
     } finally {
-      setIsLoading(false);
+      if (seq === streamSeqRef.current && currentItineraryId === startedItineraryId) {
+        setIsLoading(false);
+        activeTurnRef.current = null;
+        if (activeStreamAbortRef.current === abortController) {
+          activeStreamAbortRef.current = null;
+        }
+      }
     }
   };
 
   // Clear conversation for current scope
   const handleClearChat = () => {
+    cancelActiveTurn();
     setConversations((prev) => ({
       ...prev,
-      [currentScopeKey]: [],
+      [conversationKey]: [],
     }));
     setErrorMessage(null);
   };
@@ -966,6 +1094,33 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             </div>
           )}
         </div>
+
+        {/* Model Selector UI in Drawer Header */}
+        {scoutModels.length > 0 && (
+          <div className="mt-2 flex items-center justify-between gap-2 px-2.5 py-1.5 bg-slate-800/60 border border-slate-700/60 rounded-xl text-xs">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 shrink-0">
+              Model
+            </span>
+            <select
+              aria-label="Route Scout AI Model"
+              value={hasSelectedModel ? selectedModelId : ''}
+              onChange={(e) => onSelectModel?.(e.target.value)}
+              disabled={isLoading}
+              className="bg-transparent text-xs font-medium text-cyan-300 focus:outline-none truncate cursor-pointer disabled:opacity-50"
+            >
+              {!hasSelectedModel && (
+                <option value="" disabled className="bg-slate-900 text-slate-400">
+                  Select model...
+                </option>
+              )}
+              {scoutModels.map((m) => (
+                <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
+                  {m.name} ({m.provider})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Messages Scroll Area */}
@@ -976,7 +1131,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
             <div>
               <span className="font-semibold text-white">Route Scout Unavailable</span>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                An active AI engine or API key is required to use Route Scout. Timeline cascading, manual waypoint editing, and device sync remain fully functional.
+                {AI_UNAVAILABLE_SCOUT_MESSAGE}
               </p>
             </div>
           </div>
@@ -1015,16 +1170,18 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                   {quickPrompts.map((prompt, i) => (
                     <button
                       key={i}
-                      onClick={aiAvailable ? () => handleSendMessage(prompt) : undefined}
-                      disabled={!aiAvailable}
+                      onClick={aiAvailable && hasSelectedModel && !isLoading ? () => handleSendMessage(prompt) : undefined}
+                      disabled={!aiAvailable || !hasSelectedModel || isLoading}
                       className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-center justify-between group ${
-                        !aiAvailable
+                        !aiAvailable || !hasSelectedModel || isLoading
                           ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                           : 'bg-slate-800/70 hover:bg-slate-800 border-slate-700/60 hover:border-cyan-500/50 text-cyan-200 cursor-pointer'
                       }`}
                       title={
                         !aiAvailable
-                          ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                          ? AI_UNAVAILABLE_TOOLTIP
+                          : !hasSelectedModel
+                          ? 'Select an AI model in the header to ask Route Scout'
                           : undefined
                       }
                     >
@@ -1063,7 +1220,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                       </span>
                       {msg.engine && (
                         <span className="text-[9px] font-mono px-1.5 py-0.2 rounded border bg-slate-800 text-slate-300 border-slate-700">
-                          {msg.engine === 'template' ? 'Offline' : 'AI Assistant'}
+                          AI Assistant
                         </span>
                       )}
                     </div>
@@ -1101,7 +1258,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
 
                   {msg.content ? (
                     <FormattedAssistantText text={msg.content} />
-                  ) : (
+                  ) : isLoading ? (
                     <div className="flex items-center gap-2 text-slate-400 text-xs py-1">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400 shrink-0" />
                       <span>
@@ -1113,7 +1270,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
                         )}
                       </span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {/* Structured Suggestion Action Cards */}
@@ -1351,7 +1508,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               ref={inputRef}
               rows={1}
               value={inputText}
-              disabled={!aiAvailable || isLoading}
+              disabled={!aiAvailable || !hasSelectedModel || isLoading}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -1361,7 +1518,9 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               }}
               placeholder={
                 !aiAvailable
-                  ? 'AI features unavailable (no AI engine or API key configured)'
+                  ? AI_UNAVAILABLE_SHORT
+                  : !hasSelectedModel
+                  ? 'Select an AI model in the header to ask Route Scout...'
                   : scope.type === 'day'
                   ? 'Ask about stops, food, fuel, or pacing along this leg...'
                   : `Ask about accessibility, photo spots, or dwell time for ${
@@ -1370,7 +1529,7 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
               }
               style={{ minHeight: '42px', maxHeight: '120px' }}
               className={`w-full resize-none overflow-y-auto border rounded-xl px-3.5 py-2.5 text-sm transition-colors focus:outline-none ${
-                !aiAvailable
+                !aiAvailable || !hasSelectedModel
                   ? 'bg-slate-850 border-slate-800 text-slate-500 placeholder-slate-600 cursor-not-allowed'
                   : 'bg-slate-800 border-slate-700 text-white placeholder-slate-500 focus:border-cyan-500'
               }`}
@@ -1378,15 +1537,17 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
           </div>
           <button
             type="submit"
-            disabled={!aiAvailable || !inputText.trim() || isLoading}
+            disabled={!aiAvailable || !hasSelectedModel || !inputText.trim() || isLoading}
             className={`p-2.5 rounded-xl shadow-md transition-all shrink-0 ${
-              !aiAvailable
+              !aiAvailable || !hasSelectedModel
                 ? 'bg-slate-850 border border-slate-800 text-slate-600 cursor-not-allowed'
                 : 'bg-gradient-to-tr from-cyan-600 to-sky-500 hover:from-cyan-500 hover:to-sky-400 text-white shadow-cyan-950/40 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed'
             }`}
             title={
               !aiAvailable
-                ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                ? AI_UNAVAILABLE_TOOLTIP
+                : !hasSelectedModel
+                ? 'Select an AI model in the header to ask Route Scout'
                 : 'Send message to Route Scout'
             }
           >

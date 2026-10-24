@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Clock,
   MapPin,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react';
 
 import type { Waypoint, WaypointType, GeocodeResult } from '../types/routing';
-import type { WaypointContext } from '../types/ai';
+import type { WaypointContext, AiModelOption } from '../types/ai';
 import type { TimelineCascadeResult, ScheduledStop } from '../engine/types';
 import { SearchBar } from './SearchBar';
 import { EditWaypointModal } from './EditWaypointModal';
@@ -39,6 +40,9 @@ interface TimelineSidebarProps {
   selectedWaypointId?: string | null;
   onSelectWaypoint?: (id: string | null) => void;
   aiAvailable?: boolean;
+  aiModels?: AiModelOption[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
 }
 
 const STOP_TYPE_OPTIONS: Array<{ value: WaypointType; label: string }> = [
@@ -71,6 +75,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
   selectedWaypointId,
   onSelectWaypoint,
   aiAvailable = true,
+  aiModels,
+  selectedModelId,
+  onSelectModel,
 }) => {
   // Resizable sidebar width with localStorage persistence
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -191,8 +198,16 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     return `${hours12}:${minutes} ${ampm}`;
   };
 
+  const copywriterModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'copywriter' || m.role === 'both'),
+    [aiModels]
+  );
+  const hasSelectedCopywriterModel = Boolean(
+    selectedModelId && copywriterModels.some((m) => m.id === selectedModelId)
+  );
+
   const handleBatchGenerateAll = async () => {
-    if (waypoints.length === 0 || isBatchGenerating) return;
+    if (waypoints.length === 0 || isBatchGenerating || !hasSelectedCopywriterModel) return;
 
     setIsBatchGenerating(true);
     setBatchProgress(`Generating alerts for ${waypoints.length} stops...`);
@@ -222,7 +237,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
         };
       });
 
-      const batchResult = await generateBatchCopilotAlerts(contexts);
+      const batchResult = await generateBatchCopilotAlerts(contexts, {
+        modelId: selectedModelId,
+      });
       const updatesMap: Record<string, Partial<Waypoint>> = {};
       for (const [wpId, alert] of Object.entries(batchResult.alerts)) {
         updatesMap[wpId] = {
@@ -344,7 +361,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               }`}
               title={
                 !aiAvailable
-                  ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                  ? AI_UNAVAILABLE_TOOLTIP
                   : "Open Route Scout to discuss this day's leg, scenic stops, or meal breaks"
               }
             >
@@ -361,16 +378,18 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
           {waypoints.length > 0 ? (
             <button
-              onClick={aiAvailable ? handleBatchGenerateAll : undefined}
-              disabled={!aiAvailable || isBatchGenerating}
+              onClick={aiAvailable && hasSelectedCopywriterModel ? handleBatchGenerateAll : undefined}
+              disabled={!aiAvailable || !hasSelectedCopywriterModel || isBatchGenerating}
               className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-colors border whitespace-nowrap ${
-                !aiAvailable
+                !aiAvailable || !hasSelectedCopywriterModel
                   ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                   : 'bg-slate-800 hover:bg-slate-750 text-amber-300 border-slate-700/70 cursor-pointer disabled:opacity-50'
               }`}
               title={
                 !aiAvailable
-                  ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                  ? AI_UNAVAILABLE_TOOLTIP
+                  : !hasSelectedCopywriterModel
+                  ? 'Select an AI copywriter model to generate alerts'
                   : 'Generate Co-Pilot audio alerts for all stops'
               }
             >
@@ -379,7 +398,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               ) : (
                 <Sparkles
                   className={`w-3.5 h-3.5 shrink-0 ${
-                    !aiAvailable ? 'text-slate-500' : 'text-amber-400'
+                    !aiAvailable || !hasSelectedCopywriterModel ? 'text-slate-500' : 'text-amber-400'
                   }`}
                 />
               )}
@@ -964,7 +983,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
                               }`}
                               title={
                                 !aiAvailable
-                                  ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                                  ? AI_UNAVAILABLE_TOOLTIP
                                   : 'Ask Route Scout about this stop'
                               }
                             >
@@ -1051,6 +1070,9 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
           onClose={() => setSelectedModal(null)}
           onSave={(waypointId, updates) => onUpdateWaypoint(waypointId, updates)}
           aiAvailable={aiAvailable}
+          aiModels={aiModels}
+          selectedModelId={selectedModelId}
+          onSelectModel={onSelectModel}
         />
       )}
     </aside>

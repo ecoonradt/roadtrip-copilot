@@ -164,14 +164,15 @@ npm run dev
 
 > [!NOTE]
 > **AI Configuration Note:**
-> Route planning, road routing, timeline calculations, and device sync work 100% offline out-of-the-box. AI features (heads-up alert copywriting and the interactive Route Scout conversational assistant) require an AI engine: either the local Antigravity CLI (`agy`) or a Google AI Studio API key.
+> Route planning, road routing, timeline calculations, and device sync work 100% offline out-of-the-box. AI features (heads-up alert copywriting and the interactive Route Scout conversational assistant) use Amazon Bedrock (`ConverseCommand` / `ConverseStreamCommand` with configurable multi-vendor model selection) via your AWS credentials.
+
 
 For complete documentation on route authoring, AI model configuration, test suites, and phone handoff methods, see [route-builder/README.md](route-builder/README.md).
 
 ### Cloud Deployment & CI/CD (AWS CDK)
 
 The Route Builder Web Studio can also be deployed to AWS as a serverless application using AWS CDK (`infra/`):
-* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming, protected by stateless dual-mode Google OIDC authentication (`ALLOWED_EMAILS` allowlist + SSM Parameter Store `SecureString` secrets), with atomic user itinerary persistence in Amazon S3 (`users/{email}/itineraries/*.json`) and ETag concurrency safety.
+* **Architecture:** Amazon CloudFront distribution serving static React SPA assets from a private S3 bucket (`/*`) and routing API endpoints (`/api/*`) to a containerized Fastify backend on AWS Lambda using AWS Lambda Web Adapter with native SSE response streaming, powered by Amazon Bedrock Converse / ConverseStream (`us.moonshotai.kimi-k3` & `us.amazon.nova-2-lite-v1:0` defaults with runtime model selection), protected by stateless dual-mode Google OIDC authentication (`ALLOWED_EMAILS` allowlist + SSM Parameter Store `SecureString` secrets), with atomic user itinerary persistence in Amazon S3 (`users/{email}/itineraries/*.json`) and ETag concurrency safety.
 * **Verification Pipeline:**
   ```bash
   ./scripts/ci_check.sh

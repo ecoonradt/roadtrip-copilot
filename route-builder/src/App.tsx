@@ -21,6 +21,7 @@ import {
 import type { Waypoint, WaypointType, RouteResponse, GeocodeResult } from './types/routing';
 import type { AuthStatusResponse } from './types/auth';
 import type { ScoutScope, ScoutSuggestion } from './types/scout';
+import type { AiModelOption } from './types/ai';
 import {
   calculateTimelineCascade,
   calculateBackwardSchedule,
@@ -36,6 +37,7 @@ import {
   type ParsedTrip,
   type ParsedDay,
 } from './engine/itineraryParser';
+import { createItinerarySessionId } from './utils/itinerarySession.js';
 
 function createPlaceholderTrip(): ParsedTrip {
   return {
@@ -65,8 +67,10 @@ function getInitialRouteInfo(): { file: string | null; day: number } {
   return { file, day: isNaN(day) ? 0 : day };
 }
 
+
 export function App() {
   const [trip, setTrip] = useState<ParsedTrip>(() => createPlaceholderTrip());
+  const [itinerarySessionId, setItinerarySessionId] = useState<string>(() => createItinerarySessionId());
   const [hasActiveTrip, setHasActiveTrip] = useState(false);
   const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
   const [activeDayIndex, setActiveDayIndex] = useState<number>(() => getInitialRouteInfo().day);
@@ -111,7 +115,28 @@ export function App() {
 
   // AI availability readiness state
   const [aiAvailable, setAiAvailable] = useState<boolean>(true);
+  const [aiModels, setAiModels] = useState<AiModelOption[]>([]);
+  const [selectedScoutModelId, setSelectedScoutModelId] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('copilot_scout_model_id') || '' : ''
+  );
+  const [selectedCopywriterModelId, setSelectedCopywriterModelId] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('copilot_copywriter_model_id') || '' : ''
+  );
   const aiSeqRef = useRef<number>(0);
+
+  const handleSelectScoutModel = useCallback((modelId: string) => {
+    setSelectedScoutModelId(modelId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('copilot_scout_model_id', modelId);
+    }
+  }, []);
+
+  const handleSelectCopywriterModel = useCallback((modelId: string) => {
+    setSelectedCopywriterModelId(modelId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('copilot_copywriter_model_id', modelId);
+    }
+  }, []);
 
   const checkAiAvailability = useCallback(async () => {
     const seq = ++aiSeqRef.current;
@@ -119,6 +144,65 @@ export function App() {
       const status = await fetchAiStatus();
       if (seq === aiSeqRef.current) {
         setAiAvailable(status.available);
+        const models = status.models ?? [];
+        setAiModels(models);
+        if (models.length > 0) {
+          const scoutEligible = models.filter((m) => m.role === 'scout' || m.role === 'both');
+          const copywriterEligible = models.filter((m) => m.role === 'copywriter' || m.role === 'both');
+
+          if (scoutEligible.length > 0) {
+            setSelectedScoutModelId((prev) => {
+              if (prev && scoutEligible.some((m) => m.id === prev)) {
+                return prev;
+              }
+              if (status.defaultScoutModelId && scoutEligible.some((m) => m.id === status.defaultScoutModelId)) {
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('copilot_scout_model_id', status.defaultScoutModelId);
+                }
+                return status.defaultScoutModelId;
+              }
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('copilot_scout_model_id');
+              }
+              return '';
+            });
+          } else {
+            setSelectedScoutModelId('');
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('copilot_scout_model_id');
+            }
+          }
+
+          if (copywriterEligible.length > 0) {
+            setSelectedCopywriterModelId((prev) => {
+              if (prev && copywriterEligible.some((m) => m.id === prev)) {
+                return prev;
+              }
+              if (status.defaultCopywriterModelId && copywriterEligible.some((m) => m.id === status.defaultCopywriterModelId)) {
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('copilot_copywriter_model_id', status.defaultCopywriterModelId);
+                }
+                return status.defaultCopywriterModelId;
+              }
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('copilot_copywriter_model_id');
+              }
+              return '';
+            });
+          } else {
+            setSelectedCopywriterModelId('');
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('copilot_copywriter_model_id');
+            }
+          }
+        } else {
+          setSelectedScoutModelId('');
+          setSelectedCopywriterModelId('');
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('copilot_scout_model_id');
+            localStorage.removeItem('copilot_copywriter_model_id');
+          }
+        }
       }
     } catch {
       if (seq === aiSeqRef.current) {
@@ -253,6 +337,7 @@ export function App() {
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     saveTargetEpochRef.current += 1;
+    setItinerarySessionId(createItinerarySessionId());
     setTrip(parsed);
     setLastSavedTripJson(JSON.stringify(parsed));
     const validDay = Math.max(0, Math.min(day, (parsed.days?.length || 1) - 1));
@@ -277,6 +362,7 @@ export function App() {
     loadTripSeqRef.current += 1;
     tripRevisionRef.current += 1;
     saveTargetEpochRef.current += 1;
+    setItinerarySessionId(createItinerarySessionId());
     hasActiveTripRef.current = false;
     setHasActiveTrip(false);
     setTrip(createPlaceholderTrip());
@@ -852,12 +938,20 @@ export function App() {
   const handleSuggestDayTitle = useCallback(async (index: number) => {
     const day = trip.days[index];
     if (!day || day.waypoints.length === 0) return;
+    const isEligible = aiModels.some(
+      (m) => (m.role === 'copywriter' || m.role === 'both') && m.id === selectedCopywriterModelId
+    );
+    if (!selectedCopywriterModelId || !isEligible) return;
+
+    const startedRevision = tripRevisionRef.current;
     const { title } = await generateDayTitle(
       day.dayNumber,
-      day.waypoints.map((w) => ({ name: w.name, type: w.type }))
+      day.waypoints.map((w) => ({ name: w.name, type: w.type })),
+      { modelId: selectedCopywriterModelId }
     );
+    if (startedRevision !== tripRevisionRef.current) return;
     handleRenameDay(index, title);
-  }, [trip.days, handleRenameDay]);
+  }, [trip.days, handleRenameDay, selectedCopywriterModelId, aiModels]);
 
   const handleSetBaseDate = useCallback((newDate: string) => {
     invalidatePendingInitialLoad();
@@ -1086,6 +1180,7 @@ export function App() {
     tripRevisionRef.current += 1;
     setTripRevision(tripRevisionRef.current);
     saveTargetEpochRef.current += 1;
+    setItinerarySessionId(createItinerarySessionId());
     setTrip(newTrip);
     setLastSavedTripJson(JSON.stringify(newTrip));
     setActiveDayIndex(0);
@@ -1308,7 +1403,13 @@ export function App() {
         onDeleteDay={handleDeleteDay}
         onRenameDay={handleRenameDay}
         onSuggestDayTitle={handleSuggestDayTitle}
-        aiAvailable={aiAvailable}
+        aiAvailable={
+          aiAvailable &&
+          Boolean(
+            selectedCopywriterModelId &&
+            aiModels.some((m) => (m.role === 'copywriter' || m.role === 'both') && m.id === selectedCopywriterModelId)
+          )
+        }
       />
 
       {/* Main App Workspace: Left Waypoints Panel + Middle Map Canvas + Right Route Scout */}
@@ -1329,6 +1430,9 @@ export function App() {
           selectedWaypointId={selectedWaypointId}
           onSelectWaypoint={setSelectedWaypointId}
           aiAvailable={aiAvailable}
+          aiModels={aiModels}
+          selectedModelId={selectedCopywriterModelId}
+          onSelectModel={handleSelectCopywriterModel}
         />
 
         {/* Interactive Map Area */}
@@ -1363,6 +1467,7 @@ export function App() {
           isOpen={isScoutOpen}
           onClose={() => setIsScoutOpen(false)}
           trip={trip}
+          itineraryId={itinerarySessionId}
           activeDayIndex={activeDayIndex}
           activeDay={currentDay}
           waypoints={waypoints}
@@ -1374,6 +1479,9 @@ export function App() {
           onPreviewCoordinate={setScoutPreviewPin}
           activePreviewPin={scoutPreviewPin}
           aiAvailable={aiAvailable}
+          aiModels={aiModels}
+          selectedModelId={selectedScoutModelId}
+          onSelectModel={handleSelectScoutModel}
         />
       </div>
 

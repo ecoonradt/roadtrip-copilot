@@ -27,7 +27,12 @@ export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
   allowedHosts?: string;
   publicBaseUrl?: string;
   originVerifySecret?: string;
+  bedrockScoutModelId?: string;
+  bedrockCopywriterModelId?: string;
 }
+
+export const DEFAULT_BEDROCK_SCOUT_MODEL_ID = 'us.moonshotai.kimi-k3';
+export const DEFAULT_BEDROCK_COPYWRITER_MODEL_ID = 'us.amazon.nova-2-lite-v1:0';
 
 export class RoadtripCopilotCloudStack extends cdk.Stack {
   public readonly staticSiteBucket: s3.Bucket;
@@ -107,6 +112,8 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         ALLOWED_HOSTS: props?.allowedHosts ?? '',
         PUBLIC_BASE_URL: props?.publicBaseUrl ?? '',
         ...(props?.originVerifySecret ? { ORIGIN_VERIFY_SECRET: props.originVerifySecret } : {}),
+        BEDROCK_SCOUT_MODEL_ID: props?.bedrockScoutModelId || DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+        BEDROCK_COPYWRITER_MODEL_ID: props?.bedrockCopywriterModelId || DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
       },
     });
 
@@ -138,6 +145,30 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
             'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
           },
         },
+      }),
+    );
+
+    // Grant least-privilege Amazon Bedrock permissions for model invocation (ADR-0001, ADR-0010)
+    this.fastifyApiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+        resources: [
+          `arn:${cdk.Aws.PARTITION}:bedrock:*::foundation-model/*`,
+          `arn:${cdk.Aws.PARTITION}:bedrock:*:${this.account}:inference-profile/*`,
+        ],
+      }),
+    );
+
+    // Read-only control-plane calls for dynamic model availability (ADR-0010, ADR-0011). These list/describe
+    // actions do not support resource-level scoping, so they are isolated from the invoke actions.
+    this.fastifyApiFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'bedrock:GetFoundationModelAvailability',
+          'bedrock:ListInferenceProfiles',
+          'bedrock:ListFoundationModels',
+        ],
+        resources: ['*'],
       }),
     );
 

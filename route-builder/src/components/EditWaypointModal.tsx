@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { AI_UNAVAILABLE_ALERT_MESSAGE, AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -17,7 +18,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Waypoint, WaypointType } from '../types/routing';
-import type { WaypointContext, CopilotAlert } from '../types/ai';
+import type { WaypointContext, CopilotAlert, AiModelOption } from '../types/ai';
 import { generateCopilotAlert } from '../services/api';
 import { defaultAiQueue } from '../services/aiQueue';
 
@@ -45,6 +46,9 @@ export interface EditWaypointModalProps {
   onSave: (waypointId: string, updates: Partial<Waypoint>) => void;
   onApply?: (waypointId: string, alert: CopilotAlert) => void;
   aiAvailable?: boolean;
+  aiModels?: AiModelOption[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
 }
 
 /**
@@ -112,8 +116,14 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   onSave,
   onApply,
   aiAvailable = true,
+  aiModels = [],
+  selectedModelId,
+  onSelectModel,
 }) => {
   const [activeTab, setActiveTab] = useState<'details' | 'alert'>(initialTab);
+
+  // Request sequence guard to prevent stale responses overwriting newer state/stops
+  const genSeqRef = useRef<number>(0);
 
   // Stop Details State
   const [name, setName] = useState('');
@@ -133,8 +143,19 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
+  const copywriterModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'copywriter' || m.role === 'both'),
+    [aiModels]
+  );
+  const hasSelectedModel = Boolean(
+    selectedModelId && copywriterModels.some((m) => m.id === selectedModelId)
+  );
+
   // Synchronize state when modal opens with a new waypoint
   useEffect(() => {
+    genSeqRef.current += 1;
+    setIsLoading(false);
+    setError(null);
     if (!waypoint || !isOpen) return;
 
     setActiveTab(initialTab);
@@ -209,8 +230,9 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   };
 
   const handleGenerateAlert = async () => {
-    if (!waypoint) return;
+    if (!waypoint || !hasSelectedModel || isLoading) return;
 
+    const seq = ++genSeqRef.current;
     setIsLoading(true);
     setError(null);
 
@@ -225,16 +247,22 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
     };
 
     try {
-      const result = await defaultAiQueue.enqueue(() => generateCopilotAlert(context));
+      const result = await defaultAiQueue.enqueue(() =>
+        generateCopilotAlert(context, { modelId: selectedModelId })
+      );
+      if (seq !== genSeqRef.current) return;
       setTitle(result.title);
       setMessage(result.message);
       setSpeech(result.speech);
       setRadius(result.recommended_trigger_radius_miles);
     } catch (err: unknown) {
+      if (seq !== genSeqRef.current) return;
       const msg = err instanceof Error ? err.message : 'Generation failed';
       setError(msg);
     } finally {
-      setIsLoading(false);
+      if (seq === genSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -669,7 +697,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                   <div>
                     <span className="font-semibold text-white">AI Script Generation Unavailable</span>
                     <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                      An active AI engine or API key is required to automatically generate alerts. You can manually author or edit the card title, message, and spoken audio script below.
+                      {AI_UNAVAILABLE_ALERT_MESSAGE}
                     </p>
                   </div>
                 </div>
@@ -688,7 +716,28 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {copywriterModels.length > 0 && (
+                      <select
+                        aria-label="Copywriter AI Model"
+                        value={hasSelectedModel ? selectedModelId : ''}
+                        onChange={(e) => onSelectModel?.(e.target.value)}
+                        disabled={isLoading}
+                        className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-sky-400 focus:outline-none cursor-pointer disabled:opacity-50"
+                      >
+                        {!hasSelectedModel && (
+                          <option value="" disabled className="bg-slate-900 text-slate-400">
+                            Select model...
+                          </option>
+                        )}
+                        {copywriterModels.map((m) => (
+                          <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
+                            {m.name} ({m.provider})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
                     {(title || message || speech) && (
                       <button
                         type="button"
@@ -703,11 +752,13 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
                     <button
                       type="button"
-                      onClick={aiAvailable ? handleGenerateAlert : undefined}
-                      disabled={!aiAvailable || isLoading}
+                      onClick={aiAvailable && hasSelectedModel ? handleGenerateAlert : undefined}
+                      disabled={!aiAvailable || !hasSelectedModel || isLoading}
                       title={
                         !aiAvailable
-                          ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                          ? AI_UNAVAILABLE_TOOLTIP
+                          : !hasSelectedModel
+                          ? 'Select an AI model to generate alert'
                           : title
                           ? 'Regenerate script and alert with AI'
                           : 'Generate script and alert with AI'

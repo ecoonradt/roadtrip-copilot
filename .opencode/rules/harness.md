@@ -6,7 +6,7 @@ OpenCode-only. Antigravity does not read `.opencode/`.
 ## Delegation tool: `subagent`
 * `agent` — a subagent id. Built-ins: `general` (broad tools; can write files and run shell, but
   CANNOT spawn subagents) and `explore` (read-only search/read).
-* `prompt` — the full task. Workers have fresh context but DO inherit AGENTS.md and this file.
+* `prompt` — the full task. Workers have fresh context but DO inherit AGENTS.md and this file. Every worker prompt MUST follow Gate 1 Contract-First rules (exact file paths, literal TypeScript/Kotlin interfaces, explicit concurrency/cleanup invariants, and negative constraints).
 * `model` — `providerID/modelID`, optional `#variant`. Prefer the model already bound to a
   configured worker profile instead of naming one inline.
 * `background` — `true` to fan out without blocking.
@@ -19,8 +19,8 @@ OpenCode-only. Antigravity does not read `.opencode/`.
 ## Hard limits
 * No nesting, ever. `general` cannot launch subagents, and the worker profiles here also carry
   `permission: subagent -> deny`, so this is enforced rather than merely discouraged.
-* A worker's success report is not verification. Re-run the suite yourself.
+* A worker's success report is not verification. Perform the Gate 2 8-point Adversarial Diff Audit in `WORKING_MODEL.md` and run both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser` yourself.
 
 ## Session rituals
-* `/kickoff` — read `DECISIONS.md` and the active Work Package, then state scope.
-* `/wrapup` — run the suites, sync living docs, update the WP handoff log.
+* `/kickoff` — read `DECISIONS.md` and the active Work Package, verify live cloud/SDK assumptions, then state scope.
+* `/wrapup` — audit `git diff` against the Adversarial Review Checklist, run the suites, sync living docs, update the WP handoff log.
