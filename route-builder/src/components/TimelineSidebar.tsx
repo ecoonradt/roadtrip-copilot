@@ -1,5 +1,5 @@
 import { AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Clock,
   MapPin,
@@ -198,8 +198,16 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
     return `${hours12}:${minutes} ${ampm}`;
   };
 
+  const copywriterModels = useMemo(
+    () => (aiModels || []).filter((m) => m.role === 'copywriter' || m.role === 'both'),
+    [aiModels]
+  );
+  const hasSelectedCopywriterModel = Boolean(
+    selectedModelId && copywriterModels.some((m) => m.id === selectedModelId)
+  );
+
   const handleBatchGenerateAll = async () => {
-    if (waypoints.length === 0 || isBatchGenerating) return;
+    if (waypoints.length === 0 || isBatchGenerating || !hasSelectedCopywriterModel) return;
 
     setIsBatchGenerating(true);
     setBatchProgress(`Generating alerts for ${waypoints.length} stops...`);
@@ -230,7 +238,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
       });
 
       const batchResult = await generateBatchCopilotAlerts(contexts, {
-        modelId: selectedModelId || undefined,
+        modelId: selectedModelId,
       });
       const updatesMap: Record<string, Partial<Waypoint>> = {};
       for (const [wpId, alert] of Object.entries(batchResult.alerts)) {
@@ -370,16 +378,18 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
 
           {waypoints.length > 0 ? (
             <button
-              onClick={aiAvailable ? handleBatchGenerateAll : undefined}
-              disabled={!aiAvailable || isBatchGenerating}
+              onClick={aiAvailable && hasSelectedCopywriterModel ? handleBatchGenerateAll : undefined}
+              disabled={!aiAvailable || !hasSelectedCopywriterModel || isBatchGenerating}
               className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-medium transition-colors border whitespace-nowrap ${
-                !aiAvailable
+                !aiAvailable || !hasSelectedCopywriterModel
                   ? 'bg-slate-850 border-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                   : 'bg-slate-800 hover:bg-slate-750 text-amber-300 border-slate-700/70 cursor-pointer disabled:opacity-50'
               }`}
               title={
                 !aiAvailable
                   ? AI_UNAVAILABLE_TOOLTIP
+                  : !hasSelectedCopywriterModel
+                  ? 'Select an AI copywriter model to generate alerts'
                   : 'Generate Co-Pilot audio alerts for all stops'
               }
             >
@@ -388,7 +398,7 @@ export const TimelineSidebar: React.FC<TimelineSidebarProps> = ({
               ) : (
                 <Sparkles
                   className={`w-3.5 h-3.5 shrink-0 ${
-                    !aiAvailable ? 'text-slate-500' : 'text-amber-400'
+                    !aiAvailable || !hasSelectedCopywriterModel ? 'text-slate-500' : 'text-amber-400'
                   }`}
                 />
               )}

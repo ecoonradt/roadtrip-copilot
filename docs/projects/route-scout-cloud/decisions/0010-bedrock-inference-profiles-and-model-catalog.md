@@ -5,6 +5,8 @@
 * **Deciders:** Eric, Antigravity
 * **Related Work Package:** [`WP-03-bedrock-adapter-and-model-selection.md`](../plan/active/WP-03-bedrock-adapter-and-model-selection.md)
 
+> **Partial supersession:** [ADR-0011](0011-bedrock-discovery-with-exclusions-and-lifecycle-integrity.md) replaces this ADR's curated catalog/admission policy with AWS-driven discovery and explicit exclusions. The default models, inference-profile/IAM requirements, and outstanding account-access limitation remain applicable. References below to a curated discovery allowlist describe the earlier decision, not the current admission policy.
+
 ---
 
 ## 1. Context & Problem Statement
@@ -64,5 +66,4 @@ Consequences:
 * The adapter, catalog, IAM policy, and unit/integration tests are implemented and verified locally; live Bedrock invocation is **not** verified.
 * No documentation, test, or status message may claim Error 002 is resolved until an actual `Converse`/`ConverseStream` call succeeds on the account.
 * `/api/ai/status` must continue to report `available: false` with the upstream error when model availability cannot be confirmed, rather than advertising the catalog.
-
 

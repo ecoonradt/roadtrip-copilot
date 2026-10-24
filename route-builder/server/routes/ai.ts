@@ -28,22 +28,20 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
     async (request, reply) => {
       const { waypoint, waypoints, apiKey, preferredEngine, modelId } = request.body || {};
 
-      if (modelId !== undefined && modelId !== null) {
-        try {
-          aiService.validateModelId(modelId, preferredEngine);
-        } catch (err: unknown) {
-          if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
-            return reply.status(400).send({ error: (err as Error).message });
-          }
-          throw err;
-        }
-      }
-
       // Validate that at least one of waypoint or waypoints is provided
       if (!waypoint && (!waypoints || !Array.isArray(waypoints) || waypoints.length === 0)) {
         return reply.status(400).send({
           error: 'Request body must contain either "waypoint" (object) or "waypoints" (non-empty array)',
         });
+      }
+
+      try {
+        await aiService.resolveModelId(modelId, 'copywriter', preferredEngine);
+      } catch (err: unknown) {
+        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+          return reply.status(400).send({ error: (err as Error).message });
+        }
+        throw err;
       }
 
       try {
@@ -93,15 +91,13 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
     async (request, reply) => {
       const { dayNumber, stops, apiKey, preferredEngine, modelId } = request.body || {};
 
-      if (modelId !== undefined && modelId !== null) {
-        try {
-          aiService.validateModelId(modelId, preferredEngine);
-        } catch (err: unknown) {
-          if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
-            return reply.status(400).send({ error: (err as Error).message });
-          }
-          throw err;
+      try {
+        await aiService.resolveModelId(modelId, 'copywriter', preferredEngine);
+      } catch (err: unknown) {
+        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+          return reply.status(400).send({ error: (err as Error).message });
         }
+        throw err;
       }
 
       if (!Array.isArray(stops) || stops.length === 0) {

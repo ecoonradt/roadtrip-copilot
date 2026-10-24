@@ -147,6 +147,9 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
     () => (aiModels || []).filter((m) => m.role === 'copywriter' || m.role === 'both'),
     [aiModels]
   );
+  const hasSelectedModel = Boolean(
+    selectedModelId && copywriterModels.some((m) => m.id === selectedModelId)
+  );
 
   // Synchronize state when modal opens with a new waypoint
   useEffect(() => {
@@ -227,7 +230,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
   };
 
   const handleGenerateAlert = async () => {
-    if (!waypoint) return;
+    if (!waypoint || !hasSelectedModel || isLoading) return;
 
     const seq = ++genSeqRef.current;
     setIsLoading(true);
@@ -245,7 +248,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
     try {
       const result = await defaultAiQueue.enqueue(() =>
-        generateCopilotAlert(context, { modelId: selectedModelId || undefined })
+        generateCopilotAlert(context, { modelId: selectedModelId })
       );
       if (seq !== genSeqRef.current) return;
       setTitle(result.title);
@@ -717,11 +720,16 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                     {copywriterModels.length > 0 && (
                       <select
                         aria-label="Copywriter AI Model"
-                        value={selectedModelId || copywriterModels[0]?.id || ''}
+                        value={hasSelectedModel ? selectedModelId : ''}
                         onChange={(e) => onSelectModel?.(e.target.value)}
                         disabled={isLoading}
                         className="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-sky-400 focus:outline-none cursor-pointer disabled:opacity-50"
                       >
+                        {!hasSelectedModel && (
+                          <option value="" disabled className="bg-slate-900 text-slate-400">
+                            Select model...
+                          </option>
+                        )}
                         {copywriterModels.map((m) => (
                           <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
                             {m.name} ({m.provider})
@@ -744,11 +752,13 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
 
                     <button
                       type="button"
-                      onClick={aiAvailable ? handleGenerateAlert : undefined}
-                      disabled={!aiAvailable || isLoading}
+                      onClick={aiAvailable && hasSelectedModel ? handleGenerateAlert : undefined}
+                      disabled={!aiAvailable || !hasSelectedModel || isLoading}
                       title={
                         !aiAvailable
                           ? AI_UNAVAILABLE_TOOLTIP
+                          : !hasSelectedModel
+                          ? 'Select an AI model to generate alert'
                           : title
                           ? 'Regenerate script and alert with AI'
                           : 'Generate script and alert with AI'
