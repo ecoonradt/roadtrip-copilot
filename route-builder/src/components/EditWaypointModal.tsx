@@ -1,3 +1,4 @@
+import { AI_UNAVAILABLE_ALERT_MESSAGE, AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -693,7 +694,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                   <div>
                     <span className="font-semibold text-white">AI Script Generation Unavailable</span>
                     <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                      An active AI engine or API key is required to automatically generate alerts. You can manually author or edit the card title, message, and spoken audio script below.
+                      {AI_UNAVAILABLE_ALERT_MESSAGE}
                     </p>
                   </div>
                 </div>
@@ -747,7 +748,7 @@ export const EditWaypointModal: React.FC<EditWaypointModalProps> = ({
                       disabled={!aiAvailable || isLoading}
                       title={
                         !aiAvailable
-                          ? 'AI alert generation is unavailable. An active AI engine or API key is required.'
+                          ? AI_UNAVAILABLE_TOOLTIP
                           : title
                           ? 'Regenerate script and alert with AI'
                           : 'Generate script and alert with AI'

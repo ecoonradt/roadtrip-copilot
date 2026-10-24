@@ -7,12 +7,11 @@ This document captures architectural concepts, feature proposals, and community 
 ## 1. Multi-Provider AI Harnesses (Pluggable Adapters)
 
 ### Context & Goal
-Currently, the Route Builder AI engine uses Google Gemini:
-* **Primary (Local Zero-Config):** Antigravity CLI (`agy`), automatically resolving and invoking the active/latest Gemini Flash model (`gemini-3.8-flash-high`) via `AgyHarnessAdapter`.
-* **Cloud Fallback:** Google AI Studio REST API (`gemini-3.8-flash`) via `GeminiStudioHarnessAdapter`.
-* **Offline Fallback:** Deterministic template generator via `TemplateHarnessAdapter`.
+The Route Builder AI engine currently uses Amazon Bedrock as its sole provider:
+* **Primary:** `AwsBedrockHarnessAdapter` using Bedrock `Converse`/`ConverseStream` in `us-east-2`, with `us.moonshotai.kimi-k3` and `us.amazon.nova-2-lite-v1:0` as defaults and runtime model selection filtered to account-verified models.
+* **No offline engine:** The former deterministic template generator was removed ([ADR-0001 §6](projects/route-scout-cloud/decisions/0001-amazon-bedrock-single-bill-ai.md#6-amendment-2026-10-23-no-offline-copy-engine-provider-only-adapter-seam)). A provider failure or malformed payload fails loudly (HTTP 502); AI actions are disabled rather than producing canned copy.
 
-The server architecture is built around the `AiHarnessAdapter` interface (`route-builder/server/services/aiService.ts`), allowing new providers to be registered cleanly. We want to support additional LLM harnesses so users can generate co-pilot announcements using whatever AI tools or keys they prefer.
+The server architecture is built around the `AiHarnessAdapter` provider contract (`route-builder/server/services/aiService.ts`) with `aiRegistry.ts` as the sole composition root, allowing new multi-model providers to be registered without changing generation, parsing, Route Scout, or UI code. The Web Studio UI names no AI vendor. We want to support additional LLM providers so users can generate co-pilot announcements using whatever AI tools or keys they prefer.
 
 ### Proposed Harness Adapters
 * **Anthropic Claude Adapter (`AnthropicHarnessAdapter`):**
@@ -28,7 +27,7 @@ The server architecture is built around the `AiHarnessAdapter` interface (`route
   * Base URL + API key interface allowing self-hosted models (vLLM, LocalAI, OpenRouter, Groq).
 
 ### Production Cloud Architecture & Tool Calling
-* For a comprehensive blueprint of how Route Scout transitions from local CLI execution (`agy`) to production cloud APIs with native tool calling (OSRM snapping, Google Places, Google Search Grounding, and structured JSON schemas), see [Route Scout Cloud Architecture](projects/route-scout-cloud/route_scout_cloud_architecture.md).
+* For a comprehensive blueprint of how Route Scout moved from local CLI execution to production cloud APIs with native tool calling (OSRM snapping, Google Places, Google Search Grounding, and structured JSON schemas), see [Route Scout Cloud Architecture](projects/route-scout-cloud/route_scout_cloud_architecture.md).
 
 ---
 

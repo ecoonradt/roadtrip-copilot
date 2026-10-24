@@ -6,7 +6,8 @@ import {
   clampRadius,
   parseCopilotAlert,
   parseBatchCopilotAlerts,
-  generateTemplateAlert,
+  parseModelOutput,
+  MalformedAiResponseError,
   extractJsonString,
 } from '../../server/services/schemaParser.js';
 import type { WaypointContext } from '../../server/types/ai.js';
@@ -46,10 +47,9 @@ describe('AI Schema Parser & Sanitizer', () => {
       expect(result.endsWith(':')).toBe(false);
     });
 
-    it('Handles null, undefined, or empty titles with safe fallback', () => {
-      expect(sanitizeTitle('')).toBe('Waypoint Ahead');
-      expect(sanitizeTitle(null, 'Montezuma Castle')).toBe('Montezuma Castle Ahead');
-      expect(sanitizeTitle(undefined)).toBe('Waypoint Ahead');
+    it('Rejects empty titles instead of substituting placeholder copy', () => {
+      expect(() => sanitizeTitle('')).toThrow(MalformedAiResponseError);
+      expect(() => sanitizeTitle('   ')).toThrow(MalformedAiResponseError);
     });
   });
 
@@ -73,11 +73,11 @@ describe('AI Schema Parser & Sanitizer', () => {
       expect(clampRadius('3.2')).toBe(3.2);
       expect(clampRadius('0.05')).toBe(0.3);
       expect(clampRadius('12.0')).toBe(6.0);
+    });
 
-      // Non-numeric fallbacks
-      expect(clampRadius(NaN)).toBe(2.0);
-      expect(clampRadius('invalid')).toBe(2.0);
-      expect(clampRadius(undefined)).toBe(2.0);
+    it('Rejects non-numeric radii instead of defaulting to 2.0 miles', () => {
+      expect(() => clampRadius(NaN)).toThrow(MalformedAiResponseError);
+      expect(() => clampRadius('invalid')).toThrow(MalformedAiResponseError);
     });
   });
 
@@ -107,6 +107,10 @@ Line 5: Final overflow line.`;
       const result = sanitizeMessage(withBlanks);
       expect(result).toBe('First line\nSecond line');
     });
+
+    it('Rejects messages with no content', () => {
+      expect(() => sanitizeMessage('\n\n')).toThrow(MalformedAiResponseError);
+    });
   });
 
   describe('Speech Script Sanitization', () => {
@@ -124,9 +128,9 @@ Line 5: Final overflow line.`;
       );
     });
 
-    it('Handles empty or invalid speech with safe fallback', () => {
-      expect(sanitizeSpeech('')).toBe('Approaching your scheduled road trip stop.');
-      expect(sanitizeSpeech(null)).toBe('Approaching your scheduled road trip stop.');
+    it('Rejects empty speech instead of substituting placeholder copy', () => {
+      expect(() => sanitizeSpeech('')).toThrow(MalformedAiResponseError);
+      expect(() => sanitizeSpeech('**')).toThrow(MalformedAiResponseError);
     });
   });
 
@@ -142,18 +146,15 @@ Line 5: Final overflow line.`;
       const llmOutput = 'Here is your co-pilot notification:\n{"title": "Vista Ahead"}';
       expect(extractJsonString(llmOutput)).toBe('{"title": "Vista Ahead"}');
     });
+
+    it('Throws MalformedAiResponseError when provider output is not JSON', () => {
+      expect(() => parseModelOutput('I am unable to generate that alert.')).toThrow(
+        MalformedAiResponseError
+      );
+    });
   });
 
-  describe('Full Alert Parsing & Template Fallback', () => {
-    const waypoint: WaypointContext = {
-      id: 'wp_test',
-      name: 'Oak Creek Vista Overlook',
-      type: 'scenic_pull_off',
-      targetTime: '17:00:00',
-      formattedTime: '5:00 PM',
-      approachHighway: 'AZ-89A',
-    };
-
+  describe('Full Alert Parsing & Malformed Output', () => {
     it('Parses and enforces all schema invariants on raw LLM objects', () => {
       const rawLlmObject = {
         title: 'Approaching Spectacular Oak Creek Vista Switchbacks', // 51 chars
@@ -162,7 +163,7 @@ Line 5: Final overflow line.`;
         recommended_trigger_radius_miles: 15.0, // Should clamp to 6.0
       };
 
-      const parsed = parseCopilotAlert(rawLlmObject, waypoint);
+      const parsed = parseCopilotAlert(rawLlmObject);
 
       expect(parsed.title.length).toBeLessThanOrEqual(30);
       expect(parsed.message.split('\n').length).toBeLessThanOrEqual(2);
@@ -170,17 +171,59 @@ Line 5: Final overflow line.`;
       expect(parsed.recommended_trigger_radius_miles).toBe(6.0);
     });
 
-    it('Generates deterministic template fallback satisfying all schema rules', () => {
-      const template = generateTemplateAlert(waypoint);
+    it('Accepts alternate speech and radius field names', () => {
+      const parsed = parseCopilotAlert({
+        title: 'Vista Ahead',
+        message: 'Arriving shortly.',
+        spoken_text: 'Arriving at the vista shortly.',
+        trigger_radius_miles: '3.5',
+      });
 
-      expect(template.title.length).toBeLessThanOrEqual(30);
-      expect(template.message.split('\n').length).toBeLessThanOrEqual(2);
-      expect(template.speech).toContain('Oak Creek Vista Overlook');
-      expect(template.recommended_trigger_radius_miles).toBeGreaterThanOrEqual(0.3);
-      expect(template.recommended_trigger_radius_miles).toBeLessThanOrEqual(6.0);
+      expect(parsed.speech).toBe('Arriving at the vista shortly.');
+      expect(parsed.recommended_trigger_radius_miles).toBe(3.5);
+    });
+
+    it('Throws MalformedAiResponseError when required alert fields are missing', () => {
+      expect(() => parseCopilotAlert(null)).toThrow(MalformedAiResponseError);
+      expect(() => parseCopilotAlert('not-json')).toThrow(MalformedAiResponseError);
+      expect(() => parseCopilotAlert({ message: 'No title', speech: 'Speech', recommended_trigger_radius_miles: 2 }))
+        .toThrow(/title/);
+      expect(() => parseCopilotAlert({ title: 'No message', speech: 'Speech', recommended_trigger_radius_miles: 2 }))
+        .toThrow(/message/);
+      expect(() => parseCopilotAlert({ title: 'No speech', message: 'Message', recommended_trigger_radius_miles: 2 }))
+        .toThrow(/speech/);
+      expect(() => parseCopilotAlert({ title: 'No radius', message: 'Message', speech: 'Speech' }))
+        .toThrow(/recommended_trigger_radius_miles/);
     });
 
     it('Batch parser handles object map format', () => {
+      const batchRaw = {
+        wp_1: {
+          title: 'Stop 1 Ahead',
+          message: 'Stop 1 message',
+          speech: 'Stop 1 speech text',
+          recommended_trigger_radius_miles: 2.0,
+        },
+        wp_2: {
+          title: 'Stop 2 Ahead',
+          message: 'Stop 2 message',
+          speech: 'Stop 2 speech text',
+          recommended_trigger_radius_miles: 1.0,
+        },
+      };
+
+      const waypoints: WaypointContext[] = [
+        { id: 'wp_1', name: 'Stop 1' },
+        { id: 'wp_2', name: 'Stop 2' },
+      ];
+
+      const result = parseBatchCopilotAlerts(batchRaw, waypoints);
+
+      expect(result.wp_1.title).toBe('Stop 1 Ahead');
+      expect(result.wp_2.title).toBe('Stop 2 Ahead');
+    });
+
+    it('Batch parser throws when the provider omits a waypoint', () => {
       const batchRaw = {
         wp_1: {
           title: 'Stop 1 Ahead',
@@ -195,12 +238,7 @@ Line 5: Final overflow line.`;
         { id: 'wp_2', name: 'Stop 2 (Missing in response)' },
       ];
 
-      const result = parseBatchCopilotAlerts(batchRaw, waypoints);
-
-      expect(result.wp_1.title).toBe('Stop 1 Ahead');
-      // Missing waypoint wp_2 must have a clean template fallback generated
-      expect(result.wp_2).toBeDefined();
-      expect(result.wp_2.title.length).toBeLessThanOrEqual(30);
+      expect(() => parseBatchCopilotAlerts(batchRaw, waypoints)).toThrow(/wp_2/);
     });
 
     it('Batch parser handles array format', () => {
@@ -229,6 +267,11 @@ Line 5: Final overflow line.`;
       const result = parseBatchCopilotAlerts(batchArray, waypoints);
       expect(result.wp_1.title).toBe('Stop 1 Ahead');
       expect(result.wp_2.title).toBe('Stop 2 Ahead');
+    });
+
+    it('Batch parser throws when the payload is not an object', () => {
+      expect(() => parseBatchCopilotAlerts(null, [{ id: 'wp_1', name: 'Stop 1' }]))
+        .toThrow(MalformedAiResponseError);
     });
   });
 });

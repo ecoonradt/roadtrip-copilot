@@ -1,3 +1,4 @@
+import { AI_UNAVAILABLE_LABEL } from '../constants/aiCopy';
 import React, { useState } from 'react';
 import { Calendar, Plus, MapPin, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import { InlineEdit } from './InlineEdit';
@@ -142,7 +143,7 @@ export const DayTabBar: React.FC<DayTabBarProps> = ({
               disabled={!canSuggest || isSuggesting}
               title={
                 !aiAvailable
-                  ? 'AI engine unavailable'
+                  ? AI_UNAVAILABLE_LABEL
                   : suggestError
                     ? 'Could not suggest a name. Click to retry.'
                     : 'Suggest a day name from this day\'s stops'

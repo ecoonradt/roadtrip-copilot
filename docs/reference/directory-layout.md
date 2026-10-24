@@ -81,13 +81,14 @@ roadtrip-copilot/
 │   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
 │   │   ├── hooks/             # Fastify preHandler hooks (authGuard.ts dual-mode OIDC + allowlist gate)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
-│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, bedrockService, deviceService, itineraryStorageService, scoutService)
+│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, aiRegistry, bedrockService, deviceService, itineraryStorageService, scoutService)
 │   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
 │   │   ├── components/        # AppHeader, AccountMenu, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import), sampleTrip.ts (in-code sample route factory)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
+│   │   ├── constants/         # aiCopy.ts (provider-neutral AI-disabled UI copy)
 │   │   └── types/             # Frontend data models (auth, routing, ai, scout)
 │   └── tests/                 # Vitest suites (backend, engine, AI, schema/device, ui/) and Playwright header/account/session checks (browser/)
 └── app/

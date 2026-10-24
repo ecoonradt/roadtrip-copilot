@@ -18,7 +18,7 @@ Accepts an array of subagents under `Subagents`. Each entry must specify:
 If a specialized worker configuration is needed (e.g., custom toolsets or system prompts), use `define_subagent` to register it, then dispatch via `invoke_subagent`.
 
 ## Parallelism, Concurrency & Orchestrator Audit
-Dispatch independent tasks in parallel within the `Subagents` array (avoid overlapping file edits across concurrent workers). Antigravity handles reactive wakeup automatically—do not poll task status. After workers finish, the orchestrator MUST personally audit `git diff` against the 7-point Adversarial Review Checklist in `WORKING_MODEL.md` and run both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`.
+Dispatch independent tasks in parallel within the `Subagents` array (avoid overlapping file edits across concurrent workers). Antigravity handles reactive wakeup automatically—do not poll task status. After workers finish, the orchestrator MUST personally audit `git diff` against the 8-point Adversarial Review Checklist in `WORKING_MODEL.md` and run both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`.
 
 ## Budget note
 Always-on rules share a 20,000-token aggregate budget, and each rule file is capped at 24,000 bytes. Keep this adapter concise.

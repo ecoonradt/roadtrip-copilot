@@ -1,5 +1,3 @@
-import type { AiEngineType } from './ai.js';
-
 export interface ScoutScope {
   type: 'day' | 'waypoint';
   dayNumber?: number;
@@ -94,7 +92,7 @@ export interface ScoutMessage {
   content: string;
   timestamp: number;
   suggestions?: ScoutSuggestion[];
-  engine?: AiEngineType;
+  engine?: string;
   thought?: string;
   activities?: ScoutActivity[];
 }
@@ -105,13 +103,15 @@ export interface ScoutChatRequest {
   tripContext: ScoutTripContext;
   sessionId?: string;
   modelId?: string;
+  /** Provider id; `'auto'`/undefined selects the primary registered adapter. */
+  preferredEngine?: string;
 }
 
 export interface ScoutChatResponse {
   reply: string;
   suggestions: ScoutSuggestion[];
   sessionId: string;
-  engine: AiEngineType;
+  engine: string;
   thought?: string;
   activities?: ScoutActivity[];
   modelId?: string;

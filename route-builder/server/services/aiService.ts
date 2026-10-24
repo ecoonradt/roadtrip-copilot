@@ -1,6 +1,5 @@
 import type {
   WaypointContext,
-  CopilotAlert,
   GenerateAlertResult,
   BatchAlertResult,
   DayTitleContext,
@@ -10,15 +9,8 @@ import type {
   GenerateOptions,
   GenerateStreamWithToolsResult,
   AiStatusResult,
-  AiEngineType,
 } from '../types/ai.js';
 import type { ScoutStreamEvent } from '../types/scout.js';
-import {
-  AwsBedrockHarnessAdapter,
-  InvalidModelError,
-  BEDROCK_MODEL_CATALOG,
-} from './bedrockService.js';
-
 import {
   buildSingleWaypointPrompt,
   buildBatchWaypointPrompt,
@@ -27,30 +19,64 @@ import {
 import {
   parseCopilotAlert,
   parseBatchCopilotAlerts,
-  generateTemplateAlert,
   parseModelOutput,
+  MalformedAiResponseError,
 } from './schemaParser.js';
 
-export type { AiStatusResult };
-export { InvalidModelError, BEDROCK_MODEL_CATALOG };
+/** Raised when a caller requests a model the provider does not offer (HTTP 400). */
+export class InvalidModelError extends Error {
+  readonly statusCode = 400;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidModelError';
+  }
+}
+
+/** Raised when a caller requests an AI provider that is not registered (HTTP 400). */
+export class UnknownAiProviderError extends Error {
+  readonly statusCode = 400;
+
+  constructor(providerId: string) {
+    super(`AI provider "${providerId}" is not registered`);
+    this.name = 'UnknownAiProviderError';
+  }
+}
 
 /**
- * Pluggable AI Harness Adapter interface for LLM generation engines.
+ * Provider adapter contract for an AI backend.
+ *
+ * An adapter represents a *provider* (for example a multi-model cloud inference
+ * service), not a single model. Providers expose a catalog of models at different
+ * price/performance points; the studio selects a model id within the active
+ * provider via `validateModelId` and the role defaults returned by
+ * `getModelCatalog`.
+ *
+ * Implementations must fail loudly: never substitute canned/offline copy for a
+ * provider failure.
  */
 export interface AiHarnessAdapter {
-  readonly id: 'bedrock' | 'template' | string;
+  /** Stable provider identifier used by `preferredEngine` and response metadata. */
+  readonly id: string;
+  /** Human-readable provider name used in diagnostics. */
   readonly name: string;
   isAvailable(apiKey?: string): Promise<boolean>;
-  generate(prompt: string, apiKeyOrOptions?: string | GenerateOptions): Promise<string>;
-  decorateScoutPrompt?(domainPrompt: string): string;
-  sanitizeResponse?(rawText: string): string;
-  validateModelId?(modelId: string): string;
-  getModelCatalog?(): {
+  generate(prompt: string, options?: GenerateOptions): Promise<string>;
+  /** Normalizes a model id and throws when the provider does not offer it. */
+  validateModelId(modelId: string): string;
+  /** Account-verified models currently usable through this provider. */
+  getAvailableModels(): Promise<AiModelOption[]>;
+  /** Configured role defaults (used when the caller does not pin a model). */
+  getModelCatalog(): {
     models: AiModelOption[];
     defaultScoutModelId: string;
     defaultCopywriterModelId: string;
   };
-  getAvailableModels?(): Promise<AiModelOption[]>;
+  /** Applies provider-specific harness directives to the pure domain prompt. */
+  decorateScoutPrompt(domainPrompt: string): string;
+  /** Removes provider-specific harness noise from driver-facing prose. */
+  sanitizeResponse(rawText: string): string;
+  /** Optional streaming/tool-loop capability. */
   generateStreamWithTools?(
     prompt: string,
     tools: ToolDeclaration[],
@@ -62,116 +88,133 @@ export interface AiHarnessAdapter {
 
 export interface AiServiceOptions {
   adapters?: AiHarnessAdapter[];
-  bedrockAdapter?: AwsBedrockHarnessAdapter;
+  /** Adapter used for `preferredEngine: 'auto'`; defaults to the first registered. */
+  primaryAdapterId?: string;
 }
 
 export interface GenerationOptions {
   apiKey?: string;
   modelId?: string;
   abortSignal?: AbortSignal;
-  preferredEngine?: AiEngineType | 'auto';
+  preferredEngine?: string;
 }
 
 export class AiService {
   private adapters: Map<string, AiHarnessAdapter> = new Map();
+  private primaryAdapterId?: string;
 
   constructor(options: AiServiceOptions = {}) {
-    if (options.adapters && options.adapters.length > 0) {
-      for (const adapter of options.adapters) {
-        this.registerAdapter(adapter);
-      }
-    } else {
-      const bedrockAdapter = options.bedrockAdapter || new AwsBedrockHarnessAdapter();
-      this.registerAdapter(bedrockAdapter);
+    for (const adapter of options.adapters ?? []) {
+      this.registerAdapter(adapter);
+    }
+    if (options.primaryAdapterId) {
+      this.primaryAdapterId = options.primaryAdapterId;
     }
   }
 
   registerAdapter(adapter: AiHarnessAdapter): void {
     this.adapters.set(adapter.id, adapter);
+    if (!this.primaryAdapterId) {
+      this.primaryAdapterId = adapter.id;
+    }
   }
 
   getAdapter(id: string): AiHarnessAdapter | undefined {
     return this.adapters.get(id);
   }
 
-  validateModelId(modelId?: string): string | undefined {
+  getPrimaryAdapter(): AiHarnessAdapter | undefined {
+    if (this.primaryAdapterId) {
+      const primary = this.adapters.get(this.primaryAdapterId);
+      if (primary) {
+        return primary;
+      }
+    }
+    return this.adapters.values().next().value;
+  }
+
+  /**
+   * Resolves the provider adapter for a request. `'auto'`/undefined selects the
+   * primary provider; any other value must name a registered adapter.
+   */
+  getAdapterFor(preferredEngine?: string): AiHarnessAdapter {
+    if (preferredEngine && preferredEngine !== 'auto') {
+      const adapter = this.adapters.get(preferredEngine);
+      if (!adapter) {
+        throw new UnknownAiProviderError(preferredEngine);
+      }
+      return adapter;
+    }
+    const adapter = this.getPrimaryAdapter();
+    if (!adapter) {
+      throw new Error('No AI provider adapter is registered');
+    }
+    return adapter;
+  }
+
+  validateModelId(modelId?: string, preferredEngine?: string): string | undefined {
     if (modelId === undefined || modelId === null) {
       return undefined;
     }
-    const bedrock = this.adapters.get('bedrock') as AwsBedrockHarnessAdapter | undefined;
-    if (bedrock && typeof bedrock.validateModelId === 'function') {
-      return bedrock.validateModelId(modelId);
-    }
-    return new AwsBedrockHarnessAdapter({ available: false }).validateModelId(modelId);
+    return this.getAdapterFor(preferredEngine).validateModelId(modelId);
   }
 
   /**
-   * Checks if Bedrock AI harness adapter is available and ready for generation.
-   */
-  async checkAvailability(apiKey?: string): Promise<boolean> {
-    for (const adapter of this.adapters.values()) {
-      try {
-        if (await adapter.isAvailable(apiKey)) {
-          return true;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Returns a status object for AI feature readiness and model catalog.
+   * Returns a status object for AI feature readiness and the provider model catalog.
+   * Never falls back to an unverified static catalog.
    */
   async getStatus(apiKey?: string): Promise<AiStatusResult> {
-    let activeAdapter: AiHarnessAdapter | undefined;
-
-    for (const adapter of this.adapters.values()) {
-      try {
-        if (await adapter.isAvailable(apiKey)) {
-          activeAdapter = adapter;
-          break;
-        }
-      } catch {
-        // ignore
-      }
+    const adapter = this.getPrimaryAdapter();
+    if (!adapter) {
+      return {
+        available: false,
+        message: 'AI features are currently unavailable. No AI provider adapter is registered.',
+      };
     }
 
-    const isAvail = Boolean(activeAdapter);
-    let catalog;
-    const bedrock = (this.adapters.get('bedrock') || activeAdapter) as AwsBedrockHarnessAdapter | undefined;
-    if (bedrock && typeof bedrock.getAvailableModels === 'function') {
-      try {
-        const models = await bedrock.getAvailableModels();
-        catalog = {
-          models,
-          defaultScoutModelId: bedrock.defaultScoutModelId,
-          defaultCopywriterModelId: bedrock.defaultCopywriterModelId,
+    try {
+      if (!(await adapter.isAvailable(apiKey))) {
+        return {
+          available: false,
+          engine: adapter.id,
+          providerName: adapter.name,
+          message: `AI features are currently unavailable. ${adapter.name} is not accessible or not configured.`,
         };
-      } catch {
-        if (typeof bedrock.getModelCatalog === 'function') {
-          catalog = bedrock.getModelCatalog();
-        }
       }
-    } else if (bedrock && typeof bedrock.getModelCatalog === 'function') {
-      catalog = bedrock.getModelCatalog();
-    }
 
-    return {
-      available: isAvail,
-      engine: activeAdapter ? (activeAdapter.id as AiEngineType) : undefined,
-      ...(catalog ? catalog : {}),
-      message: isAvail
-        ? undefined
-        : 'AI features are currently unavailable. AWS Bedrock is not accessible or not configured.',
-    };
+      const models = await adapter.getAvailableModels();
+      if (models.length === 0) {
+        return {
+          available: false,
+          engine: adapter.id,
+          providerName: adapter.name,
+          message: `AI features are currently unavailable. No ${adapter.name} models are accessible for this account.`,
+        };
+      }
+
+      const catalog = adapter.getModelCatalog();
+      return {
+        available: true,
+        engine: adapter.id,
+        providerName: adapter.name,
+        models,
+        defaultScoutModelId: catalog.defaultScoutModelId,
+        defaultCopywriterModelId: catalog.defaultCopywriterModelId,
+      };
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        available: false,
+        engine: adapter.id,
+        providerName: adapter.name,
+        message: `${adapter.name} model availability check failed: ${detail}`,
+      };
+    }
   }
 
   /**
-   * Generates a single alert for a waypoint.
-   * If preferredEngine is 'template', generates deterministic offline template alert.
-   * Otherwise uses Bedrock; fails loudly if Bedrock invocation fails.
+   * Generates a single alert for a waypoint via the resolved provider.
+   * Fails loudly if the provider is unavailable or returns an unusable payload.
    */
   async generateAlert(
     waypoint: WaypointContext,
@@ -181,51 +224,33 @@ export class AiService {
       throw new Error('Request aborted');
     }
 
-    const validatedModelId = this.validateModelId(options.modelId);
+    const adapter = this.getAdapterFor(options.preferredEngine);
+    const validatedModelId = this.validateModelId(options.modelId, options.preferredEngine);
     const prompt = buildSingleWaypointPrompt(waypoint);
-    const preferredEngine = options.preferredEngine || 'auto';
 
-    if (preferredEngine === 'template') {
-      const templateAlert = generateTemplateAlert(waypoint);
-      return {
-        alert: templateAlert,
-        title: templateAlert.title,
-        message: templateAlert.message,
-        speech: templateAlert.speech,
-        recommended_trigger_radius_miles: templateAlert.recommended_trigger_radius_miles,
-        engine: 'template',
-      };
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
     }
 
-    const bedrock = this.adapters.get('bedrock');
-    if (!bedrock) {
-      throw new Error('Amazon Bedrock adapter is not registered');
-    }
-
-    const isAvail = await bedrock.isAvailable();
-    if (!isAvail) {
-      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
-    }
-
-    const rawOutput = await bedrock.generate(prompt, {
+    const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
       abortSignal: options.abortSignal,
     });
     const parsed = parseModelOutput(rawOutput);
-    const alert = parseCopilotAlert(parsed, waypoint);
+    const alert = parseCopilotAlert(parsed);
     return {
       alert,
       title: alert.title,
       message: alert.message,
       speech: alert.speech,
       recommended_trigger_radius_miles: alert.recommended_trigger_radius_miles,
-      engine: 'bedrock',
+      engine: adapter.id,
     };
   }
 
   /**
-   * Suggests a day title from the actual stops using Bedrock (or template if explicitly requested).
-   * Fails loudly if Bedrock invocation fails.
+   * Suggests a day title from the actual stops using the resolved provider.
+   * Fails loudly if the provider invocation fails.
    */
   async generateDayTitle(
     ctx: DayTitleContext,
@@ -235,27 +260,15 @@ export class AiService {
       throw new Error('Request aborted');
     }
 
-    const validatedModelId = this.validateModelId(options.modelId);
-    const preferredEngine = options.preferredEngine || 'auto';
+    const adapter = this.getAdapterFor(options.preferredEngine);
+    const validatedModelId = this.validateModelId(options.modelId, options.preferredEngine);
     const prompt = buildDayTitlePrompt(ctx);
 
-    if (preferredEngine === 'template') {
-      const first = ctx.stops[0]?.name.split(',')[0] || 'Start';
-      const last = ctx.stops[ctx.stops.length - 1]?.name.split(',')[0] || 'End';
-      return { title: `${first} to ${last}`.slice(0, 60), engine: 'template' };
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
     }
 
-    const bedrock = this.adapters.get('bedrock');
-    if (!bedrock) {
-      throw new Error('Amazon Bedrock adapter is not registered');
-    }
-
-    const isAvail = await bedrock.isAvailable();
-    if (!isAvail) {
-      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
-    }
-
-    const rawOutput = await bedrock.generate(prompt, {
+    const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
       abortSignal: options.abortSignal,
     });
@@ -263,14 +276,14 @@ export class AiService {
     const raw = parsed && typeof parsed === 'object' ? (parsed as { title?: unknown }).title : parsed;
     const title = typeof raw === 'string' ? raw.replace(/^day\s*\d+\s*[:\-–]\s*/i, '').trim() : '';
     if (!title) {
-      throw new Error('Failed to generate day title from Bedrock response');
+      throw new MalformedAiResponseError('AI provider returned an unusable day-title payload');
     }
-    return { title: title.slice(0, 60), engine: 'bedrock' };
+    return { title: title.slice(0, 60), engine: adapter.id };
   }
 
   /**
-   * Generates alerts for a batch of waypoints in a single invocation.
-   * Fails loudly if Bedrock invocation fails.
+   * Generates alerts for a batch of waypoints in a single provider invocation.
+   * Fails loudly if the provider invocation fails or omits a waypoint.
    */
   async generateBatchAlerts(
     waypoints: WaypointContext[],
@@ -280,29 +293,19 @@ export class AiService {
       throw new Error('Request aborted');
     }
 
-    const validatedModelId = this.validateModelId(options.modelId);
     if (waypoints.length === 0) {
-      return { alerts: {}, results: [], engine: 'template' };
+      return { alerts: {}, results: [] };
     }
 
+    const adapter = this.getAdapterFor(options.preferredEngine);
+    const validatedModelId = this.validateModelId(options.modelId, options.preferredEngine);
     const prompt = buildBatchWaypointPrompt(waypoints);
-    const preferredEngine = options.preferredEngine || 'auto';
 
-    if (preferredEngine === 'template') {
-      return this.generateBatchTemplate(waypoints);
+    if (!(await adapter.isAvailable(options.apiKey))) {
+      throw new Error(`${adapter.name} is currently unavailable.`);
     }
 
-    const bedrock = this.adapters.get('bedrock');
-    if (!bedrock) {
-      throw new Error('Amazon Bedrock adapter is not registered');
-    }
-
-    const isAvail = await bedrock.isAvailable();
-    if (!isAvail) {
-      throw new Error('Amazon Bedrock is currently unavailable. Please verify AWS credentials and region.');
-    }
-
-    const rawOutput = await bedrock.generate(prompt, {
+    const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
       abortSignal: options.abortSignal,
     });
@@ -312,21 +315,6 @@ export class AiService {
       id: wp.id,
       alert: alerts[wp.id],
     }));
-    return { alerts, results, engine: 'bedrock' };
-  }
-
-  private generateBatchTemplate(waypoints: WaypointContext[]): BatchAlertResult {
-    const alerts: Record<string, CopilotAlert> = {};
-    const results: Array<{ id: string; alert: CopilotAlert }> = [];
-
-    for (const wp of waypoints) {
-      const alert = generateTemplateAlert(wp);
-      alerts[wp.id] = alert;
-      results.push({ id: wp.id, alert });
-    }
-
-    return { alerts, results, engine: 'template' };
+    return { alerts, results, engine: adapter.id };
   }
 }
-
-export const defaultAiService = new AiService();

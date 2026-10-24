@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { AiService, defaultAiService } from '../services/aiService.js';
-import { InvalidModelError } from '../services/bedrockService.js';
-import type { WaypointContext, AiEngineType, DayTitleContext } from '../types/ai.js';
+import { AiService, InvalidModelError } from '../services/aiService.js';
+import { defaultAiService } from '../services/aiRegistry.js';
+import { MalformedAiResponseError } from '../services/schemaParser.js';
+import type { WaypointContext, DayTitleContext } from '../types/ai.js';
 
 export interface AiPluginOptions {
   aiService?: AiService;
@@ -11,7 +12,7 @@ interface GenerateBody {
   waypoint?: WaypointContext;
   waypoints?: WaypointContext[];
   apiKey?: string;
-  preferredEngine?: AiEngineType | 'auto';
+  preferredEngine?: string;
   modelId?: string;
 }
 
@@ -29,7 +30,7 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
 
       if (modelId !== undefined && modelId !== null) {
         try {
-          aiService.validateModelId(modelId);
+          aiService.validateModelId(modelId, preferredEngine);
         } catch (err: unknown) {
           if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
             return reply.status(400).send({ error: (err as Error).message });
@@ -69,6 +70,10 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
         }
+        if (err instanceof MalformedAiResponseError) {
+          fastify.log.error({ err }, `AI provider returned an unusable alert payload: ${err.message}`);
+          return reply.status(502).send({ error: err.message });
+        }
         const message = err instanceof Error ? err.message : 'AI generation error';
         fastify.log.error({ err }, `AI alert generation failed: ${message}`);
         return reply.status(500).send({ error: message });
@@ -80,7 +85,7 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
   fastify.post<{
     Body: Partial<DayTitleContext> & {
       apiKey?: string;
-      preferredEngine?: AiEngineType | 'auto';
+      preferredEngine?: string;
       modelId?: string;
     };
   }>(
@@ -90,7 +95,7 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
 
       if (modelId !== undefined && modelId !== null) {
         try {
-          aiService.validateModelId(modelId);
+          aiService.validateModelId(modelId, preferredEngine);
         } catch (err: unknown) {
           if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
             return reply.status(400).send({ error: (err as Error).message });
@@ -111,6 +116,10 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
       } catch (err: unknown) {
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
+        }
+        if (err instanceof MalformedAiResponseError) {
+          fastify.log.error({ err }, `AI provider returned an unusable day-title payload: ${err.message}`);
+          return reply.status(502).send({ error: err.message });
         }
         const message = err instanceof Error ? err.message : 'Day title generation error';
         return reply.status(500).send({ error: message });

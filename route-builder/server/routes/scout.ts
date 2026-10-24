@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { ScoutService } from '../services/scoutService.js';
-import { InvalidModelError } from '../services/bedrockService.js';
+import { InvalidModelError } from '../services/aiService.js';
+import { MalformedAiResponseError } from '../services/schemaParser.js';
 import type { ScoutChatRequest, ScoutScope } from '../types/scout.js';
-import type { AiEngineType } from '../types/ai.js';
 
 export interface ScoutPluginOptions {
   scoutService?: ScoutService;
@@ -11,7 +11,7 @@ export interface ScoutPluginOptions {
 
 interface ChatBody extends ScoutChatRequest {
   apiKey?: string;
-  preferredEngine?: AiEngineType | 'auto';
+  preferredEngine?: string;
   modelId?: string;
 }
 
@@ -34,7 +34,7 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
 
     if (modelId !== undefined && modelId !== null) {
       try {
-        scoutService.validateModelId(modelId);
+        scoutService.validateModelId(modelId, preferredEngine);
       } catch (err: unknown) {
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
@@ -71,6 +71,10 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
       if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
         return reply.status(400).send({ error: (err as Error).message });
       }
+      if (err instanceof MalformedAiResponseError) {
+        fastify.log.error({ err }, `AI provider returned an unusable Route Scout response: ${err.message}`);
+        return reply.status(502).send({ error: err.message });
+      }
       const message = err instanceof Error ? err.message : 'Route Scout error';
       fastify.log.error({ err }, `Route Scout chat failed: ${message}`);
       return reply.status(500).send({ error: message });
@@ -83,7 +87,7 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
 
     if (modelId !== undefined && modelId !== null) {
       try {
-        scoutService.validateModelId(modelId);
+        scoutService.validateModelId(modelId, preferredEngine);
       } catch (err: unknown) {
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });

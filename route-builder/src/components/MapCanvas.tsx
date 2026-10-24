@@ -1,3 +1,4 @@
+import { AI_UNAVAILABLE_TOOLTIP } from '../constants/aiCopy';
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   MapContainer,
@@ -394,7 +395,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
                       }`}
                       title={
                         !aiAvailable
-                          ? 'Route Scout is unavailable. An active AI engine or API key is required.'
+                          ? AI_UNAVAILABLE_TOOLTIP
                           : 'Open Route Scout for this stop'
                       }
                     >
