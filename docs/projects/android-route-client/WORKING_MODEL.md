@@ -5,6 +5,9 @@
 > This project defines the Android on-the-fly route editing engine and cloud co-pilot client.  
 > **Sequencing Rule:** Implementation of Tier 2 (Cloud Sync & Mobile Route Scout) is strictly blocked until the Fastify AWS backend, S3 endpoints, and Google OIDC auth in [`docs/projects/route-scout-cloud/`](../route-scout-cloud/WORKING_MODEL.md) reach their Definition of Done.
 >
+> **Mandatory Pre-Kickoff Working Model Alignment (STOP BEFORE STARTING):**  
+> Our multi-agent orchestration, delegation, and review practices are actively evolving during Phase 1. **Before authoring `plan/ROADMAP.md`, creating `WP-01`, or modifying any Android code for this project, the agent MUST stop and collaborate with the user to review and finalize this `WORKING_MODEL.md`** based on lessons learned from Phase 1. Do not automatically copy or assume the Phase 1 working model without explicit user sign-off.
+>
 > While Tier 1 (offline Kotlin cascade and Google Maps URL generator) does not require cloud endpoints, active execution across this project is queued so that development efforts remain 100% focused on finishing Phase 1 first.
 
 ---
