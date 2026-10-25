@@ -76,7 +76,7 @@ export function extractCleanPlaceName(name: string): string {
  *   to prevent Google Maps from searching for non-existent businesses or snapping to Airbnbs/side-streets.
  */
 export function formatLocationQuery(loc: CoordinateLocation): string {
-  if (!isPhysicalStop(loc)) {
+  if (!isPhysicalStop(loc) || loc.isRouteAnchor === true) {
     return formatCoord(loc.lat, loc.lng);
   }
 
@@ -160,6 +160,14 @@ export function filterWaypointsForNavigation(
   return [origin, ...selectedIntermediates, destination];
 }
 
+function shouldEmitPlaceId(loc: CoordinateLocation): boolean {
+  return (
+    isPhysicalStop(loc) &&
+    loc.isRouteAnchor !== true &&
+    Boolean(loc.placeId && loc.placeId.trim().length > 0)
+  );
+}
+
 /**
  * Constructs a single valid Google Maps Navigation URL.
  * Format:
@@ -174,12 +182,12 @@ export function buildSingleGoogleMapsUrl(
   const destQuery = formatLocationQuery(destination);
 
   let url = `${GOOGLE_MAPS_DIR_BASE}&origin=${originQuery}`;
-  if (origin.placeId && origin.placeId.trim()) {
+  if (shouldEmitPlaceId(origin) && origin.placeId) {
     url += `&origin_place_id=${encodeURIComponent(origin.placeId.trim())}`;
   }
 
   url += `&destination=${destQuery}`;
-  if (destination.placeId && destination.placeId.trim()) {
+  if (shouldEmitPlaceId(destination) && destination.placeId) {
     url += `&destination_place_id=${encodeURIComponent(destination.placeId.trim())}`;
   }
 
@@ -189,13 +197,11 @@ export function buildSingleGoogleMapsUrl(
       .join('|');
     url += `&waypoints=${waypointsParam}`;
 
-    const hasAnyPlaceId = intermediateWaypoints.some(
-      (w) => w.placeId && w.placeId.trim().length > 0
-    );
+    const hasAnyPlaceId = intermediateWaypoints.some(shouldEmitPlaceId);
     if (hasAnyPlaceId) {
       const placeIdsParam = intermediateWaypoints
         .map((w) =>
-          w.placeId && w.placeId.trim().length > 0
+          shouldEmitPlaceId(w) && w.placeId
             ? encodeURIComponent(w.placeId.trim())
             : ''
         )

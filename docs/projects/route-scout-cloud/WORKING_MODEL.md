@@ -132,16 +132,24 @@ Before dispatching any `flash` worker, the Orchestrator must verify live externa
 6. **Zero Silent Fallbacks or Mock Degradation:**
    * Never instruct workers to build silent fallbacks to mock templates, client-side mocks, or local CLIs (`agy`). External API failures must fail loudly and transparently with explicit HTTP status codes (`502`, `503`, `400`). Building any fallback mechanism requires prior user consultation and explicit written approval.
 
-#### Gate 2: Orchestrator Adversarial Diff Audit & Multi-Suite Verification (Pre-PR)
+#### Gate 2: Orchestrator Adversarial Diff Audit (Gate 2A) & Independent Review (Gate 2B)
+
+##### Gate 2A: Orchestrator Personal Diff Audit & Multi-Suite Verification (Mandatory, Never Delegated)
 A worker's self-reported success is never sufficient. Before opening or updating a PR, the Orchestrator must personally inspect the full `git diff` against this 8-point **Adversarial Review Checklist**:
 1. **Region & IAM Accuracy:** Zero hardcoded `'us-east-1'` fallbacks in regional SDK clients; CDK IAM policies include all required resource ARNs (e.g., both `foundation-model/*` and `inference-profile/*` for Bedrock).
 2. **Race Condition & Stale-State Audit:** Every async UI handler/effect guards post-`await` state mutations against `signal.aborted` or a revision ref; switching scope/model/trip mid-flight is race-safe.
-3. **Timer, Listener & Stream Leak Audit:** Every `setInterval` (such as SSE keep-alives) is cleared in `finally` and on socket `close`.
+3. **Timer, Listener & Stream Leak Audit:** Every `setInterval` (such as SSE keep-alives) and request timeout/abort listener is cleared in `finally` and on socket `close`.
 4. **Boundary Validation & Error Status Fidelity:** Invalid parameters return `400` (not `500` or silent fallback); `ApiError` preserves HTTP status codes end-to-end.
-5. **Zero Silent Fallbacks or Mock Degradation:** Catch blocks must never swallow errors to silently return canned mock responses or fall back to local-only tooling (`agy`). External service failures must bubble up cleanly with accurate status codes and user-visible error details.
+5. **Zero Silent Fallbacks or Mock Degradation:** Catch blocks must never swallow errors to silently return canned mock responses, estimated fallback timings, or local-only tooling (`agy`). External service failures must bubble up cleanly with accurate status codes and user-visible error details.
 6. **Prompt & Output Hygiene:** Internal model reasoning (`reasoningContent`, `<think>...</think>`, `<thinking>...</thinking>`) and SSE heartbeat comments (`: ping`, `: keep-alive`) never leak into user-visible text or corrupt JSON extraction.
 7. **Adversarial Test Coverage:** Tests explicitly exercise unhappy paths—unknown `modelId` (`400`), stream error/disconnect timer cleanup, tool-loop iteration limit (`MAX_TOOL_ITERATIONS`), stale async response suppression, and failure propagation without silent mock degradation.
 8. **Full Verification Matrix:** Both `./scripts/ci_check.sh` AND `cd route-builder && npm run test:browser` pass with zero warnings or layout regressions.
+
+##### Gate 2B: Fresh-Context Read-Only Independent Review (Optional Supplement)
+Independent subagent review supplements—and never replaces—the orchestrator's personal Gate 2A audit. Whereas **implementation workers** receive detailed Contract-First prompts (Gate 1), **independent reviewers** must remain unprimed so they can surface blind spots rather than merely checking off a predetermined list:
+* **Short Neutral Prompt Only:** Provide only (1) the git diff/base revision to inspect, (2) pointers to the objective/spec (`WP-XX`) and architectural rules (`AGENTS.md`, `DECISIONS.md`), and (3) a unique `tmp/` findings file path for incremental output.
+* **No Priming:** Do **not** supply a prior fix list, earlier review findings, or a targeted checklist of expected bugs in the review prompt. Never claim a review is "independent" if the reviewer was primed with prior findings.
+* **Read-Only & Single-Level Boundaries:** Use a read-only reviewer configuration (`research` / `diff-reviewer`), writing only to the designated `tmp/` report path if requested, with no subagent nesting.
 
 ---
 

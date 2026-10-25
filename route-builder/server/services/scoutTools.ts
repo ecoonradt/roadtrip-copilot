@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+import zlib from 'node:zlib';
 import dns from 'node:dns';
 import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
 import tzlookup from 'tz-lookup';
@@ -45,6 +48,16 @@ export interface ScoutToolExecutionContext {
 export type DnsLookupFn = (
   hostname: string
 ) => Promise<Array<{ address: string; family: number }>>;
+
+export interface SafeUrlValidationResult {
+  url: URL;
+  addresses: Array<{ address: string; family: number }>;
+}
+
+export interface DnsValidationOptions {
+  timeoutMs?: number;
+  abortSignal?: AbortSignal;
+}
 
 export interface ScoutToolLibraryOptions {
   ssmClient?: SSMClient;
@@ -492,36 +505,99 @@ export function assertSafeExternalUrl(rawUrl: string): URL {
 }
 
 /**
- * Validates an external URL and resolves its DNS records (when not an IP literal)
- * to ensure no A/AAAA record points to a private, loopback, or metadata IP.
+ * Resolves an external URL with SSRF validation and DNS record checks.
  */
-export async function assertSafeExternalUrlWithDns(
+export async function resolveValidatedUrlWithDns(
   rawUrl: string,
-  dnsLookup: DnsLookupFn = (host) => dns.promises.lookup(host, { all: true, verbatim: true })
-): Promise<URL> {
+  dnsLookup: DnsLookupFn = (host) => dns.promises.lookup(host, { all: true, verbatim: true }),
+  options?: DnsValidationOptions
+): Promise<SafeUrlValidationResult> {
+  if (options?.abortSignal?.aborted) {
+    throw new Error('Request aborted');
+  }
   const parsed = assertSafeExternalUrl(rawUrl);
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
 
   const isIpv4Literal = /^\d+\.\d+\.\d+\.\d+$/.test(hostname);
   const isIpv6Literal = hostname.includes(':');
 
-  if (!isIpv4Literal && !isIpv6Literal) {
-    let records: Array<{ address: string; family: number }>;
+  if (isIpv4Literal) {
+    assertSafeIpAddress(hostname);
+    return { url: parsed, addresses: [{ address: hostname, family: 4 }] };
+  }
+  if (isIpv6Literal) {
+    assertSafeIpAddress(hostname);
+    return { url: parsed, addresses: [{ address: hostname, family: 6 }] };
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
+  const lookupPromise = (async () => {
     try {
-      records = await dnsLookup(hostname);
+      return await dnsLookup(hostname);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`DNS resolution failed for "${hostname}": ${msg}`);
     }
-    if (!Array.isArray(records) || records.length === 0) {
-      throw new Error(`DNS resolution returned no addresses for "${hostname}"`);
+  })();
+
+  const controlPromise = new Promise<never>((_resolve, reject) => {
+    if (options?.abortSignal) {
+      if (options.abortSignal.aborted) {
+        reject(new Error('Request aborted'));
+        return;
+      }
+      onAbort = () => reject(new Error('Request aborted'));
+      options.abortSignal.addEventListener('abort', onAbort, { once: true });
     }
-    for (const rec of records) {
-      assertSafeIpAddress(rec.address);
+    if (options?.timeoutMs !== undefined && Number.isFinite(options.timeoutMs)) {
+      const ms = Math.max(1, options.timeoutMs);
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Request timed out after ${ms}ms: ${rawUrl}`));
+      }, ms);
+    }
+  });
+
+  let records: Array<{ address: string; family: number }>;
+  try {
+    records = await Promise.race([lookupPromise, controlPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (onAbort && options?.abortSignal) {
+      options.abortSignal.removeEventListener('abort', onAbort);
     }
   }
 
-  return parsed;
+  if (!Array.isArray(records) || records.length === 0) {
+    throw new Error(`DNS resolution returned no addresses for "${hostname}"`);
+  }
+
+  const validatedAddresses: Array<{ address: string; family: number }> = [];
+  for (const rec of records) {
+    if (!rec || typeof rec.address !== 'string') {
+      throw new Error(`DNS resolution returned invalid record for "${hostname}"`);
+    }
+    assertSafeIpAddress(rec.address);
+    const cleanAddr = rec.address.trim().replace(/^\[|\]$/g, '');
+    const family = rec.family === 6 || cleanAddr.includes(':') ? 6 : 4;
+    validatedAddresses.push({ address: cleanAddr, family });
+  }
+
+  return { url: parsed, addresses: validatedAddresses };
+}
+
+/**
+ * Validates an external URL and resolves its DNS records (when not an IP literal)
+ * to ensure no A/AAAA record points to a private, loopback, or metadata IP.
+ */
+export async function assertSafeExternalUrlWithDns(
+  rawUrl: string,
+  dnsLookup: DnsLookupFn = (host) => dns.promises.lookup(host, { all: true, verbatim: true }),
+  options?: DnsValidationOptions
+): Promise<URL> {
+  const res = await resolveValidatedUrlWithDns(rawUrl, dnsLookup, options);
+  return res.url;
 }
 
 function decodeHtmlEntities(str: string): string {
@@ -558,13 +634,13 @@ function stripTagBlocksLinear(input: string, tagName: string): string {
   const lower = input.toLowerCase();
   const openToken = `<${tagName}`;
   const closeToken = `</${tagName}`;
-  let out = '';
+  const chunks: string[] = [];
   let cursor = 0;
 
   while (cursor < input.length) {
     const startIdx = lower.indexOf(openToken, cursor);
     if (startIdx === -1) {
-      out += input.slice(cursor);
+      chunks.push(input.slice(cursor));
       break;
     }
 
@@ -578,12 +654,12 @@ function stripTagBlocksLinear(input: string, tagName: string): string {
       afterTagChar !== '\n' &&
       afterTagChar !== '\r'
     ) {
-      out += input.slice(cursor, startIdx + openToken.length);
+      chunks.push(input.slice(cursor, startIdx + openToken.length));
       cursor = startIdx + openToken.length;
       continue;
     }
 
-    out += input.slice(cursor, startIdx);
+    chunks.push(input.slice(cursor, startIdx));
 
     const openTagEnd = lower.indexOf('>', startIdx + openToken.length);
     if (openTagEnd === -1) {
@@ -610,7 +686,71 @@ function stripTagBlocksLinear(input: string, tagName: string): string {
     cursor = closeTagEnd + 1;
   }
 
-  return out;
+  return chunks.join('');
+}
+
+function classifyHtmlTagReplacement(rawInside: string): string {
+  const trimmed = rawInside.trim();
+  if (!trimmed) return ' ';
+
+  if (trimmed[0] === '/') {
+    const closeName = trimmed.slice(1).trim().toLowerCase();
+    if (closeName === 'li') return '';
+    if (
+      closeName === 'p' ||
+      closeName === 'div' ||
+      closeName === 'tr' ||
+      closeName === 'table' ||
+      closeName === 'section' ||
+      closeName === 'article' ||
+      (closeName.length === 2 && closeName[0] === 'h' && closeName[1] >= '1' && closeName[1] <= '6')
+    ) {
+      return '\n\n';
+    }
+    return ' ';
+  }
+
+  let endIdx = 0;
+  while (endIdx < trimmed.length) {
+    const ch = trimmed[endIdx];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '/') {
+      break;
+    }
+    endIdx++;
+  }
+  const openName = trimmed.slice(0, endIdx).toLowerCase();
+  if (openName === 'br') return '\n';
+  if (openName === 'li') return '\n* ';
+  return ' ';
+}
+
+function stripAndFormatHtmlTagsLinear(input: string): string {
+  const chunks: string[] = [];
+  let cursor = 0;
+  const len = input.length;
+
+  while (cursor < len) {
+    const ltIdx = input.indexOf('<', cursor);
+    if (ltIdx === -1) {
+      chunks.push(input.slice(cursor));
+      break;
+    }
+    if (ltIdx > cursor) {
+      chunks.push(input.slice(cursor, ltIdx));
+    }
+    const gtIdx = input.indexOf('>', ltIdx + 1);
+    if (gtIdx === -1) {
+      // Unterminated tag or trailing '<' sequence without closing '>' -> drop to EOF in O(1)
+      break;
+    }
+    // If there are nested '<' inside [ltIdx + 1, gtIdx), check the innermost '<' before gtIdx for tag classification
+    const lastLt = input.lastIndexOf('<', gtIdx - 1);
+    const tagStart = lastLt > ltIdx ? lastLt : ltIdx;
+    chunks.push(classifyHtmlTagReplacement(input.slice(tagStart + 1, gtIdx)));
+    cursor = gtIdx + 1;
+  }
+
+  return chunks.join('');
 }
 
 function extractTitleLinear(html: string): string | undefined {
@@ -640,12 +780,7 @@ export function htmlToReadableText(html: string): { title?: string; text: string
     text = stripTagBlocksLinear(text, tag);
   }
 
-  text = text
-    .replace(/<\/(?:p|div|h[1-6]|tr|table|section|article)>/gi, '\n\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<li(?:\s[^>]*)?>/gi, '\n* ')
-    .replace(/<\/li>/gi, '')
-    .replace(/<[^>]+>/g, ' ');
+  text = stripAndFormatHtmlTagsLinear(text);
 
   text = decodeHtmlEntities(text);
   text = text
@@ -718,74 +853,110 @@ export function detectTimezone(lat: number, lng: number, fallback = 'UTC'): stri
   }
 }
 
-interface HighwayDesignator {
-  kind: 'interstate' | 'us' | 'state' | 'other';
+export interface HighwayDesignator {
+  kind: 'interstate' | 'us' | 'state';
+  stateCode?: string;
   number: string;
 }
 
-const US_STATE_CODES = new Set([
+const US_STATE_PRIMARY_CODES = new Set([
   'al', 'ak', 'az', 'ar', 'ca', 'co', 'ct', 'de', 'fl', 'ga',
   'hi', 'id', 'il', 'in', 'ia', 'ks', 'ky', 'la', 'me', 'md',
   'ma', 'mi', 'mn', 'ms', 'mo', 'mt', 'ne', 'nv', 'nh', 'nj',
   'nm', 'ny', 'nc', 'nd', 'oh', 'ok', 'or', 'pa', 'ri', 'sc',
   'sd', 'tn', 'tx', 'ut', 'vt', 'va', 'wa', 'wv', 'wi', 'wy',
-  'dc', 'pr', 'sr', 'sh', 'sp', 'fm', 'rm',
+  'dc', 'pr',
 ]);
 
-function parseHighwayDesignators(name: string): HighwayDesignator[] {
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function parseHighwayDesignators(name: string): HighwayDesignator[] {
+  if (!name || typeof name !== 'string') return [];
   const lower = name.toLowerCase();
   const results: HighwayDesignator[] = [];
 
-  // Interstate e.g. I-40, I 40, Interstate 40
-  for (const m of lower.matchAll(/\b(?:i|interstate)[\s\-]+(\d+[a-z]?)\b/g)) {
-    results.push({ kind: 'interstate', number: m[1] });
-  }
+  // Match Interstates:
+  const interstateRegex =
+    /\b(?:i|ih|interstate(?:\s+(?:highway|hwy|route|rt))?)[\s\-]+(\d+[a-z]?)\b|\b(?:i|ih)(\d+[a-z]?)\b/g;
+  let remaining = lower.replace(interstateRegex, (match, p1, p2) => {
+    const num = (p1 || p2 || '').trim();
+    if (num) {
+      results.push({ kind: 'interstate', number: num });
+    }
+    return ' '.repeat(match.length);
+  });
 
-  // US Highway e.g. US-89, US 89, US Highway 89, U.S. Route 89A
-  for (const m of lower.matchAll(/\b(?:u\.?s\.?)(?:[\s\-]+(?:highway|hwy|route|rt))?[\s\-]+(\d+[a-z]?)\b/g)) {
-    results.push({ kind: 'us', number: m[1] });
-  }
+  // Match US Highways:
+  const usRegex = /\b(?:u\.?s\.?|united\s+states)(?:[\s\-]+(?:highway|hwy|route|rt))?[\s\-]*(\d+[a-z]?)\b/g;
+  remaining = remaining.replace(usRegex, (match, p1) => {
+    const num = (p1 || '').trim();
+    if (num) {
+      results.push({ kind: 'us', number: num });
+    }
+    return ' '.repeat(match.length);
+  });
 
-  // State Route / Highway e.g. AZ-179, State Route 179, SR 179, Highway 179
-  for (const m of lower.matchAll(
-    /\b(?:(state[\s\-]+(?:route|highway|hwy|rd|road)|highway|hwy|route)|([a-z]{2}))[\s\-]+(\d+[a-z]?)\b/g
-  )) {
-    const statePrefix = m[2];
-    if (m[1] || (statePrefix && US_STATE_CODES.has(statePrefix))) {
-      results.push({ kind: 'state', number: m[3] });
+  // Match State Routes on remaining string:
+  // 1. Generic prefix
+  const genericStateRegex =
+    /\b(?:state[\s\-]+(?:route|highway|hwy|rd|road|rt)|sr|sh|sp|fm|rm|highway|hwy|route|rt)[\s\-]*(\d+[a-z]?)\b/g;
+  remaining = remaining.replace(genericStateRegex, (match, p1) => {
+    const num = (p1 || '').trim();
+    if (num) {
+      results.push({ kind: 'state', number: num });
+    }
+    return ' '.repeat(match.length);
+  });
+
+  // 2. State code prefix
+  const stateCodeRegex = /\b([a-z]{2})[\s\-]*(\d+[a-z]?)\b/g;
+  for (const m of remaining.matchAll(stateCodeRegex)) {
+    const code = m[1];
+    const num = (m[2] || '').trim();
+    if (US_STATE_PRIMARY_CODES.has(code) && num) {
+      results.push({ kind: 'state', stateCode: code, number: num });
     }
   }
 
   return results;
 }
 
-function matchesHighwayRoadName(candidateRoadName: string, targetRoadName: string): boolean {
-  const rawCand = candidateRoadName.trim();
-  const rawTarget = targetRoadName.trim();
+export function matchesHighwayRoadName(candidateRoadName: string, targetRoadName: string): boolean {
+  const rawCand = candidateRoadName ? candidateRoadName.trim() : '';
+  const rawTarget = targetRoadName ? targetRoadName.trim() : '';
   if (!rawCand || !rawTarget) return false;
-
-  const candDirect = rawCand.toLowerCase().replace(/[\s\-_.]+/g, '');
-  const targetDirect = rawTarget.toLowerCase().replace(/[\s\-_.]+/g, '');
-  if (!candDirect || !targetDirect) return false;
-
-  if (candDirect === targetDirect) return true;
-  if (
-    candDirect.length >= 3 &&
-    targetDirect.length >= 3 &&
-    (candDirect.includes(targetDirect) || targetDirect.includes(candDirect))
-  ) {
-    return true;
-  }
 
   const targetDesignators = parseHighwayDesignators(rawTarget);
   const candDesignators = parseHighwayDesignators(rawCand);
-  if (targetDesignators.length > 0 && candDesignators.length > 0) {
-    for (const td of targetDesignators) {
-      for (const cd of candDesignators) {
-        if (td.kind === cd.kind && td.number === cd.number) {
-          return true;
-        }
-      }
+
+  if (targetDesignators.length > 0 || candDesignators.length > 0) {
+    if (targetDesignators.length === 0 || candDesignators.length === 0) {
+      return false;
+    }
+    return targetDesignators.some((td) =>
+      candDesignators.some(
+        (cd) =>
+          td.kind === cd.kind &&
+          td.number === cd.number &&
+          (!td.stateCode || !cd.stateCode || td.stateCode === cd.stateCode)
+      )
+    );
+  }
+
+  // When neither has highway designators
+  const candNorm = rawCand.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const targetNorm = rawTarget.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  if (!candNorm || !targetNorm) return false;
+  if (candNorm === targetNorm) return true;
+
+  if (Math.min(candNorm.length, targetNorm.length) >= 4) {
+    const targetWordRegex = new RegExp(`(?:^|\\s)${escapeRegExp(targetNorm)}(?:$|\\s)`);
+    const candWordRegex = new RegExp(`(?:^|\\s)${escapeRegExp(candNorm)}(?:$|\\s)`);
+    if (targetWordRegex.test(candNorm) || candWordRegex.test(targetNorm)) {
+      return true;
     }
   }
 
@@ -875,7 +1046,7 @@ export class ScoutToolLibrary {
     return this.ssmClient;
   }
 
-  private async fetchWithTimeout(
+  public async fetchWithTimeout(
     url: string,
     init: RequestInit,
     abortSignal?: AbortSignal,
@@ -911,6 +1082,282 @@ export class ScoutToolLibrary {
         abortSignal.removeEventListener('abort', onAbort);
       }
     }
+  }
+
+  private async fetchJsonWithTimeout<T>(
+    url: string,
+    init: RequestInit,
+    upstreamLabel: string,
+    abortSignal?: AbortSignal,
+    customTimeoutMs?: number
+  ): Promise<T> {
+    if (abortSignal?.aborted) {
+      throw new Error('Request aborted');
+    }
+    const timeoutMs = customTimeoutMs ?? this.options.upstreamTimeoutMs ?? 10_000;
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+    const onAbort = () => timeoutController.abort();
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', onAbort, { once: true });
+    }
+    const fetchFn = this.options.fetchImpl ?? fetch;
+    let res: Response | undefined;
+    let activeReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    const controlPromise = new Promise<never>((_resolve, reject) => {
+      const abortHandler = () => {
+        if (activeReader) {
+          void activeReader.cancel().catch(() => {});
+        } else if (res?.body && !res.body.locked) {
+          void res.body.cancel().catch(() => {});
+        }
+        if (abortSignal?.aborted) {
+          reject(new Error('Request aborted'));
+        } else {
+          reject(new Error(`Upstream request timed out after ${timeoutMs}ms: ${url}`));
+        }
+      };
+      if (timeoutController.signal.aborted) {
+        abortHandler();
+        return;
+      }
+      timeoutController.signal.addEventListener('abort', abortHandler, { once: true });
+    });
+
+    const executionPromise = (async (): Promise<T> => {
+      try {
+        res = await fetchFn(url, {
+          ...init,
+          signal: timeoutController.signal,
+        });
+      } catch (err: unknown) {
+        if (abortSignal?.aborted) {
+          throw new Error('Request aborted');
+        }
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error(`Upstream request timed out after ${timeoutMs}ms: ${url}`);
+        }
+        throw err;
+      }
+
+      if (!res.ok) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore
+        }
+        throw new Error(`${upstreamLabel} failed with HTTP ${res.status}`);
+      }
+
+      try {
+        if (res.body && typeof res.body.getReader === 'function') {
+          activeReader = res.body.getReader();
+          const decoder = new TextDecoder('utf-8');
+          const chunks: string[] = [];
+          while (true) {
+            const { done, value } = await activeReader.read();
+            if (timeoutController.signal.aborted) {
+              throw new Error('AbortError');
+            }
+            if (done) break;
+            if (value) {
+              chunks.push(decoder.decode(value, { stream: true }));
+            }
+          }
+          chunks.push(decoder.decode());
+          return JSON.parse(chunks.join('')) as T;
+        }
+        return (await res.json()) as T;
+      } catch (err: unknown) {
+        if (abortSignal?.aborted) {
+          throw new Error('Request aborted');
+        }
+        if (timeoutController.signal.aborted) {
+          throw new Error(`Upstream request timed out after ${timeoutMs}ms: ${url}`);
+        }
+        throw err;
+      }
+    })();
+
+    try {
+      return await Promise.race([executionPromise, controlPromise]);
+    } finally {
+      clearTimeout(timeoutId);
+      if (abortSignal) {
+        abortSignal.removeEventListener('abort', onAbort);
+      }
+    }
+  }
+
+  private requestPinnedUrl(
+    validated: SafeUrlValidationResult,
+    headers: Record<string, string>,
+    signal: AbortSignal
+  ): Promise<Response> {
+    const cleanHostname = validated.url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+    const isIpLiteral = /^\d+\.\d+\.\d+\.\d+$/.test(cleanHostname) || cleanHostname.includes(':');
+    const isHttps = validated.url.protocol === 'https:';
+    const transport = isHttps ? https : http;
+
+    return new Promise<Response>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Error('Request aborted'));
+        return;
+      }
+
+      let settled = false;
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        req.destroy(new Error('Request aborted'));
+        reject(new Error('Request aborted'));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+
+      const reqOptions: https.RequestOptions = {
+        protocol: validated.url.protocol,
+        hostname: cleanHostname,
+        port: validated.url.port ? Number(validated.url.port) : isHttps ? 443 : 80,
+        path: `${validated.url.pathname}${validated.url.search}`,
+        method: 'GET',
+        headers: {
+          ...headers,
+          Host: validated.url.host,
+          'Accept-Encoding': 'identity',
+        },
+        agent: false,
+        signal,
+        ...(isHttps && !isIpLiteral ? { servername: cleanHostname } : {}),
+        lookup: (_host, lookupOpts, callback) => {
+          try {
+            for (const addr of validated.addresses) {
+              assertSafeIpAddress(addr.address);
+            }
+            const primary = validated.addresses[0];
+            const wantAll =
+              typeof lookupOpts === 'object' &&
+              lookupOpts !== null &&
+              'all' in lookupOpts &&
+              Boolean((lookupOpts as { all?: boolean }).all);
+            if (wantAll) {
+              (callback as (err: NodeJS.ErrnoException | null, addresses: dns.LookupAddress[]) => void)(
+                null,
+                validated.addresses.map((a) => ({ address: a.address, family: a.family }))
+              );
+            } else {
+              (callback as (err: NodeJS.ErrnoException | null, address: string, family: number) => void)(
+                null,
+                primary.address,
+                primary.family
+              );
+            }
+          } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            (callback as (err: NodeJS.ErrnoException | null, address: string, family: number) => void)(
+              error as NodeJS.ErrnoException,
+              '',
+              4
+            );
+          }
+        },
+      };
+
+      const req = transport.request(reqOptions, (incoming) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+
+        const resHeaders = new Headers();
+        for (const [key, val] of Object.entries(incoming.headers)) {
+          if (val === undefined) continue;
+          if (Array.isArray(val)) {
+            for (const item of val) {
+              resHeaders.append(key, item);
+            }
+          } else {
+            resHeaders.set(key, val);
+          }
+        }
+
+        let bodyStream: NodeJS.ReadableStream = incoming;
+        const contentEncoding = (resHeaders.get('content-encoding') || '').toLowerCase().trim();
+        if (contentEncoding === 'gzip') {
+          const decompressor = zlib.createGunzip();
+          incoming.pipe(decompressor);
+          bodyStream = decompressor;
+          resHeaders.delete('content-encoding');
+        } else if (contentEncoding === 'deflate') {
+          const decompressor = zlib.createInflate();
+          incoming.pipe(decompressor);
+          bodyStream = decompressor;
+          resHeaders.delete('content-encoding');
+        } else if (contentEncoding === 'br') {
+          const decompressor = zlib.createBrotliDecompress();
+          incoming.pipe(decompressor);
+          bodyStream = decompressor;
+          resHeaders.delete('content-encoding');
+        }
+
+        const webStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            bodyStream.on('data', (chunk: Buffer | Uint8Array) => {
+              controller.enqueue(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+            });
+            bodyStream.on('end', () => {
+              try {
+                controller.close();
+              } catch {
+                // already closed
+              }
+            });
+            bodyStream.on('error', (err) => {
+              try {
+                controller.error(err);
+              } catch {
+                // already errored
+              }
+            });
+          },
+          cancel() {
+            if ('destroy' in bodyStream && typeof (bodyStream as { destroy?: () => void }).destroy === 'function') {
+              (bodyStream as { destroy: () => void }).destroy();
+            }
+            incoming.destroy();
+            req.destroy();
+          },
+        });
+
+        resolve(
+          new Response(webStream, {
+            status: incoming.statusCode ?? 500,
+            statusText: incoming.statusMessage ?? '',
+            headers: resHeaders,
+          })
+        );
+      });
+
+      req.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+
+      req.on('socket', (socket) => {
+        socket.on('connect', () => {
+          if (socket.remoteAddress) {
+            try {
+              assertSafeIpAddress(socket.remoteAddress);
+            } catch (err: unknown) {
+              req.destroy(err instanceof Error ? err : new Error(String(err)));
+            }
+          }
+        });
+      });
+
+      req.end();
+    });
   }
 
   /**
@@ -1122,7 +1569,7 @@ export class ScoutToolLibrary {
     const apiKey = await this.resolveBraveSearchApiKey(context.abortSignal);
     const url = `${BRAVE_SEARCH_BASE_URL}?q=${encodeURIComponent(rawQuery)}&count=${count}`;
 
-    const res = await this.fetchWithTimeout(
+    const data = await this.fetchJsonWithTimeout<RawBraveSearchResponse>(
       url,
       {
         method: 'GET',
@@ -1131,14 +1578,10 @@ export class ScoutToolLibrary {
           'X-Subscription-Token': apiKey,
         },
       },
+      'Brave Search API',
       context.abortSignal
     );
 
-    if (!res.ok) {
-      throw new Error(`Brave Search API failed with HTTP ${res.status}`);
-    }
-
-    const data = (await res.json()) as RawBraveSearchResponse;
     const rawResults = data.web?.results;
     const results = Array.isArray(rawResults)
       ? rawResults.map((r) => ({
@@ -1172,45 +1615,94 @@ export class ScoutToolLibrary {
       throw new Error('Missing required "url" argument for read_url_content');
     }
 
-    const shouldVerifyDns = Boolean(this.options.dnsLookup || !this.options.fetchImpl);
-    const validateHopUrl = async (targetUrl: string): Promise<string> => {
-      if (shouldVerifyDns) {
-        const parsed = await assertSafeExternalUrlWithDns(targetUrl, this.options.dnsLookup);
-        return parsed.toString();
-      }
-      return assertSafeExternalUrl(targetUrl).toString();
-    };
-
-    let currentUrl = await validateHopUrl(rawUrl);
-    const MAX_REDIRECTS = 3;
-    let redirects = 0;
     const timeoutMs = this.options.urlTimeoutMs ?? 10_000;
+    const deadlineMs = Date.now() + timeoutMs;
     const maxChars = this.options.maxUrlChars ?? 12_000;
     const maxBytes = 512 * 1024;
-    const fetchFn = this.options.fetchImpl ?? fetch;
+    const MAX_REDIRECTS = 3;
+    let redirects = 0;
+
+    const validateHop = async (targetUrl: string, remainingMs: number): Promise<SafeUrlValidationResult> => {
+      if (this.options.dnsLookup || !this.options.fetchImpl) {
+        return await resolveValidatedUrlWithDns(targetUrl, this.options.dnsLookup, {
+          timeoutMs: remainingMs,
+          abortSignal: context.abortSignal,
+        });
+      }
+      const parsed = assertSafeExternalUrl(targetUrl);
+      return { url: parsed, addresses: [] };
+    };
+
+    if (Date.now() >= deadlineMs) {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${rawUrl}`);
+    }
+    let validated = await validateHop(rawUrl, Math.max(1, deadlineMs - Date.now()));
+    let currentUrl = validated.url.toString();
 
     while (true) {
       if (context.abortSignal?.aborted) {
         throw new Error('Request aborted');
       }
 
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error(`Request timed out after ${timeoutMs}ms: ${currentUrl}`);
+      }
+
+      const hopTimeoutMs = Math.max(1, remainingMs);
       const timeoutController = new AbortController();
-      const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+      const timeoutId = setTimeout(() => timeoutController.abort(), hopTimeoutMs);
       const abortHandler = () => timeoutController.abort();
       if (context.abortSignal) {
         context.abortSignal.addEventListener('abort', abortHandler, { once: true });
       }
 
-      try {
-        const res = await fetchFn(currentUrl, {
-          method: 'GET',
-          redirect: 'manual',
-          headers: {
-            'User-Agent': 'RoadtripCopilot-Scout/1.0 (https://github.com/roadtrip-copilot)',
-            Accept: 'text/html,application/xhtml+xml,text/plain,text/markdown,application/json;q=0.9,*/*;q=0.5',
-          },
-          signal: timeoutController.signal,
+      const raceStreamStep = <T>(promise: Promise<T>): Promise<T> => {
+        if (timeoutController.signal.aborted) {
+          if (context.abortSignal?.aborted) {
+            return Promise.reject(new Error('Request aborted'));
+          }
+          return Promise.reject(new Error(`Request timed out after ${timeoutMs}ms: ${currentUrl}`));
+        }
+        return new Promise<T>((resolve, reject) => {
+          const onAbort = () => {
+            if (context.abortSignal?.aborted) {
+              reject(new Error('Request aborted'));
+            } else {
+              reject(new Error(`Request timed out after ${timeoutMs}ms: ${currentUrl}`));
+            }
+          };
+          timeoutController.signal.addEventListener('abort', onAbort, { once: true });
+          promise.then(
+            (val) => {
+              timeoutController.signal.removeEventListener('abort', onAbort);
+              resolve(val);
+            },
+            (err) => {
+              timeoutController.signal.removeEventListener('abort', onAbort);
+              reject(err);
+            }
+          );
         });
+      };
+
+      try {
+        const headers: Record<string, string> = {
+          'User-Agent': 'RoadtripCopilot-Scout/1.0 (https://github.com/roadtrip-copilot)',
+          Accept: 'text/html,application/xhtml+xml,text/plain,text/markdown,application/json;q=0.9,*/*;q=0.5',
+        };
+
+        let res: Response;
+        if (this.options.fetchImpl) {
+          res = await this.options.fetchImpl(currentUrl, {
+            method: 'GET',
+            redirect: 'manual',
+            headers,
+            signal: timeoutController.signal,
+          });
+        } else {
+          res = await this.requestPinnedUrl(validated, headers, timeoutController.signal);
+        }
 
         if ([301, 302, 303, 307, 308].includes(res.status)) {
           try {
@@ -1227,7 +1719,12 @@ export class ScoutToolLibrary {
             throw new Error(`HTTP ${res.status} redirect without Location header`);
           }
           const resolvedNext = new URL(location, currentUrl).toString();
-          currentUrl = await validateHopUrl(resolvedNext);
+          const nextRemainingMs = deadlineMs - Date.now();
+          if (nextRemainingMs <= 0) {
+            throw new Error(`Request timed out after ${timeoutMs}ms: ${resolvedNext}`);
+          }
+          validated = await validateHop(resolvedNext, Math.max(1, nextRemainingMs));
+          currentUrl = validated.url.toString();
           continue;
         }
 
@@ -1268,31 +1765,35 @@ export class ScoutToolLibrary {
           const reader = res.body.getReader();
           const chunks: Uint8Array[] = [];
           let totalBytes = 0;
-          while (true) {
-            if (context.abortSignal?.aborted) {
+          let readFinished = false;
+          try {
+            while (true) {
+              if (context.abortSignal?.aborted) {
+                throw new Error('Request aborted');
+              }
+              const { done, value } = await raceStreamStep(reader.read());
+              if (done) {
+                readFinished = true;
+                break;
+              }
+              if (value) {
+                totalBytes += value.length;
+                if (totalBytes > maxBytes) {
+                  truncatedByBytes = true;
+                  const allowed = maxBytes - (totalBytes - value.length);
+                  if (allowed > 0) chunks.push(value.subarray(0, allowed));
+                  break;
+                }
+                chunks.push(value);
+              }
+            }
+          } finally {
+            if (!readFinished) {
               try {
                 await reader.cancel();
               } catch {
                 // ignore
               }
-              throw new Error('Request aborted');
-            }
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value) {
-              totalBytes += value.length;
-              if (totalBytes > maxBytes) {
-                truncatedByBytes = true;
-                const allowed = maxBytes - (totalBytes - value.length);
-                if (allowed > 0) chunks.push(value.subarray(0, allowed));
-                try {
-                  await reader.cancel();
-                } catch {
-                  // ignore
-                }
-                break;
-              }
-              chunks.push(value);
             }
           }
           const combined = new Uint8Array(chunks.reduce((acc, c) => acc + c.length, 0));
@@ -1306,7 +1807,7 @@ export class ScoutToolLibrary {
             bodyText = bodyText.slice(0, -1);
           }
         } else {
-          bodyText = await res.text();
+          bodyText = await raceStreamStep(res.text());
           if (bodyText.length > maxBytes) {
             truncatedByBytes = true;
             bodyText = bodyText.slice(0, maxBytes);
@@ -1337,6 +1838,9 @@ export class ScoutToolLibrary {
       } catch (err: unknown) {
         if (context.abortSignal?.aborted) {
           throw new Error('Request aborted');
+        }
+        if (timeoutController.signal.aborted) {
+          throw new Error(`Request timed out after ${timeoutMs}ms: ${currentUrl}`);
         }
         if (err instanceof Error && err.name === 'AbortError') {
           throw new Error(`Request timed out after ${timeoutMs}ms: ${currentUrl}`);
@@ -1410,7 +1914,7 @@ export class ScoutToolLibrary {
       };
     }
 
-    const res = await this.fetchWithTimeout(
+    const data = await this.fetchJsonWithTimeout<RawGooglePlacesTextSearchResponse>(
       GOOGLE_PLACES_TEXT_SEARCH_URL,
       {
         method: 'POST',
@@ -1421,14 +1925,10 @@ export class ScoutToolLibrary {
         },
         body: JSON.stringify(body),
       },
+      'Google Places API',
       context.abortSignal
     );
 
-    if (!res.ok) {
-      throw new Error(`Google Places API failed with HTTP ${res.status}`);
-    }
-
-    const data = (await res.json()) as RawGooglePlacesTextSearchResponse;
     const rawPlaces = Array.isArray(data.places) ? data.places.slice(0, 5) : [];
     const records: ResolvedPlaceRecord[] = [];
 
@@ -1531,7 +2031,7 @@ export class ScoutToolLibrary {
     // Preserve literal comma in OSRM URL path (Rule 5)
     const url = `${baseUrl}/${coordSegment}?number=5`;
 
-    const res = await this.fetchWithTimeout(
+    const data = await this.fetchJsonWithTimeout<RawOsrmNearestResponse>(
       url,
       {
         method: 'GET',
@@ -1539,14 +2039,10 @@ export class ScoutToolLibrary {
           Accept: 'application/json',
         },
       },
+      'OSRM nearest',
       context.abortSignal
     );
 
-    if (!res.ok) {
-      throw new Error(`OSRM nearest failed with HTTP ${res.status}`);
-    }
-
-    const data = (await res.json()) as RawOsrmNearestResponse;
     if (data.code !== 'Ok' || !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
       throw new Error('OSRM nearest returned no highway candidates');
     }
@@ -1743,7 +2239,11 @@ export class ScoutToolLibrary {
       throw new Error('Trip context waypoints must be an array');
     }
 
-    const waypoints: ScoutWaypointSummary[] = originalWaypoints.map((w) => ({ ...w }));
+    interface SimulationWaypoint extends ScoutWaypointSummary {
+      origIndex?: number;
+    }
+
+    const waypoints: SimulationWaypoint[] = originalWaypoints.map((w, index) => ({ ...w, origIndex: index }));
     const idx = waypoints.findIndex((w) => w.id === targetId);
     if (idx === -1) {
       throw new Error(
@@ -1778,13 +2278,14 @@ export class ScoutToolLibrary {
           : 'scenic_pull_off';
       const dwell = typeof args.dwell_minutes === 'number' ? args.dwell_minutes : 15;
 
-      const newWp: ScoutWaypointSummary = {
+      const newWp: SimulationWaypoint = {
         id: `sim_add_${Date.now()}`,
         name: candidateName,
         type: candidateType,
         lat: Number(args.candidate_lat.toFixed(6)),
         lng: Number(args.candidate_lng.toFixed(6)),
         dwell_minutes: dwell,
+        origIndex: undefined,
       };
       waypoints.splice(idx + 1, 0, newWp);
     } else if (action === 'update') {
@@ -1936,6 +2437,63 @@ export class ScoutToolLibrary {
       timezone: string;
     }> = [];
 
+    const routeService = this.options.routeService ?? defaultRouteService;
+
+    interface LegMeasurement {
+      distMiles: number;
+      driveSec: number;
+    }
+
+    const legMeasurements: LegMeasurement[] = new Array(waypoints.length);
+    const legRoutingTasks: Array<{ legIdx: number; promise: Promise<LegMeasurement> }> = [];
+
+    for (let i = 1; i < waypoints.length; i++) {
+      const prev = waypoints[i - 1];
+      const wp = waypoints[i];
+      const isUnchanged =
+        prev.origIndex !== undefined &&
+        wp.origIndex !== undefined &&
+        wp.origIndex === prev.origIndex + 1 &&
+        Math.abs(originalWaypoints[prev.origIndex].lat - prev.lat) < 1e-6 &&
+        Math.abs(originalWaypoints[prev.origIndex].lng - prev.lng) < 1e-6 &&
+        Math.abs(originalWaypoints[wp.origIndex].lat - wp.lat) < 1e-6 &&
+        Math.abs(originalWaypoints[wp.origIndex].lng - wp.lng) < 1e-6 &&
+        typeof wp.drive_duration_minutes === 'number' &&
+        Number.isFinite(wp.drive_duration_minutes) &&
+        wp.drive_duration_minutes >= 0 &&
+        typeof wp.drive_distance_miles === 'number' &&
+        Number.isFinite(wp.drive_distance_miles) &&
+        wp.drive_distance_miles >= 0;
+
+      if (isUnchanged) {
+        legMeasurements[i] = {
+          distMiles: wp.drive_distance_miles as number,
+          driveSec: Math.round((wp.drive_duration_minutes as number) * 60),
+        };
+      } else {
+        const coordString = `${Number(prev.lng.toFixed(6))},${Number(prev.lat.toFixed(6))};${Number(wp.lng.toFixed(6))},${Number(wp.lat.toFixed(6))}`;
+        legRoutingTasks.push({
+          legIdx: i,
+          promise: (async () => {
+            const routeRes = await routeService.getRoute(coordString, undefined, context.abortSignal);
+            const distMiles = routeRes.distanceMiles;
+            const driveSec =
+              typeof routeRes.durationSeconds === 'number' && Number.isFinite(routeRes.durationSeconds)
+                ? routeRes.durationSeconds
+                : Math.round(routeRes.durationMinutes * 60);
+            return { distMiles, driveSec };
+          })(),
+        });
+      }
+    }
+
+    if (legRoutingTasks.length > 0) {
+      const taskResults = await Promise.all(legRoutingTasks.map((t) => t.promise));
+      for (let t = 0; t < legRoutingTasks.length; t++) {
+        legMeasurements[legRoutingTasks[t].legIdx] = taskResults[t];
+      }
+    }
+
     let totalDriveSeconds = 0;
     let totalDwellMinutes = 0;
     let totalDistanceMiles = 0;
@@ -1949,29 +2507,9 @@ export class ScoutToolLibrary {
       let distMiles = 0;
 
       if (i > 0) {
-        const prev = waypoints[i - 1];
-        const origIdx = originalWaypoints.findIndex((ow) => ow.id === wp.id);
-        const origPrev = origIdx > 0 ? originalWaypoints[origIdx - 1] : undefined;
-        const origCurr = origIdx >= 0 ? originalWaypoints[origIdx] : undefined;
-
-        if (
-          origPrev &&
-          origCurr &&
-          origPrev.id === prev.id &&
-          Math.abs(origPrev.lat - prev.lat) < 1e-6 &&
-          Math.abs(origPrev.lng - prev.lng) < 1e-6 &&
-          Math.abs(origCurr.lat - wp.lat) < 1e-6 &&
-          Math.abs(origCurr.lng - wp.lng) < 1e-6 &&
-          typeof wp.drive_duration_minutes === 'number' &&
-          typeof wp.drive_distance_miles === 'number'
-        ) {
-          distMiles = wp.drive_distance_miles;
-          driveSec = Math.round(wp.drive_duration_minutes * 60);
-        } else {
-          distMiles = Number(haversineMiles(prev.lat, prev.lng, wp.lat, wp.lng).toFixed(2));
-          // Estimate at ~50 mph statutory cruising speed accounting for turns
-          driveSec = Math.round((distMiles / 50) * 3600);
-        }
+        const leg = legMeasurements[i];
+        distMiles = leg.distMiles;
+        driveSec = leg.driveSec;
         totalDriveSeconds += driveSec;
         totalDistanceMiles += distMiles;
       }
@@ -2132,20 +2670,16 @@ export class ScoutToolLibrary {
     const auditSingleWaypoint = async (wp: ScoutWaypointSummary) => {
       const coordSegment = `${Number(wp.lng.toFixed(6))},${Number(wp.lat.toFixed(6))}`;
       const url = `${baseUrl}/${coordSegment}?number=1`;
-      const res = await this.fetchWithTimeout(
+      const data = await this.fetchJsonWithTimeout<RawOsrmNearestResponse>(
         url,
         {
           method: 'GET',
           headers: { Accept: 'application/json' },
         },
+        'OSRM nearest',
         context.abortSignal
       );
 
-      if (!res.ok) {
-        throw new Error(`OSRM nearest failed with HTTP ${res.status}`);
-      }
-
-      const data = (await res.json()) as RawOsrmNearestResponse;
       if (data.code !== 'Ok' || !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
         throw new Error('OSRM nearest returned no highway candidates');
       }

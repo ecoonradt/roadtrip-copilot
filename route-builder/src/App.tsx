@@ -861,6 +861,14 @@ export function App() {
 
   const handleAddWaypointFromScout = useCallback(
     (suggestion: ScoutSuggestion) => {
+      const isInTransitAnchor =
+        suggestion.type === 'scenic_drive_by' ||
+        suggestion.is_route_anchor === true ||
+        (suggestion.dwell_minutes === 0 &&
+          suggestion.type !== 'lodging' &&
+          suggestion.type !== 'destination' &&
+          suggestion.type !== 'origin');
+
       const newWp: Waypoint = {
         id: suggestion.newId || `wp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         name: suggestion.name,
@@ -873,8 +881,8 @@ export function App() {
         target_time: '12:00:00',
         notes: suggestion.reason,
         place_name: suggestion.place_name,
-        address: suggestion.address,
-        google_place_id: suggestion.google_place_id,
+        address: isInTransitAnchor ? undefined : suggestion.address,
+        google_place_id: isInTransitAnchor ? undefined : suggestion.google_place_id,
         is_route_anchor: suggestion.is_route_anchor,
         notification: suggestion.notification,
       };
