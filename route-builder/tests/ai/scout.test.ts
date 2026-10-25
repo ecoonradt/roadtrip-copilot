@@ -390,8 +390,38 @@ describe('Route Scout Service & Prompts', () => {
       expect(suggestions[0].is_route_anchor).toBe(false);
     });
 
-    it('deterministically strips hallucinated or unverified Google Place IDs unless present in knownPlaceIds', () => {
-      const rawModelOutput = `Audited stop.
+    it('deterministically strips hallucinated or unverified Google Place IDs unless present in knownPlaceIds on physical stops, and always strips them on scenic anchors', () => {
+      const rawPhysicalOutput = `Audited stop.
+\`\`\`json:suggestions
+[
+  {
+    "action": "update_waypoint",
+    "targetWaypointId": "wp_sedona",
+    "name": "Sedona Red Rocks Cafe",
+    "type": "meal",
+    "lat": 34.7865,
+    "lng": -111.7612,
+    "dwell_minutes": 45,
+    "google_place_id": "ChIJfake_hallucinated_place_id_12345"
+  }
+]
+\`\`\``;
+
+      // With an empty knownPlaceIds set (no verified place IDs on the route yet), the newly invented ID is stripped
+      const { suggestions: stripped } = parseScoutResponse(rawPhysicalOutput, {
+        knownPlaceIds: new Set(['ChIJverified_other_id_1234567890']),
+      });
+      expect(stripped[0].google_place_id).toBeUndefined();
+      expect(stripped[0].is_route_anchor).toBe(false);
+
+      // When the ID is in knownPlaceIds on a physical stop, it is retained
+      const { suggestions: retained } = parseScoutResponse(rawPhysicalOutput, {
+        knownPlaceIds: new Set(['ChIJfake_hallucinated_place_id_12345']),
+      });
+      expect(retained[0].google_place_id).toBe('ChIJfake_hallucinated_place_id_12345');
+
+      // On a scenic drive-by / route anchor, google_place_id is always stripped even if present in knownPlaceIds
+      const rawScenicOutput = `Audited scenic anchor.
 \`\`\`json:suggestions
 [
   {
@@ -407,19 +437,11 @@ describe('Route Scout Service & Prompts', () => {
   }
 ]
 \`\`\``;
-
-      // With an empty knownPlaceIds set (no verified place IDs on the route yet), the newly invented ID is stripped
-      const { suggestions: stripped } = parseScoutResponse(rawModelOutput, {
-        knownPlaceIds: new Set(['ChIJverified_other_id_1234567890']),
-      });
-      expect(stripped[0].google_place_id).toBeUndefined();
-      expect(stripped[0].is_route_anchor).toBe(true);
-
-      // When the ID is in knownPlaceIds, it is retained
-      const { suggestions: retained } = parseScoutResponse(rawModelOutput, {
+      const { suggestions: scenicAnchor } = parseScoutResponse(rawScenicOutput, {
         knownPlaceIds: new Set(['ChIJfake_hallucinated_place_id_12345']),
       });
-      expect(retained[0].google_place_id).toBe('ChIJfake_hallucinated_place_id_12345');
+      expect(scenicAnchor[0].google_place_id).toBeUndefined();
+      expect(scenicAnchor[0].is_route_anchor).toBe(true);
     });
 
     it('validates Google Place ID formatting with validateScoutPlaceId and isValidGooglePlaceId', () => {

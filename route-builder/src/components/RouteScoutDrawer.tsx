@@ -934,6 +934,14 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
     const targetId = suggestion.targetWaypointId || scope.waypointId;
     if (!targetId) return;
 
+    const isInTransitAnchor =
+      suggestion.type === 'scenic_drive_by' ||
+      suggestion.is_route_anchor === true ||
+      (suggestion.dwell_minutes === 0 &&
+        suggestion.type !== 'lodging' &&
+        suggestion.type !== 'destination' &&
+        suggestion.type !== 'origin');
+
     onUpdateWaypoint(targetId, {
       ...(suggestion.newId ? { id: suggestion.newId } : {}),
       name: suggestion.name,
@@ -943,8 +951,12 @@ export const RouteScoutDrawer: React.FC<RouteScoutDrawerProps> = ({
       dwell_minutes: suggestion.dwell_minutes,
       trigger_radius_miles: suggestion.trigger_radius_miles,
       ...(suggestion.place_name ? { place_name: suggestion.place_name } : {}),
-      ...(suggestion.address ? { address: suggestion.address } : {}),
-      ...(suggestion.google_place_id ? { google_place_id: suggestion.google_place_id } : {}),
+      ...(isInTransitAnchor
+        ? { google_place_id: undefined, address: undefined }
+        : {
+            ...(suggestion.address ? { address: suggestion.address } : {}),
+            ...(suggestion.google_place_id ? { google_place_id: suggestion.google_place_id } : {}),
+          }),
       ...(suggestion.is_route_anchor !== undefined ? { is_route_anchor: suggestion.is_route_anchor } : {}),
       ...(suggestion.notification ? { notification: suggestion.notification } : {}),
     });

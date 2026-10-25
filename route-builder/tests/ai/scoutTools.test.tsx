@@ -1,4 +1,7 @@
 import React from 'react';
+import http from 'node:http';
+import https from 'node:https';
+import { PassThrough } from 'node:stream';
 import * as renderer from 'react-test-renderer';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -8,6 +11,9 @@ import {
   cleanPlaceName,
   assertSafeExternalUrl,
   assertSafeExternalUrlWithDns,
+  resolveValidatedUrlWithDns,
+  parseHighwayDesignators,
+  matchesHighwayRoadName,
   htmlToReadableText,
   ScoutToolLibrary,
   createTurnGroundingCache,
@@ -19,12 +25,19 @@ import {
   ScoutService,
   parseScoutResponse,
   hydrateSuggestionFromResolvedPlaces,
+  matchResolvedPlaceForSuggestion,
+  isInTransitOrAnchorSuggestion,
   isValidGooglePlaceId,
 } from '../../server/services/scoutService.js';
 import { formatBedrockToolLabel, AwsBedrockHarnessAdapter } from '../../server/services/bedrockService.js';
 import { RouteService } from '../../server/services/routeService.js';
 import { AiService, type AiHarnessAdapter } from '../../server/services/aiService.js';
 import { RouteScoutDrawer } from '../../src/components/RouteScoutDrawer.js';
+import {
+  buildSingleGoogleMapsUrl,
+  generateGoogleMapsUrls,
+  type CoordinateLocation,
+} from '../../src/engine/googleMapsUrl.js';
 import { chatWithScoutStream, fetchScoutQuickPrompts } from '../../src/services/api.js';
 import type { ScoutTripContext, ScoutChatRequest, ScoutStreamEvent } from '../../server/types/scout.js';
 import type { ParsedTrip } from '../../src/engine/itineraryParser.js';
@@ -1050,7 +1063,15 @@ describe('Route Scout Grounding Tools & Isolation', () => {
 
     describe('simulate_schedule_cascade', () => {
       it('simulates forward schedule cascade for action "add"', async () => {
-        const toolLib = new ScoutToolLibrary();
+        const mockRouteService = {
+          getRoute: vi.fn().mockResolvedValue({
+            distanceMiles: 4.5,
+            durationMinutes: 8,
+            durationSeconds: 480,
+            geometry: { type: 'LineString', coordinates: [] },
+          }),
+        } as unknown as RouteService;
+        const toolLib = new ScoutToolLibrary({ routeService: mockRouteService });
         const context: ScoutToolExecutionContext = { tripContext: sampleTripContext };
 
         const res = await toolLib.simulateScheduleCascade(
@@ -1073,10 +1094,14 @@ describe('Route Scout Grounding Tools & Isolation', () => {
         expect(added).toBeDefined();
         expect(added?.dwell_minutes).toBe(25);
         expect(res.total_dwell_minutes).toBe(70); // 45 (lunch) + 25 (added)
+        expect(mockRouteService.getRoute).toHaveBeenCalledTimes(2);
       });
 
       it('simulates action "update" preserving untouched leg drive durations', async () => {
-        const toolLib = new ScoutToolLibrary();
+        const mockRouteService = {
+          getRoute: vi.fn(),
+        } as unknown as RouteService;
+        const toolLib = new ScoutToolLibrary({ routeService: mockRouteService });
         const context: ScoutToolExecutionContext = { tripContext: sampleTripContext };
 
         // Updating Sedona Lunch dwell from 45m to 60m
@@ -1093,12 +1118,21 @@ describe('Route Scout Grounding Tools & Isolation', () => {
         const lunchStop = res.stops.find((s) => s.id === 'wp_sedona_lunch');
         expect(lunchStop?.dwell_minutes).toBe(60);
 
-        // Untouched leg duration from bell rock to lunch was preserved
+        // Untouched leg duration from bell rock to lunch was preserved without calling RouteService
         expect(lunchStop?.drive_minutes_from_previous).toBe(10);
+        expect(mockRouteService.getRoute).not.toHaveBeenCalled();
       });
 
       it('simulates action "delete" removing the target waypoint', async () => {
-        const toolLib = new ScoutToolLibrary();
+        const mockRouteService = {
+          getRoute: vi.fn().mockResolvedValue({
+            distanceMiles: 35.0,
+            durationMinutes: 55,
+            durationSeconds: 3300,
+            geometry: { type: 'LineString', coordinates: [] },
+          }),
+        } as unknown as RouteService;
+        const toolLib = new ScoutToolLibrary({ routeService: mockRouteService });
         const context: ScoutToolExecutionContext = { tripContext: sampleTripContext };
 
         const res = await toolLib.simulateScheduleCascade(
@@ -1112,6 +1146,7 @@ describe('Route Scout Grounding Tools & Isolation', () => {
         expect(res.action).toBe('delete');
         expect(res.stops).toHaveLength(3);
         expect(res.stops.some((s) => s.id === 'wp_sedona_lunch')).toBe(false);
+        expect(mockRouteService.getRoute).toHaveBeenCalledTimes(1);
       });
 
       it('generates sunset warnings when stops arrive at or after 18:30 local time', async () => {
@@ -1354,9 +1389,11 @@ describe('Route Scout Grounding Tools & Isolation', () => {
       expect(fuelSug.lat).toBe(35.195);
       expect(fuelSug.lng).toBe(-111.665);
 
-      // Scenic drive-by with is_route_anchor: true: highway coordinates preserved!
+      // Scenic drive-by with is_route_anchor: true: highway coordinates preserved and kept coordinate-only (Finding 4)!
       const scenicSug = parsed.suggestions[1];
-      expect(scenicSug.place_name).toBe('Sedona Overlook');
+      expect(scenicSug.name).toBe('Sedona Overlook');
+      expect(scenicSug.google_place_id).toBeUndefined();
+      expect(scenicSug.address).toBeUndefined();
       expect(scenicSug.lat).toBe(34.8005);
       expect(scenicSug.lng).toBe(-111.7667);
       expect(scenicSug.is_route_anchor).toBe(true);
@@ -1407,8 +1444,8 @@ describe('Route Scout Grounding Tools & Isolation', () => {
         place_name: 'Diner Beta',
         display_name: 'Diner Beta',
         address: '200 Beta St',
-        lat: 34.2,
-        lng: -112.2,
+        lat: 34.08,
+        lng: -112.08,
         google_place_id: 'ChIJCR3fWhuQO4cRxCLXXbAfCxQ',
       };
 
@@ -2131,6 +2168,828 @@ describe('Route Scout Grounding Tools & Isolation', () => {
       expect(toolResultsJson).toContain('[redacted-ssm-parameter]');
       expect(toolResultsJson).not.toContain('123456789012');
       expect(toolResultsJson).not.toContain('/roadtrip-copilot/brave-search-api-key');
+    });
+  });
+
+  // =========================================================================
+  // 8. M4 Consolidated Review Findings Regression Suite (Findings 1–8)
+  // =========================================================================
+  describe('8. M4 Consolidated Review Findings Regression Suite (Findings 1–8)', () => {
+    it('Finding 1: binds URL validation to actual connection, prevents DNS rebinding across redirect hops, preserves Host/SNI, and bounds DNS lookup', async () => {
+      // 1A. Bounded DNS timeout and AbortSignal cancellation
+      const hangingDns = vi.fn(() => new Promise<Array<{ address: string; family: number }>>(() => {}));
+      await expect(
+        resolveValidatedUrlWithDns('https://slow-dns.example.com/guide', hangingDns, { timeoutMs: 20 })
+      ).rejects.toThrow('Request timed out after 20ms');
+
+      const abortController = new AbortController();
+      setTimeout(() => abortController.abort(), 10);
+      await expect(
+        resolveValidatedUrlWithDns('https://abort-dns.example.com/guide', hangingDns, {
+          abortSignal: abortController.signal,
+          timeoutMs: 2000,
+        })
+      ).rejects.toThrow('Request aborted');
+
+      // 1B. Pinned transport prevents public-to-private DNS rebinding at connection time & preserves Host/SNI across redirect hops
+      let dnsLookupCallCount = 0;
+      const rebindingDns = vi.fn(async (host: string) => {
+        dnsLookupCallCount++;
+        if (host === 'hop1.example.com') {
+          // If a second unpinned lookup were ever invoked for hop1, it would return 127.0.0.1!
+          return dnsLookupCallCount === 1
+            ? [{ address: '93.184.216.34', family: 4 }]
+            : [{ address: '127.0.0.1', family: 4 }];
+        }
+        if (host === 'hop2.example.org') {
+          return [{ address: '93.184.216.35', family: 4 }];
+        }
+        return [{ address: '127.0.0.1', family: 4 }];
+      });
+
+      const capturedRequests: Array<{
+        hostname?: string;
+        hostHeader?: string;
+        servername?: string;
+        resolvedAddress?: string;
+        resolvedFamily?: number;
+      }> = [];
+
+      const httpsRequestSpy = vi.spyOn(https, 'request').mockImplementation(((
+        options: https.RequestOptions,
+        callback?: (res: http.IncomingMessage) => void
+      ) => {
+        let resolvedAddress: string | undefined;
+        let resolvedFamily: number | undefined;
+        if (typeof options.lookup === 'function') {
+          options.lookup(
+            options.hostname || '',
+            { all: false },
+            (_err, address, family) => {
+              resolvedAddress = typeof address === 'string' ? address : undefined;
+              resolvedFamily = family;
+            }
+          );
+        }
+        const headersObj = (options.headers || {}) as Record<string, string>;
+        const reqRecord = {
+          hostname: options.hostname ?? undefined,
+          hostHeader: headersObj.Host || headersObj.host,
+          servername: (options as { servername?: string }).servername,
+          resolvedAddress,
+          resolvedFamily,
+        };
+        capturedRequests.push(reqRecord);
+
+        const reqStream = new PassThrough() as unknown as http.ClientRequest;
+        reqStream.end = (() => {
+          queueMicrotask(() => {
+            const incoming = new PassThrough() as unknown as http.IncomingMessage;
+            if (options.hostname === 'hop1.example.com') {
+              incoming.statusCode = 302;
+              incoming.statusMessage = 'Found';
+              incoming.headers = { location: 'https://hop2.example.org/scenic-byway' };
+              callback?.(incoming);
+              incoming.end();
+            } else {
+              incoming.statusCode = 200;
+              incoming.statusMessage = 'OK';
+              incoming.headers = { 'content-type': 'text/html; charset=utf-8' };
+              callback?.(incoming);
+              incoming.end('<html><head><title>Pinned Scenic Guide</title></head><body><p>Red Rock Byway mileposts.</p></body></html>');
+            }
+          });
+          return reqStream;
+        }) as unknown as http.ClientRequest['end'];
+        reqStream.destroy = (() => reqStream) as unknown as http.ClientRequest['destroy'];
+        return reqStream;
+      }) as unknown as typeof https.request);
+
+      try {
+        // Notice: No fetchImpl injected -> exercises pinned node:https transport!
+        const toolLib = new ScoutToolLibrary({ dnsLookup: rebindingDns });
+        const res = await toolLib.readUrlContent({ url: 'https://hop1.example.com/start' }, {});
+
+        expect(res.url).toBe('https://hop2.example.org/scenic-byway');
+        expect(res.title).toBe('Pinned Scenic Guide');
+        expect(res.content).toContain('Red Rock Byway mileposts.');
+
+        // DNS lookup called exactly once per hostname (never re-queried by transport)
+        expect(rebindingDns).toHaveBeenCalledTimes(2);
+        expect(capturedRequests).toHaveLength(2);
+        expect(capturedRequests[0]).toEqual({
+          hostname: 'hop1.example.com',
+          hostHeader: 'hop1.example.com',
+          servername: 'hop1.example.com',
+          resolvedAddress: '93.184.216.34',
+          resolvedFamily: 4,
+        });
+        expect(capturedRequests[1]).toEqual({
+          hostname: 'hop2.example.org',
+          hostHeader: 'hop2.example.org',
+          servername: 'hop2.example.org',
+          resolvedAddress: '93.184.216.35',
+          resolvedFamily: 4,
+        });
+      } finally {
+        httpsRequestSpy.mockRestore();
+      }
+
+      // 1C. Local loopback fixture server: if a socket or lookup ever rebounds to 127.0.0.1 at connect time, connection is aborted before reading loopback content
+      const secretServer = http.createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('LOOPBACK_SECRET_METADATA_PAYLOAD');
+      });
+      await new Promise<void>((resolve) => secretServer.listen(0, '127.0.0.1', () => resolve()));
+      const addrInfo = secretServer.address();
+      const port = typeof addrInfo === 'object' && addrInfo ? addrInfo.port : 80;
+
+      try {
+        const toolLib = new ScoutToolLibrary();
+        const requestPinned = (
+          toolLib as unknown as {
+            requestPinnedUrl: (
+              validated: { url: URL; addresses: Array<{ address: string; family: number }> },
+              headers: Record<string, string>,
+              signal: AbortSignal
+            ) => Promise<Response>;
+          }
+        ).requestPinnedUrl.bind(toolLib);
+
+        await expect(
+          requestPinned(
+            {
+              url: new URL(`http://rebind.example.com:${port}/secret`),
+              // Simulate a tampered/rebound loopback address reaching connection time
+              addresses: [{ address: '127.0.0.1', family: 4 }],
+            },
+            { Accept: 'text/plain' },
+            new AbortController().signal
+          )
+        ).rejects.toThrow(/Blocked URL: private or reserved IPv4 address "127\.0\.0\.1"/);
+      } finally {
+        await new Promise<void>((resolve) => secretServer.close(() => resolve()));
+      }
+    });
+
+    it('Finding 2: extracts HTML in linear O(n) time on pathological repeated "<" and malformed generic tags while preserving formatting', () => {
+      // 40,000 repeated '<' without '>' (previously caused ~1s quadratic backtracking)
+      const repeatedLtHtml = `<title>Linear Title</title><p>Intro paragraph</p>${'<'.repeat(40_000)}`;
+      const resRepeated = htmlToReadableText(repeatedLtHtml);
+      expect(resRepeated.title).toBe('Linear Title');
+      expect(resRepeated.text).toBe('Linear Title Intro paragraph');
+
+      // Malformed generic tags without closing '>'
+      const malformedGenericHtml =
+        '<html><head><title>Canyon Guide</title><script>var secret = 1;</script></head>' +
+        '<body><h1>Sedona Stops</h1><ul><li>Bell Rock</li><li>Cathedral Rock</li></ul>' +
+        '<p>First line<br/>Second line &amp;lt;safe&gt;</p>' +
+        '<div attr="unclosed'.repeat(5_000);
+      const resMalformed = htmlToReadableText(malformedGenericHtml);
+      expect(resMalformed.title).toBe('Canyon Guide');
+      expect(resMalformed.text).not.toContain('var secret');
+      expect(resMalformed.text).toContain('Sedona Stops');
+      expect(resMalformed.text).toContain('* Bell Rock\n* Cathedral Rock');
+      expect(resMalformed.text).toContain('First line\nSecond line &lt;safe>');
+    });
+
+    it('Finding 3 & Finding 8: disambiguates same-name branches across cities and within cities, and overwrites fabricated model metadata with authoritative record fields', () => {
+      const flagstaffMaverik: ResolvedPlaceRecord = {
+        query: 'Maverik Flagstaff',
+        place_name: 'Maverik',
+        display_name: 'Maverik Adventure’s First Stop',
+        address: '1000 W Route 66, Flagstaff, AZ 86001',
+        lat: 35.1983,
+        lng: -111.6513,
+        google_place_id: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+      };
+      const sedonaMaverik: ResolvedPlaceRecord = {
+        query: 'Maverik Sedona',
+        place_name: 'Maverik',
+        display_name: 'Maverik Adventure’s First Stop',
+        address: '200 W State Route 89A, Sedona, AZ 86336',
+        lat: 34.865,
+        lng: -111.763,
+        google_place_id: 'ChIJCR3fWhuQO4cRxCLXXbAfCxQ',
+      };
+      const flagstaffEastMaverik: ResolvedPlaceRecord = {
+        query: 'Maverik East Flagstaff',
+        place_name: 'Maverik',
+        display_name: 'Maverik Adventure’s First Stop',
+        address: '2500 E Lucky Ln, Flagstaff, AZ 86004',
+        lat: 35.205,
+        lng: -111.615,
+        google_place_id: 'ChIJ2wW_a80KK4cR24D7xO_z5Y4',
+      };
+
+      const knownIds = new Set([
+        flagstaffMaverik.google_place_id!,
+        sedonaMaverik.google_place_id!,
+        flagstaffEastMaverik.google_place_id!,
+      ]);
+
+      // 3A. Sedona Maverik suggestion selects Sedona branch regardless of resolution order ([Flagstaff, Sedona] vs [Sedona, Flagstaff])
+      for (const order of [
+        [flagstaffMaverik, sedonaMaverik],
+        [sedonaMaverik, flagstaffMaverik],
+      ]) {
+        const hydrated = hydrateSuggestionFromResolvedPlaces(
+          {
+            id: 'sug_sedona_fuel',
+            action: 'add_waypoint',
+            name: 'Maverik Fuel Stop',
+            place_name: 'Maverik',
+            type: 'fuel',
+            lat: 34.8697,
+            lng: -111.761,
+            dwell_minutes: 15,
+            reason: 'Refuel in Sedona.',
+          },
+          order,
+          knownIds
+        );
+        expect(hydrated.google_place_id).toBe(sedonaMaverik.google_place_id);
+        expect(hydrated.address).toBe(sedonaMaverik.address);
+        expect(hydrated.lat).toBe(sedonaMaverik.lat);
+        expect(hydrated.lng).toBe(sedonaMaverik.lng);
+      }
+
+      // 3B. When ONLY Flagstaff Maverik was resolved, a Sedona Maverik suggestion is left unhydrated rather than moved 23.5 miles to Flagstaff
+      const unhydratedWrongCity = hydrateSuggestionFromResolvedPlaces(
+        {
+          id: 'sug_sedona_only',
+          action: 'add_waypoint',
+          name: 'Maverik Fuel Stop',
+          place_name: 'Maverik',
+          type: 'fuel',
+          lat: 34.8697,
+          lng: -111.761,
+          dwell_minutes: 15,
+          reason: 'Refuel in Sedona.',
+        },
+        [flagstaffMaverik],
+        knownIds
+      );
+      expect(unhydratedWrongCity.google_place_id).toBeUndefined();
+      expect(unhydratedWrongCity.address).toBeUndefined();
+      expect(unhydratedWrongCity.lat).toBe(34.8697);
+      expect(unhydratedWrongCity.lng).toBe(-111.761);
+
+      // 3C. Two branches in the same city with ambiguous midpoint coordinates and no address qualifier -> left unhydrated
+      const ambiguousSameCity = hydrateSuggestionFromResolvedPlaces(
+        {
+          id: 'sug_flag_ambig',
+          action: 'add_waypoint',
+          name: 'Maverik Fuel Stop',
+          place_name: 'Maverik',
+          type: 'fuel',
+          lat: 35.2015,
+          lng: -111.633,
+          dwell_minutes: 15,
+          reason: 'Refuel in Flagstaff.',
+        },
+        [flagstaffMaverik, flagstaffEastMaverik],
+        knownIds
+      );
+      expect(ambiguousSameCity.google_place_id).toBeUndefined();
+      expect(ambiguousSameCity.address).toBeUndefined();
+
+      // 3D. Same two branches disambiguated by street qualifier token ("Lucky")
+      const disambiguatedByQualifier = hydrateSuggestionFromResolvedPlaces(
+        {
+          id: 'sug_flag_lucky',
+          action: 'update_waypoint',
+          targetWaypointId: 'wp_sedona_lunch',
+          name: 'Maverik (Lucky Ln)',
+          place_name: 'Maverik',
+          type: 'fuel',
+          lat: 35.2015,
+          lng: -111.633,
+          dwell_minutes: 15,
+          reason: 'Update to East Flagstaff Maverik.',
+        },
+        [flagstaffMaverik, flagstaffEastMaverik],
+        knownIds
+      );
+      expect(disambiguatedByQualifier.google_place_id).toBe(flagstaffEastMaverik.google_place_id);
+      expect(disambiguatedByQualifier.address).toBe(flagstaffEastMaverik.address);
+
+      // 3E. Coordinate backfill in parseScoutResponse when lat/lng omitted on update_waypoint uses target waypoint's city coordinates
+      const rawOmittedCoords = `Updating stop in Sedona:
+\`\`\`json:suggestions
+[
+  {
+    "action": "update_waypoint",
+    "targetWaypointId": "wp_sedona_lunch",
+    "name": "Maverik Fuel Stop",
+    "place_name": "Maverik",
+    "type": "fuel",
+    "dwell_minutes": 15,
+    "reason": "Switch Sedona stop to Maverik."
+  }
+]
+\`\`\``;
+      const backfilledParsed = parseScoutResponse(rawOmittedCoords, {
+        resolvedPlaces: [flagstaffMaverik, sedonaMaverik],
+        knownPlaceIds: knownIds,
+        tripWaypoints: sampleTripContext.waypoints,
+      });
+      expect(backfilledParsed.suggestions).toHaveLength(1);
+      expect(backfilledParsed.suggestions[0].google_place_id).toBe(sedonaMaverik.google_place_id);
+      expect(backfilledParsed.suggestions[0].address).toBe(sedonaMaverik.address);
+      expect(backfilledParsed.suggestions[0].lat).toBe(sedonaMaverik.lat);
+      expect(backfilledParsed.suggestions[0].lng).toBe(sedonaMaverik.lng);
+
+      // Finding 8: Exact Place ID match with fabricated model place_name/address overwrites with authoritative record fields
+      const fabricatedMetaSug = hydrateSuggestionFromResolvedPlaces(
+        {
+          id: 'sug_fabricated',
+          action: 'add_waypoint',
+          name: 'Stop',
+          place_name: 'Hallucinated Wrong Bistro Name',
+          address: '9999 Invented Wrong Ave, Nowhere, AZ 00000',
+          google_place_id: sedonaMaverik.google_place_id,
+          type: 'fuel',
+          lat: 34.86,
+          lng: -111.76,
+          dwell_minutes: 15,
+          reason: 'Exact ID match.',
+        },
+        [flagstaffMaverik, sedonaMaverik],
+        knownIds
+      );
+      expect(fabricatedMetaSug.place_name).toBe('Maverik');
+      expect(fabricatedMetaSug.address).toBe('200 W State Route 89A, Sedona, AZ 86336');
+      expect(fabricatedMetaSug.lat).toBe(sedonaMaverik.lat);
+      expect(fabricatedMetaSug.lng).toBe(sedonaMaverik.lng);
+
+      // Finding 8: Empty record fields never overwrite existing non-empty suggestion metadata
+      const sparseRecord: ResolvedPlaceRecord = {
+        query: 'Sparse Stop',
+        place_name: '   ',
+        display_name: 'Sparse Stop',
+        address: '',
+        lat: 34.865,
+        lng: -111.763,
+        google_place_id: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+      };
+      const sparseHydrated = hydrateSuggestionFromResolvedPlaces(
+        {
+          id: 'sug_sparse',
+          action: 'add_waypoint',
+          name: 'Fallback Name',
+          place_name: 'Preserved Place Name',
+          address: 'Preserved 123 Main St',
+          google_place_id: sparseRecord.google_place_id,
+          type: 'meal',
+          lat: 34.865,
+          lng: -111.763,
+          dwell_minutes: 30,
+          reason: 'Keep non-empty fields when record is blank.',
+        },
+        [sparseRecord],
+        knownIds
+      );
+      expect(sparseHydrated.place_name).toBe('Preserved Place Name');
+      expect(sparseHydrated.address).toBe('Preserved 123 Main St');
+    });
+
+    it('Finding 4: keeps scenic navigation anchors coordinate-only end-to-end from hydration through Google Maps URL generation while preserving positional Place ID alignment', () => {
+      const resolvedPlaces: ResolvedPlaceRecord[] = [
+        {
+          query: 'Oak Creek Vista',
+          place_name: 'Oak Creek Vista Overlook',
+          display_name: 'Oak Creek Vista',
+          address: 'US-89A, Sedona, AZ 86336',
+          lat: 35.0225,
+          lng: -111.7375,
+          google_place_id: 'ChIJCR3fWhuQO4cRxCLXXbAfCxQ',
+        },
+        {
+          query: 'Flagstaff Diner',
+          place_name: 'Galaxy Diner',
+          display_name: 'Galaxy Diner',
+          address: '931 W Route 66, Flagstaff, AZ 86001',
+          lat: 35.1955,
+          lng: -111.6625,
+          google_place_id: 'ChIJ2wW_a80KK4cR24D7xO_z5Y4',
+        },
+      ];
+      const knownIds = new Set([
+        'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+        'ChIJCR3fWhuQO4cRxCLXXbAfCxQ',
+        'ChIJ2wW_a80KK4cR24D7xO_z5Y4',
+      ]);
+
+      const rawOutput = `Here are your scenic anchor and diner updates:
+\`\`\`json:suggestions
+[
+  {
+    "action": "add_waypoint",
+    "afterWaypointId": "wp_sedona_lunch",
+    "name": "Oak Creek Vista Overlook",
+    "place_name": "Oak Creek Vista Overlook",
+    "type": "scenic_drive_by",
+    "lat": 35.0221,
+    "lng": -111.7371,
+    "dwell_minutes": 0,
+    "google_place_id": "ChIJCR3fWhuQO4cRxCLXXbAfCxQ",
+    "is_route_anchor": true,
+    "reason": "Keep route on US-89A switchbacks."
+  },
+  {
+    "action": "add_waypoint",
+    "afterWaypointId": "wp_sedona_lunch",
+    "name": "Galaxy Diner",
+    "place_name": "Galaxy Diner",
+    "type": "meal",
+    "lat": 35.195,
+    "lng": -111.662,
+    "dwell_minutes": 45,
+    "reason": "Retro Route 66 dinner."
+  }
+]
+\`\`\``;
+
+      const parsed = parseScoutResponse(rawOutput, {
+        resolvedPlaces,
+        knownPlaceIds: knownIds,
+        tripWaypoints: sampleTripContext.waypoints,
+      });
+
+      expect(parsed.suggestions).toHaveLength(2);
+      const scenicAnchorSug = parsed.suggestions[0];
+      const physicalDinerSug = parsed.suggestions[1];
+
+      // Scenic anchor stripped of google_place_id and kept at exact highway coordinates
+      expect(isInTransitOrAnchorSuggestion(scenicAnchorSug)).toBe(true);
+      expect(scenicAnchorSug.google_place_id).toBeUndefined();
+      expect(scenicAnchorSug.address).toBeUndefined();
+      expect(scenicAnchorSug.lat).toBe(35.0221);
+      expect(scenicAnchorSug.lng).toBe(-111.7371);
+
+      // Physical stop retains verified Place ID, address, and entrance coordinates
+      expect(isInTransitOrAnchorSuggestion(physicalDinerSug)).toBe(false);
+      expect(physicalDinerSug.google_place_id).toBe('ChIJ2wW_a80KK4cR24D7xO_z5Y4');
+      expect(physicalDinerSug.address).toBe('931 W Route 66, Flagstaff, AZ 86001');
+      expect(physicalDinerSug.lat).toBe(35.1955);
+      expect(physicalDinerSug.lng).toBe(-111.6625);
+
+      // Build Google Maps URL with mixed physical stops and scenic route anchor in between:
+      // Origin -> Physical Stop 1 (Sedona Cafe) -> Scenic Route Anchor (Oak Creek Vista) -> Physical Stop 2 (Galaxy Diner) -> Destination
+      const navLocations: CoordinateLocation[] = [
+        {
+          lat: 33.4484,
+          lng: -112.074,
+          name: 'Phoenix Departure',
+          category: 'origin',
+          dwellMinutes: 0,
+        },
+        {
+          lat: 34.8697,
+          lng: -111.761,
+          name: 'Sedona Cafe',
+          placeName: 'Sedona Cafe',
+          address: '100 Main St, Sedona, AZ 86336',
+          placeId: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
+          category: 'meal',
+          dwellMinutes: 45,
+          isRouteAnchor: false,
+        },
+        {
+          lat: scenicAnchorSug.lat,
+          lng: scenicAnchorSug.lng,
+          name: scenicAnchorSug.name,
+          placeName: scenicAnchorSug.place_name,
+          // Even if a legacy/stale placeId were present on a route anchor, buildSingleGoogleMapsUrl must suppress it!
+          placeId: 'ChIJCR3fWhuQO4cRxCLXXbAfCxQ',
+          category: scenicAnchorSug.type,
+          dwellMinutes: scenicAnchorSug.dwell_minutes,
+          isRouteAnchor: true,
+        },
+        {
+          lat: physicalDinerSug.lat,
+          lng: physicalDinerSug.lng,
+          name: physicalDinerSug.name,
+          placeName: physicalDinerSug.place_name,
+          address: physicalDinerSug.address,
+          placeId: physicalDinerSug.google_place_id,
+          category: physicalDinerSug.type,
+          dwellMinutes: physicalDinerSug.dwell_minutes,
+          isRouteAnchor: false,
+        },
+        {
+          lat: 35.1983,
+          lng: -111.6513,
+          name: 'Flagstaff Hotel',
+          category: 'destination',
+          dwellMinutes: 0,
+        },
+      ];
+
+      const urlsResult = generateGoogleMapsUrls(navLocations);
+      expect(urlsResult.legs).toHaveLength(1);
+      const gmUrl = urlsResult.primaryUrl;
+
+      // Scenic anchor is formatted as raw lat,lng in waypoints=
+      expect(gmUrl).toContain('35.0221,-111.7371');
+      // waypoint_place_ids has 3 intermediate slots: Physical Stop 1 | (empty for Scenic Anchor) | Physical Stop 2
+      expect(gmUrl).toContain(
+        '&waypoint_place_ids=ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q||ChIJ2wW_a80KK4cR24D7xO_z5Y4'
+      );
+      expect(gmUrl).not.toContain('ChIJCR3fWhuQO4cRxCLXXbAfCxQ');
+    });
+
+    it('Finding 5: routes changed schedule legs via RouteService instead of 50 mph Haversine estimation, preserves unchanged legs, handles timezones, and fails loudly on routing errors', async () => {
+      // North Rim -> South Rim Grand Canyon example (11.68 mi straight-line vs 210.4 mi road route)
+      const canyonTripContext: ScoutTripContext = {
+        tripName: 'Grand Canyon Rim-to-Rim Drive',
+        date: '2026-10-10',
+        origin: 'North Rim, AZ',
+        destination: 'Flagstaff, AZ',
+        departureTime: '08:00:00',
+        waypoints: [
+          {
+            id: 'wp_north_rim',
+            name: 'Grand Canyon North Rim Lodge',
+            type: 'origin',
+            lat: 36.198,
+            lng: -112.052,
+            dwell_minutes: 0,
+            timezone: 'America/Phoenix',
+          },
+          {
+            id: 'wp_jacob_lake',
+            name: 'Jacob Lake Inn',
+            type: 'meal',
+            lat: 36.713,
+            lng: -112.216,
+            dwell_minutes: 30,
+            drive_distance_miles: 44.0,
+            drive_duration_minutes: 55,
+            timezone: 'America/Phoenix',
+          },
+          {
+            id: 'wp_south_rim',
+            name: 'South Rim Visitor Center',
+            type: 'scenic_pull_off',
+            lat: 36.054,
+            lng: -112.14,
+            dwell_minutes: 60,
+            drive_distance_miles: 166.4,
+            drive_duration_minutes: 240,
+            timezone: 'America/Phoenix',
+          },
+          {
+            id: 'wp_bluff_ut',
+            name: 'Bluff Desert Inn',
+            type: 'destination',
+            lat: 37.284,
+            lng: -109.552,
+            dwell_minutes: 0,
+            drive_distance_miles: 190.0,
+            drive_duration_minutes: 210,
+            timezone: 'America/Denver',
+          },
+        ],
+      };
+
+      const getRouteMock = vi.fn().mockResolvedValue({
+        distanceMiles: 210.4,
+        durationMinutes: 295,
+        durationSeconds: 17700,
+        geometry: { type: 'LineString', coordinates: [] },
+      });
+      const mockRouteService = { getRoute: getRouteMock } as unknown as RouteService;
+      const toolLib = new ScoutToolLibrary({ routeService: mockRouteService });
+
+      const originalSnapshot = JSON.stringify(canyonTripContext.waypoints);
+
+      // 5A. Deleting Jacob Lake bridges North Rim -> South Rim via RouteService (210.4 mi / 295 min, NOT 11.68 mi / 14 min!)
+      // while preserving South Rim -> Bluff UT (190.0 mi / 210 min) without re-routing it.
+      const delRes = await toolLib.simulateScheduleCascade(
+        { action: 'delete', target_waypoint_id: 'wp_jacob_lake' },
+        { tripContext: canyonTripContext }
+      );
+
+      expect(getRouteMock).toHaveBeenCalledTimes(1);
+      expect(getRouteMock).toHaveBeenCalledWith('-112.052,36.198;-112.14,36.054', undefined, undefined);
+      expect(delRes.stops).toHaveLength(3);
+      expect(delRes.stops[1].id).toBe('wp_south_rim');
+      expect(delRes.stops[1].distance_miles_from_previous).toBe(210.4);
+      expect(delRes.stops[1].drive_minutes_from_previous).toBe(295);
+      // Unchanged leg preserved
+      expect(delRes.stops[2].id).toBe('wp_bluff_ut');
+      expect(delRes.stops[2].distance_miles_from_previous).toBe(190.0);
+      expect(delRes.stops[2].drive_minutes_from_previous).toBe(210);
+      // Timezone crossing preserved (America/Phoenix UTC-7 -> America/Denver UTC-6 MDT)
+      expect(delRes.timezones_crossed).toEqual(['America/Phoenix', 'America/Denver']);
+      // Input waypoints not mutated
+      expect(JSON.stringify(canyonTripContext.waypoints)).toBe(originalSnapshot);
+
+      // 5B. Coordinate relocation on update routes both affected legs
+      getRouteMock.mockClear();
+      getRouteMock
+        .mockResolvedValueOnce({
+          distanceMiles: 50.0,
+          durationMinutes: 60,
+          durationSeconds: 3600,
+          geometry: { type: 'LineString', coordinates: [] },
+        })
+        .mockResolvedValueOnce({
+          distanceMiles: 160.0,
+          durationMinutes: 230,
+          durationSeconds: 13800,
+          geometry: { type: 'LineString', coordinates: [] },
+        });
+
+      const relocRes = await toolLib.simulateScheduleCascade(
+        {
+          action: 'update',
+          target_waypoint_id: 'wp_jacob_lake',
+          candidate_lat: 36.85,
+          candidate_lng: -112.15,
+          dwell_minutes: 0,
+        },
+        { tripContext: canyonTripContext }
+      );
+      expect(getRouteMock).toHaveBeenCalledTimes(2);
+      expect(relocRes.stops[1].distance_miles_from_previous).toBe(50.0);
+      expect(relocRes.stops[1].dwell_minutes).toBe(0);
+      expect(relocRes.stops[2].distance_miles_from_previous).toBe(160.0);
+
+      // 5C. Dwell-only update with dwell_minutes: 0 makes zero RouteService calls
+      getRouteMock.mockClear();
+      const dwellZeroRes = await toolLib.simulateScheduleCascade(
+        {
+          action: 'update',
+          target_waypoint_id: 'wp_jacob_lake',
+          dwell_minutes: 0,
+        },
+        { tripContext: canyonTripContext }
+      );
+      expect(getRouteMock).not.toHaveBeenCalled();
+      expect(dwellZeroRes.stops[1].dwell_minutes).toBe(0);
+
+      // 5D. Upstream RouteService failure propagates loudly without silent fallback
+      const failingRouteService = {
+        getRoute: vi.fn().mockRejectedValue(new Error('OSRM upstream routing service unavailable (502)')),
+      } as unknown as RouteService;
+      const failingToolLib = new ScoutToolLibrary({ routeService: failingRouteService });
+      await expect(
+        failingToolLib.simulateScheduleCascade(
+          { action: 'delete', target_waypoint_id: 'wp_jacob_lake' },
+          { tripContext: canyonTripContext }
+        )
+      ).rejects.toThrow('OSRM upstream routing service unavailable (502)');
+    });
+
+    it('Finding 6: keeps timeout deadlines and AbortSignal active through full JSON/text body consumption and cancels stalled response bodies', async () => {
+      // 6A. Fast headers (200 OK) followed by stalled JSON body times out at upstreamTimeoutMs and cancels body
+      let bodyCancelledOnTimeout = false;
+      const stalledBodyFetch: typeof fetch = vi.fn(async () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"web":{"results":['));
+            // Never closes -> stalls during res.json()
+          },
+          cancel() {
+            bodyCancelledOnTimeout = true;
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      });
+
+      const timeoutLib = new ScoutToolLibrary({
+        braveSearchApiKey: 'test-key',
+        fetchImpl: stalledBodyFetch,
+        upstreamTimeoutMs: 25,
+      });
+
+      await expect(timeoutLib.searchWeb({ query: 'Sedona trails' }, {})).rejects.toThrow(
+        /Upstream request timed out after 25ms/
+      );
+      expect(bodyCancelledOnTimeout).toBe(true);
+
+      // 6B. AbortSignal fired after headers arrive while body is streaming aborts immediately and cancels body
+      let bodyCancelledOnAbort = false;
+      const abortController = new AbortController();
+      const abortDuringBodyFetch: typeof fetch = vi.fn(async () => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"places":['));
+            setTimeout(() => abortController.abort(), 15);
+          },
+          cancel() {
+            bodyCancelledOnAbort = true;
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      });
+
+      const abortLib = new ScoutToolLibrary({
+        googlePlacesApiKey: 'test-places-key',
+        fetchImpl: abortDuringBodyFetch,
+        upstreamTimeoutMs: 2000,
+      });
+
+      await expect(
+        abortLib.resolveAndStandardizePlace(
+          { query: 'Maverik Sedona' },
+          { abortSignal: abortController.signal }
+        )
+      ).rejects.toThrow('Request aborted');
+      expect(bodyCancelledOnAbort).toBe(true);
+
+      // 6C. Malformed JSON response body rejects deterministically
+      const malformedJsonFetch: typeof fetch = vi.fn(async () => {
+        return new Response('{broken_json_body', {
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+        });
+      });
+      const malformedLib = new ScoutToolLibrary({
+        braveSearchApiKey: 'test-key',
+        fetchImpl: malformedJsonFetch,
+      });
+      await expect(malformedLib.searchWeb({ query: 'Sedona' }, {})).rejects.toThrow();
+    });
+
+    it('Finding 7: matches complete highway designators strictly without substring cross-matching (I-40 vs I-405, US-89 vs US-89A, I-89 vs US-89 vs AZ-89)', async () => {
+      // Unit assertions on parseHighwayDesignators and matchesHighwayRoadName
+      expect(parseHighwayDesignators('I-405 North')).toEqual([{ kind: 'interstate', number: '405' }]);
+      expect(parseHighwayDesignators('Interstate 40')).toEqual([{ kind: 'interstate', number: '40' }]);
+      expect(parseHighwayDesignators('U.S. Highway 89A')).toEqual([{ kind: 'us', number: '89a' }]);
+      expect(parseHighwayDesignators('AZ-179 / State Route 179')).toEqual([
+        { kind: 'state', number: '179' },
+        { kind: 'state', stateCode: 'az', number: '179' },
+      ]);
+
+      // Different numbers: I-40 must NEVER match I-405
+      expect(matchesHighwayRoadName('I-405', 'I-40')).toBe(false);
+      expect(matchesHighwayRoadName('Interstate 405', 'I-40')).toBe(false);
+      expect(matchesHighwayRoadName('Interstate 40', 'I-40')).toBe(true);
+      expect(matchesHighwayRoadName('IH-40', 'I-40')).toBe(true);
+
+      // Suffixes: US-89 must NEVER match US-89A
+      expect(matchesHighwayRoadName('US-89A', 'US-89')).toBe(false);
+      expect(matchesHighwayRoadName('US-89', 'US-89A')).toBe(false);
+      expect(matchesHighwayRoadName('U.S. Highway 89A', 'US-89A')).toBe(true);
+
+      // Network & state distinctions: I-89 vs US-89 vs AZ-89 vs UT-89
+      expect(matchesHighwayRoadName('I-89', 'US-89')).toBe(false);
+      expect(matchesHighwayRoadName('AZ-89', 'US-89')).toBe(false);
+      expect(matchesHighwayRoadName('AZ-89', 'UT-89')).toBe(false);
+      expect(matchesHighwayRoadName('State Route 89', 'AZ-89')).toBe(true);
+      expect(matchesHighwayRoadName('SR 179', 'AZ-179')).toBe(true);
+
+      // End-to-end snapToHighwayCorridor: skips closer I-405 candidate to select true I-40 match
+      const mockOsrmFetch: typeof fetch = vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            code: 'Ok',
+            waypoints: [
+              { name: 'I-405', location: [-111.76, 35.19], distance: 5 },
+              { name: 'Interstate 40', location: [-111.75, 35.2], distance: 18 },
+            ],
+          }),
+          { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }
+        );
+      });
+
+      const toolLib = new ScoutToolLibrary({ fetchImpl: mockOsrmFetch });
+      const matchedRes = await toolLib.snapToHighwayCorridor(
+        { lat: 35.195, lng: -111.755, road_name: 'I-40' },
+        {}
+      );
+      expect(matchedRes.road_name_matched).toBe(true);
+      expect(matchedRes.snapped_road_name).toBe('Interstate 40');
+      expect(matchedRes.snapped_lat).toBe(35.2);
+      expect(matchedRes.snapped_lng).toBe(-111.75);
+
+      // When only I-405 is present for hint I-40, road_name_matched is false
+      const mockUnmatchedFetch: typeof fetch = vi.fn(async () => {
+        return new Response(
+          JSON.stringify({
+            code: 'Ok',
+            waypoints: [{ name: 'I-405', location: [-111.76, 35.19], distance: 5 }],
+          }),
+          { status: 200, headers: new Headers({ 'content-type': 'application/json' }) }
+        );
+      });
+      const unmatchedLib = new ScoutToolLibrary({ fetchImpl: mockUnmatchedFetch });
+      const unmatchedRes = await unmatchedLib.snapToHighwayCorridor(
+        { lat: 35.195, lng: -111.755, road_name: 'I-40' },
+        {}
+      );
+      expect(unmatchedRes.road_name_matched).toBe(false);
+      expect(unmatchedRes.snapped_road_name).toBe('I-405');
     });
   });
 });

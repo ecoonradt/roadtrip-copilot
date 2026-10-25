@@ -308,6 +308,199 @@ export function separateThoughtAndReply(
 }
 
 /**
+ * Returns true if a suggestion represents an in-transit scenic drive-by or route-forcing anchor
+ * rather than a physical stopping destination.
+ */
+export function isInTransitOrAnchorSuggestion(
+  sug: Pick<ScoutSuggestion, 'type' | 'dwell_minutes' | 'is_route_anchor'>
+): boolean {
+  if (sug.type === 'scenic_drive_by' || sug.is_route_anchor === true) {
+    return true;
+  }
+  if (
+    sug.dwell_minutes === 0 &&
+    sug.type !== 'lodging' &&
+    sug.type !== 'destination' &&
+    sug.type !== 'origin'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export interface PlaceMatchCandidate {
+  action: 'add_waypoint' | 'update_waypoint';
+  name?: string;
+  place_name?: string;
+  address?: string;
+  google_place_id?: string;
+  type?: string;
+  dwell_minutes?: number;
+  is_route_anchor?: boolean;
+  lat?: number;
+  lng?: number;
+}
+
+const GENERIC_STOP_WORDS = new Set([
+  'stop', 'fuel', 'gas', 'station', 'service', 'center', 'travel', 'meal',
+  'lunch', 'dinner', 'breakfast', 'cafe', 'restaurant', 'diner', 'hotel',
+  'motel', 'inn', 'lodge', 'lodging', 'resort', 'scenic', 'overlook',
+  'vista', 'view', 'point', 'pull', 'off', 'byway', 'the', 'and', 'for',
+  'at', 'in', 'on', 'of', 'by', 'to', 'near', 'from', 'exit', 'hwy',
+  'highway', 'route', 'st', 'street', 'ave', 'avenue', 'rd', 'road',
+  'blvd', 'dr', 'drive', 'ln', 'way', 'az', 'ut', 'ca', 'nv', 'nm',
+  'co', 'tx', 'us', 'morning', 'afternoon', 'evening', 'night', 'pit',
+  'quick', 'break', 'rest', 'snack', 'coffee', 'waypoint', 'stopover',
+  'detour', 'option', 'recommended',
+]);
+
+/**
+ * Matches and disambiguates a candidate waypoint against grounded resolved places.
+ */
+export function matchResolvedPlaceForSuggestion(
+  candidate: PlaceMatchCandidate,
+  resolvedPlaces?: ResolvedPlaceRecord[]
+): ResolvedPlaceRecord | undefined {
+  if (!resolvedPlaces || resolvedPlaces.length === 0) {
+    return undefined;
+  }
+
+  // 2. Exact google_place_id match
+  if (candidate.google_place_id && candidate.google_place_id.trim().length > 0) {
+    return resolvedPlaces.find((r) => r.google_place_id === candidate.google_place_id);
+  }
+
+  // 3. Normalized Name Matching & Multi-Branch Disambiguation
+  const sugCleanName = cleanPlaceName(candidate.place_name || candidate.name || '').toLowerCase();
+  let nameCandidates: ResolvedPlaceRecord[] = [];
+
+  if (sugCleanName.length > 0) {
+    const exactMatches = resolvedPlaces.filter((r) => {
+      const rPlace = r.place_name.toLowerCase();
+      const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
+      return (
+        (rPlace.length > 0 && rPlace === sugCleanName) ||
+        (rDisplay.length > 0 && rDisplay === sugCleanName)
+      );
+    });
+
+    if (exactMatches.length > 0) {
+      nameCandidates = exactMatches;
+    } else if (sugCleanName.length >= 4) {
+      nameCandidates = resolvedPlaces.filter((r) => {
+        const rPlace = r.place_name.toLowerCase();
+        return (
+          rPlace.length >= 4 &&
+          (rPlace.includes(sugCleanName) || sugCleanName.includes(rPlace))
+        );
+      });
+    }
+  }
+
+  // Distinguishing qualifier/address tokens
+  const rawQualifierText = `${candidate.name || ''} ${candidate.address || ''}`.toLowerCase();
+  const nameTokens = new Set(sugCleanName.split(/[^a-z0-9]+/).filter(Boolean));
+  const allTokens = rawQualifierText.split(/[^a-z0-9]+/).filter(Boolean);
+  const qualifierTokens = Array.from(
+    new Set(
+      allTokens.filter((token) => {
+        if (nameTokens.has(token)) return false;
+        if (GENERIC_STOP_WORDS.has(token)) return false;
+        const isNumeric = /^\d+$/.test(token);
+        return token.length >= 3 || (isNumeric && token.length >= 2);
+      })
+    )
+  );
+
+  const hasCoords =
+    typeof candidate.lat === 'number' &&
+    Number.isFinite(candidate.lat) &&
+    typeof candidate.lng === 'number' &&
+    Number.isFinite(candidate.lng);
+
+  if (nameCandidates.length > 0) {
+    let geoCompatible = hasCoords
+      ? nameCandidates.filter(
+          (r) => haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng) <= 10
+        )
+      : [...nameCandidates];
+
+    if (geoCompatible.length === 0) {
+      return undefined;
+    }
+
+    if (qualifierTokens.length > 0) {
+      const scored = geoCompatible.map((r) => {
+        const recordText = `${r.display_name} ${r.address} ${r.query}`.toLowerCase();
+        const score = qualifierTokens.filter((t) => new RegExp(`\\b${t}\\b`).test(recordText)).length;
+        return { record: r, score };
+      });
+      const maxScore = Math.max(0, ...scored.map((s) => s.score));
+      if (maxScore === 0) {
+        // Explicit qualifier/address/city tokens on the suggestion do not match any candidate record -> do not guess!
+        return undefined;
+      }
+      const bestTokenMatches = scored.filter((s) => s.score === maxScore).map((s) => s.record);
+      if (bestTokenMatches.length === 1) {
+        return bestTokenMatches[0];
+      }
+      geoCompatible = bestTokenMatches;
+    }
+
+    if (geoCompatible.length === 1) {
+      return geoCompatible[0];
+    }
+
+    if (geoCompatible.length > 1) {
+      if (!hasCoords) {
+        return undefined;
+      }
+      const sorted = geoCompatible
+        .map((r) => ({
+          record: r,
+          dist: haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng),
+        }))
+        .sort((a, b) => a.dist - b.dist);
+
+      const best = sorted[0];
+      const second = sorted[1];
+      if (
+        best.dist <= 2.0 &&
+        (second.dist > 5.0 || (best.dist <= 0.5 && second.dist >= Math.max(0.5, best.dist * 3)))
+      ) {
+        return best.record;
+      }
+      return undefined;
+    }
+  }
+
+  // 4. Proximity Fallback (<= 0.15 miles)
+  if (
+    nameCandidates.length === 0 &&
+    hasCoords &&
+    candidate.action === 'add_waypoint' &&
+    (candidate.type === 'meal' || candidate.type === 'fuel' || candidate.type === 'lodging') &&
+    !isInTransitOrAnchorSuggestion({
+      type: candidate.type || '',
+      dwell_minutes: candidate.dwell_minutes,
+      is_route_anchor: candidate.is_route_anchor,
+    })
+  ) {
+    if (candidate.place_name && candidate.place_name.trim().length > 0) {
+      return undefined;
+    }
+    const proximityCandidates = resolvedPlaces.filter(
+      (r) => haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng) <= 0.15
+    );
+    if (proximityCandidates.length === 1) {
+      return proximityCandidates[0];
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Hydrates an AI suggestion with verified establishment names, addresses,
  * Google Place IDs, and authentic physical entrance coordinates from grounded tool calls.
  * Never mutates the input suggestion object.
@@ -320,61 +513,30 @@ export function hydrateSuggestionFromResolvedPlaces(
   const result: ScoutSuggestion = { ...suggestion };
   if (!resolvedPlaces || resolvedPlaces.length === 0) return result;
 
-  let matched: ResolvedPlaceRecord | undefined;
-
-  // 1. Exact google_place_id match.
-  // If suggestion.google_place_id is already set, ONLY match a record with that exact Place ID
-  // so we never cross-pollinate Place ID of A with coordinates/address of B (F-32).
-  if (result.google_place_id) {
-    matched = resolvedPlaces.find((r) => r.google_place_id === result.google_place_id);
-  } else {
-    // 2. Normalized name match
-    const sugName = cleanPlaceName(result.place_name || result.name).toLowerCase();
-    if (sugName) {
-      // 2a. Prefer exact normalized equality
-      matched = resolvedPlaces.find((r) => {
-        const rPlace = r.place_name.toLowerCase();
-        const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
-        return (
-          (rPlace.length > 0 && rPlace === sugName) ||
-          (rDisplay.length > 0 && rDisplay === sugName)
-        );
-      });
-
-      // 2b. Only fall back to substring containment if >= 4 chars and unambiguously matches a single record
-      if (!matched && sugName.length >= 4) {
-        const substringMatches = resolvedPlaces.filter((r) => {
-          const rPlace = r.place_name.toLowerCase();
-          return (
-            rPlace.length >= 4 &&
-            (rPlace.includes(sugName) || sugName.includes(rPlace))
-          );
-        });
-        if (substringMatches.length === 1) {
-          matched = substringMatches[0];
-        }
-      }
-    }
-
-    // 3. Proximity match (<= 0.15 miles) strictly for commercial physical stop additions
-    // when unambiguously matching at most 1 resolved place (F-31).
-    const isCommercialStop =
-      result.type === 'meal' || result.type === 'fuel' || result.type === 'lodging';
-    if (
-      !matched &&
-      result.action === 'add_waypoint' &&
-      isCommercialStop &&
-      !result.is_route_anchor
-    ) {
-      const proximityCandidates = resolvedPlaces.filter(
-        (r) => haversineMiles(result.lat, result.lng, r.lat, r.lng) <= 0.15
-      );
-      if (proximityCandidates.length === 1) {
-        matched = proximityCandidates[0];
-      }
-    }
+  if (isInTransitOrAnchorSuggestion(result)) {
+    result.google_place_id = undefined;
+    return result;
   }
 
+  if (result.action !== 'add_waypoint' && result.action !== 'update_waypoint') {
+    return result;
+  }
+
+  const matched = matchResolvedPlaceForSuggestion(
+    {
+      action: result.action,
+      name: result.name,
+      place_name: result.place_name,
+      address: result.address,
+      google_place_id: result.google_place_id,
+      type: result.type,
+      dwell_minutes: result.dwell_minutes,
+      is_route_anchor: result.is_route_anchor,
+      lat: result.lat,
+      lng: result.lng,
+    },
+    resolvedPlaces
+  );
   if (matched) {
     if (
       !result.google_place_id &&
@@ -383,17 +545,18 @@ export function hydrateSuggestionFromResolvedPlaces(
     ) {
       result.google_place_id = matched.google_place_id;
     }
-    if (!result.place_name && matched.place_name) {
-      result.place_name = matched.place_name;
+    if (matched.place_name && matched.place_name.trim().length > 0) {
+      result.place_name = matched.place_name.trim();
     }
-    if (!result.address && matched.address) {
-      result.address = matched.address;
+    if (matched.address && matched.address.trim().length > 0) {
+      result.address = matched.address.trim();
     }
-    // Only overwrite coordinates for commercial physical stops (meal, fuel, lodging)
-    // so scenic_pull_off and scenic_drive_by pins are never moved off their overlook/highway coordinate.
     if (
-      (result.type === 'meal' || result.type === 'fuel' || result.type === 'lodging') &&
-      !result.is_route_anchor
+      result.type === 'meal' ||
+      result.type === 'fuel' ||
+      result.type === 'lodging' ||
+      result.type === 'stop' ||
+      (suggestion.google_place_id && matched.google_place_id === suggestion.google_place_id)
     ) {
       result.lat = Number(matched.lat.toFixed(6));
       result.lng = Number(matched.lng.toFixed(6));
@@ -484,56 +647,6 @@ export function parseScoutResponse(
 
             const validatedPlaceId = validateScoutPlaceId(rawPlaceId, options?.knownPlaceIds);
 
-            // Backfill missing coordinates from resolvedPlaces or matchedWp when omitted by the model (F-35)
-            let resolvedLat: number | undefined =
-              typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined;
-            let resolvedLng: number | undefined =
-              typeof item.lng === 'number' && Number.isFinite(item.lng) ? item.lng : undefined;
-
-            if ((resolvedLat === undefined || resolvedLng === undefined) && options?.resolvedPlaces) {
-              const candidateName = cleanPlaceName(
-                place_name || (typeof item.name === 'string' ? item.name : '')
-              ).toLowerCase();
-              const matchedPlace = options.resolvedPlaces.find((r) => {
-                if (validatedPlaceId && r.google_place_id === validatedPlaceId) return true;
-                if (!validatedPlaceId && candidateName.length > 0) {
-                  const rPlace = r.place_name.toLowerCase();
-                  const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
-                  return rPlace === candidateName || rDisplay === candidateName;
-                }
-                return false;
-              });
-              if (matchedPlace) {
-                resolvedLat = matchedPlace.lat;
-                resolvedLng = matchedPlace.lng;
-              }
-            }
-
-            if ((resolvedLat === undefined || resolvedLng === undefined) && matchedWp) {
-              resolvedLat = matchedWp.lat;
-              resolvedLng = matchedWp.lng;
-            }
-
-            if (
-              resolvedLat === undefined ||
-              resolvedLng === undefined ||
-              !Number.isFinite(resolvedLat) ||
-              !Number.isFinite(resolvedLng) ||
-              resolvedLat < -90 ||
-              resolvedLat > 90 ||
-              resolvedLng < -180 ||
-              resolvedLng > 180
-            ) {
-              return;
-            }
-
-            const newId =
-              typeof item.newId === 'string' && item.newId.trim().length > 0
-                ? item.newId.trim()
-                : typeof item.new_id === 'string' && item.new_id.trim().length > 0
-                ? item.new_id.trim()
-                : undefined;
-
             const rawIsAnchor =
               typeof item.is_route_anchor === 'boolean'
                 ? item.is_route_anchor
@@ -567,6 +680,69 @@ export function parseScoutResponse(
 
             const is_route_anchor = isPhysical ? false : rawIsAnchor;
 
+            const inTransitOrAnchor = isInTransitOrAnchorSuggestion({
+              type: resolvedType,
+              dwell_minutes: resolvedDwellMinutes,
+              is_route_anchor,
+            });
+
+            // Backfill missing coordinates from resolvedPlaces or matchedWp when omitted by the model (F-35)
+            let resolvedLat: number | undefined =
+              typeof item.lat === 'number' && Number.isFinite(item.lat) ? item.lat : undefined;
+            let resolvedLng: number | undefined =
+              typeof item.lng === 'number' && Number.isFinite(item.lng) ? item.lng : undefined;
+
+            if (
+              (resolvedLat === undefined || resolvedLng === undefined) &&
+              options?.resolvedPlaces &&
+              !inTransitOrAnchor
+            ) {
+              const matchedPlace = matchResolvedPlaceForSuggestion(
+                {
+                  action: item.action,
+                  name: typeof item.name === 'string' ? item.name : matchedWp?.name,
+                  place_name,
+                  address: typeof item.address === 'string' ? item.address : undefined,
+                  google_place_id: validatedPlaceId,
+                  type: resolvedType,
+                  dwell_minutes: resolvedDwellMinutes,
+                  is_route_anchor,
+                  lat: resolvedLat ?? matchedWp?.lat,
+                  lng: resolvedLng ?? matchedWp?.lng,
+                },
+                options.resolvedPlaces
+              );
+              if (matchedPlace) {
+                resolvedLat = matchedPlace.lat;
+                resolvedLng = matchedPlace.lng;
+              }
+            }
+
+            if ((resolvedLat === undefined || resolvedLng === undefined) && matchedWp) {
+              resolvedLat = matchedWp.lat;
+              resolvedLng = matchedWp.lng;
+            }
+
+            if (
+              resolvedLat === undefined ||
+              resolvedLng === undefined ||
+              !Number.isFinite(resolvedLat) ||
+              !Number.isFinite(resolvedLng) ||
+              resolvedLat < -90 ||
+              resolvedLat > 90 ||
+              resolvedLng < -180 ||
+              resolvedLng > 180
+            ) {
+              return;
+            }
+
+            const newId =
+              typeof item.newId === 'string' && item.newId.trim().length > 0
+                ? item.newId.trim()
+                : typeof item.new_id === 'string' && item.new_id.trim().length > 0
+                ? item.new_id.trim()
+                : undefined;
+
             const baseSug: ScoutSuggestion = {
               id: `scout_sug_${Date.now()}_${index}`,
               action: item.action,
@@ -592,7 +768,7 @@ export function parseScoutResponse(
                 typeof item.address === 'string' && item.address.trim().length > 0
                   ? item.address.trim()
                   : undefined,
-              google_place_id: validatedPlaceId,
+              google_place_id: inTransitOrAnchor ? undefined : validatedPlaceId,
               is_route_anchor,
               notification:
                 resolvedType !== 'stop' &&

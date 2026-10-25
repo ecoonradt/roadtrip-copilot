@@ -6,7 +6,9 @@ OpenCode-only. Antigravity does not read `.opencode/`.
 ## Delegation tool: `subagent`
 * `agent` — a subagent id. Built-ins: `general` (broad tools; can write files and run shell, but
   CANNOT spawn subagents) and `explore` (read-only search/read).
-* `prompt` — the full task. Workers have fresh context but DO inherit AGENTS.md and this file. Every worker prompt MUST follow Gate 1 Contract-First rules (exact file paths, literal TypeScript/Kotlin interfaces, explicit concurrency/cleanup invariants, and negative constraints).
+* `prompt` — the full task. Workers have fresh context but DO inherit AGENTS.md and this file.
+  * **Implementation workers (`impl-worker` / `test-worker`):** Every implementation prompt MUST follow Gate 1 Contract-First rules (exact file paths, literal TypeScript/Kotlin interfaces, explicit concurrency/cleanup invariants, and negative constraints).
+  * **Independent reviewers (`diff-reviewer`, Gate 2B):** Use a short neutral prompt (diff/base to inspect, objective/spec and architectural-rule pointers, and a unique `tmp/` findings path if writing incremental output). Never prime an independent reviewer with a prior fix list, earlier findings, or a targeted checklist.
 * `model` — `providerID/modelID`, optional `#variant`. Prefer the model already bound to a
   configured worker profile instead of naming one inline.
 * `background` — `true` to fan out without blocking.

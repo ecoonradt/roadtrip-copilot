@@ -113,8 +113,9 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
      - Reject hostnames matching `localhost`, `*.localhost`, `*.local`, `*.internal`, `metadata.google.internal`, `metadata`, or IP literals in private/loopback/link-local/cloud-metadata ranges:
        * IPv4: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10` (CGNAT), `127.0.0.0/8`, `169.254.0.0/16` (AWS IMDS `169.254.169.254`), `172.16.0.0/12`, `192.0.0.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`.
        * IPv6: `::`, `::1`, `fc00::/7` (`fc00::`–`fdff::`, including AWS IMDSv2 IPv6 `fd00:ec2::254`), `fe80::/10`, and IPv4-mapped IPv6 `::ffff:a.b.c.d` / `::ffff:xxxx:xxxx` where the embedded IPv4 address is private/reserved.
-     - Follow HTTP `301`/`302`/`303`/`307`/`308` redirects manually (`redirect: 'manual'`, max `3` hops), validating every resolved `Location` target against `assertSafeExternalUrl` before fetching so an external site can never redirect to `http://169.254.169.254` or `http://127.0.0.1`!
-     - Enforce per-request timeout (`timeoutMs = 10_000`) and abort propagation (`abortSignal`), reject binary content types (`image/*`, `audio/*`, `video/*`, `application/pdf`, `application/octet-stream`, `application/zip`), cap raw body read at `512 * 1024` bytes, and cap extracted Markdown/text at `maxChars = 12_000`.
+      - Follow HTTP `301`/`302`/`303`/`307`/`308` redirects manually (`redirect: 'manual'`, max `3` hops), validating every resolved `Location` target against `assertSafeExternalUrl` and bounded DNS resolution before fetching so an external site can never redirect to `http://169.254.169.254` or `http://127.0.0.1`!
+      - Bind DNS validation to the actual socket connection on every hop: resolve DNS once per hop (bounded by request timeout and `abortSignal`), validate all returned A/AAAA records via `assertSafeIpAddress`, and connect exclusively to the validated IP(s) via a pinned HTTP/HTTPS transport (`lookup` callback returning only the validated addresses, `agent: false`, preserving the original `Host` header and HTTPS TLS `servername` SNI/certificate verification). Never perform an unchecked second DNS lookup at connection time.
+      - Enforce per-request timeout (`timeoutMs = 10_000`) and abort propagation (`abortSignal`) across DNS resolution, socket connection, and full response body consumption; reject binary content types (`image/*`, `audio/*`, `video/*`, `application/pdf`, `application/octet-stream`, `application/zip`); cap raw body read at `512 * 1024` bytes; cap extracted Markdown/text at `maxChars = 12_000`; and use strictly linear $\mathcal{O}(n)$ tag scanning/tokenization (`htmlToReadableText`) without backtracking regexes on malformed or unclosed generic tags.
 
 5. **Google Places API (New) Contract in `resolve_and_standardize_place`:**
    * Endpoint: `POST https://places.googleapis.com/v1/places:searchText`
@@ -134,29 +135,31 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
 
 6. **OSRM Nearest & Detour Math in `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, `audit_corridor_waypoints`:**
    * Preserve literal `,` and `;` in OSRM URL paths (Rule 5: never `encodeURIComponent` coordinate path segments).
+   * Maintain request deadline and `AbortSignal` cancellation through full JSON body consumption (`res.json()`) across all upstream API calls (`search_web`, `resolve_and_standardize_place`, `snap_to_highway_corridor`, `audit_corridor_waypoints`).
    * `snap_to_highway_corridor`:
      - Calls `${osrmNearestBaseUrl}/${lng},${lat}?number=5` (default `https://router.project-osrm.org/nearest/v1/driving`).
-     - If `road_name` is provided, selects the closest OSRM candidate whose `name` matches `road_name` (normalized case-insensitive substring or highway token match, e.g. `US-89` <-> `US Highway 89` / `US 89`), or falls back to `waypoints[0]` with `road_name_matched: false`.
+     - If `road_name` is provided, compares complete highway designators (`I-40` vs `I-405`, `US-89` vs `US-89A`, Interstate vs US vs State Route) before allowing non-numbered textual matches, or falls back to `waypoints[0]` with `road_name_matched: false`.
    * `calculate_detour_impact`:
      - Validates `candidate_lat`, `candidate_lng`, and `after_waypoint_id`.
      - Finds `after_waypoint_id` in `context.tripContext.waypoints`. If not found, throws descriptive `Error` listing valid waypoint IDs.
      - Uses `RouteService` (`getRoute`) in parallel (`Promise.all`) to compare baseline leg vs detour leg and returns exact `added_distance_miles` and `added_duration_minutes`.
    * `simulate_schedule_cascade`:
-     - Supports `action: 'add' | 'update' | 'delete'` on `context.tripContext.waypoints` using self-contained timeline cascade and `tz-lookup` timezone calculation inside `server/services/scoutTools.ts` (respecting `tsconfig.server.json` `"rootDir": "server"` and Lambda `Dockerfile` isolation where `src/` is excluded), returning shifted stop arrival/departure times, `timezones_crossed`, and `sunset_warnings` (stops arriving at or after `18:30` local time).
+     - Supports `action: 'add' | 'update' | 'delete'` on `context.tripContext.waypoints` using `RouteService` (`getRoute`) for changed legs while retaining valid unchanged-leg durations/distances, propagating aborts and upstream routing errors without straight-line 50 mph fallback estimates, and returning shifted stop arrival/departure times, `timezones_crossed`, and `sunset_warnings` (stops arriving at or after `18:30` local time).
    * `audit_corridor_waypoints`:
-     - Concurrently inspects all waypoints in `context.tripContext.waypoints` via `Promise.all` (OSRM `/nearest` distance check, leg speed `< 30 mph` over `>= 2 mi` check, `isValidGooglePlaceId` check, physical stop address/place_name check, `is_route_anchor` on physical stop check, and notification/ID category & anticipatory future-tense speech check).
+     - Concurrently inspects all waypoints in `context.tripContext.waypoints` with bounded concurrency (`MAX_AUDIT_CONCURRENCY = 4`, `MAX_AUDIT_WAYPOINTS = 50`) (OSRM `/nearest` distance check, leg speed `< 30 mph` over `>= 2 mi` check, `isValidGooglePlaceId` check, physical stop address/place_name check, `is_route_anchor` on physical stop check, and notification/ID category & anticipatory future-tense speech check).
 
 ### C. Server-Side Suggestion Hydration & `delete_waypoint` (`server/services/scoutService.ts` & `server/services/bedrockService.ts`)
 1. **Per-Turn Tool Wiring in `ScoutService`:**
    * Default `this.tools` to `SCOUT_TOOL_DECLARATIONS` when `options.tools` is not explicitly provided.
    * For each `chat()` and `chatStream()` turn, instantiate a fresh `TurnGroundingCache` (seeded with `knownPlaceIds` from `request.tripContext.waypoints`).
    * Dispatch tool calls through `this.toolLibrary.executeTool(name, args, turnContext)` (or if a custom `options.toolDispatcher` was injected, invoke it and also record any valid `resolve_and_standardize_place` result into `groundingCache`).
-2. **Deterministic Suggestion Hydration (`hydrateSuggestionsWithResolvedPlaces` in `parseScoutResponse`):**
-   * When parsing `add_waypoint` or `update_waypoint` suggestions in `parseScoutResponse`, match against `options.resolvedPlaces`:
-     1. Exact `google_place_id` match.
-     2. Normalized `place_name` / cleaned `name` match against `record.place_name` or `record.display_name`.
-     3. Close coordinate proximity (`<= 0.15` miles) for non-`scenic_drive_by` stops.
-   * When matched, deterministically inject `record.google_place_id` (if valid), `record.place_name`, `record.address`, and (for physical stops `type !== 'scenic_drive_by'` and `!is_route_anchor`) verified entrance `record.lat` and `record.lng`.
+2. **Deterministic Suggestion Hydration (`hydrateSuggestionFromResolvedPlaces` in `parseScoutResponse`):**
+   * Share disambiguated place-matching logic (`matchResolvedPlaceForSuggestion`) between coordinate backfill and suggestion hydration:
+     1. Exact `google_place_id` match (never cross-pollinating one branch's ID with another branch's metadata).
+     2. Disambiguated normalized `place_name` / `display_name` match: require unambiguous geographic proximity or unambiguous address/qualifier evidence when multiple same-name branches exist or when a single candidate is in a distant city; otherwise leave unhydrated rather than guessing.
+     3. Unambiguous close coordinate proximity (`<= 0.15` miles) for commercial `add_waypoint` physical stops (`meal`, `fuel`, `lodging`).
+   * For physical stops (`!isInTransitOrAnchorSuggestion`), replace model `place_name` and `address` with available non-empty authoritative fields from the matched record, attach `matched.google_place_id` (if valid), and (for commercial stops or exact ID matches) apply verified `matched.lat` and `matched.lng`.
+   * Keep in-transit scenic drive-bys and route anchors (`type === 'scenic_drive_by'`, `is_route_anchor === true`, or `dwell_minutes === 0` non-lodging/origin/destination) strictly coordinate-only: never attach or retain `google_place_id` on scenic anchors in hydration, frontend suggestion application (`RouteScoutDrawer.tsx` / `App.tsx`), or `googleMapsUrl.ts` (`waypoint_place_ids`).
 3. **`delete_waypoint` Parsing in `parseScoutResponse`:**
    * Accept `item.action === 'delete_waypoint'` when `targetWaypointId` (or `target_waypoint_id`) is a non-empty string.
    * Backfill `name`, `type`, `lat`, and `lng` from `options.tripWaypoints` matching `targetWaypointId` when omitted by the model.
@@ -207,6 +210,20 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
   - Sync living docs (`AGENTS.md`, `README.md`, `route-builder/AGENTS.md`, `route-builder/README.md`, `docs/reference/directory-layout.md`, `docs/README.md`).
   - Run `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`.
   - Push `feat/m4-scout-grounding-tools` and open green PR on GitHub.
+- [ ] **Step 7: M4 Consolidated Review Fixes & Unhappy-Path Regression Suite**
+  - Add regression tests and apply focused fixes for all 8 reproduced findings:
+    1. Bind URL validation to the actual socket connection on every hop (`read_url_content`), preserving `Host` and HTTPS SNI/certificate verification with bounded DNS resolution and cancellation.
+    2. Replace residual tag regexes in `htmlToReadableText` with linear-time tag tokenization/scanning (`O(n)` on malformed generic tags and repeated `<`).
+    3. Disambiguate same-name establishments across coordinate backfill and suggestion hydration (`matchResolvedPlaceForSuggestion`).
+    4. Keep scenic navigation anchors coordinate-only across hydration, suggestion apply, and `googleMapsUrl.ts` (`waypoint_place_ids`).
+    5. Route changed schedule legs via `RouteService` in `simulate_schedule_cascade` instead of straight-line 50 mph estimation.
+    6. Keep request deadlines and `AbortSignal` cancellation active through full JSON/text body consumption (`fetchJsonWithTimeout` and `read_url_content`).
+    7. Match complete highway designators (`I-40` vs `I-405`, `US-89` vs `US-89A`, Interstate vs US vs State Route) before textual matching.
+    8. Make matched place metadata (`place_name`, `address`) authoritative during hydration without overwriting with empty fields.
+  - Update review governance rules (`AGENTS.md` and `WORKING_MODEL.md`) separating Contract-First implementation prompts from neutral, unprimed Gate 2B independent-review prompts.
+- [ ] **Step 8: Behavior-Preserving Decomposition of `scoutTools.ts` & Living Docs Sync**
+  - Extract cohesive modules under `route-builder/server/services/scoutTools/` (`types.ts`, `urlSafety.ts`, `geo.ts`, `scheduleSimulator.ts`, `corridorTools.ts`) while keeping `scoutTools.ts` as the compatible coordinator/facade.
+  - Update `docs/reference/directory-layout.md` and `route-builder/AGENTS.md` for the final layout and verify with `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`.
 
 ---
 
