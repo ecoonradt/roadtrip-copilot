@@ -339,9 +339,53 @@ describe('Route Scout Grounding Tools & Isolation', () => {
       expect(parsed2.hostname).toBe('[2606:4700:4700::1]');
       expect(parsed2.protocol).toBe('https:');
 
-      const parsed3 = assertSafeExternalUrl('http://roadtrip.guide:8080/scenic-routes?state=az');
+      const parsed3 = assertSafeExternalUrl('http://roadtrip.guide/scenic-routes?state=az');
       expect(parsed3.hostname).toBe('roadtrip.guide');
-      expect(parsed3.port).toBe('8080');
+      expect(parsed3.protocol).toBe('http:');
+      expect(parsed3.port).toBe('');
+    });
+
+    it('enforces the approved external port policy (80/443 only)', () => {
+      // Default HTTP/HTTPS ports normalize to '' and remain allowed.
+      expect(assertSafeExternalUrl('http://example.com/guide').port).toBe('');
+      expect(assertSafeExternalUrl('https://example.com/guide').port).toBe('');
+
+      // Explicit default ports normalize to '' and remain allowed.
+      const explicitHttp = assertSafeExternalUrl('http://example.com:80/guide');
+      expect(explicitHttp.protocol).toBe('http:');
+      expect(explicitHttp.port).toBe('');
+      const explicitHttps = assertSafeExternalUrl('https://example.com:443/guide');
+      expect(explicitHttps.protocol).toBe('https:');
+      expect(explicitHttps.port).toBe('');
+
+      const disallowedPortUrls: Array<{ url: string; port: string }> = [
+        { url: 'http://example.com:8080/guide', port: '8080' },
+        { url: 'https://example.com:8443/guide', port: '8443' },
+        { url: 'http://example.com:8000/guide', port: '8000' },
+        { url: 'https://example.com:3000/guide', port: '3000' },
+        { url: 'http://example.com:22/guide', port: '22' },
+        { url: 'https://example.com:6379/guide', port: '6379' },
+      ];
+      for (const { url, port } of disallowedPortUrls) {
+        expect(() => assertSafeExternalUrl(url)).toThrow(new RegExp(`port "${port}" is not allowed`));
+      }
+    });
+
+    it('rejects forbidden ports before DNS resolution or fetch', async () => {
+      const dnsLookup = vi.fn(async (): Promise<Array<{ address: string; family: number }>> => [
+        { address: '93.184.216.34', family: 4 },
+      ]);
+      const fetchImpl: typeof fetch = vi.fn(async () => new Response('must not be fetched'));
+      const toolLib = new ScoutToolLibrary({ dnsLookup, fetchImpl });
+
+      for (const url of ['http://example.com:8080/guide', 'https://example.com:8443/guide']) {
+        await expect(
+          toolLib.readUrlContent({ url }, { tripContext: sampleTripContext })
+        ).rejects.toThrow(/port "\d+" is not allowed/);
+      }
+
+      expect(dnsLookup).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
     });
 
     it('rejects non-HTTP(S) schemes', () => {
