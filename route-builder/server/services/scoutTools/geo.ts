@@ -226,6 +226,129 @@ export const GENERIC_STOP_WORDS = new Set([
   'detour', 'option', 'recommended',
 ]);
 
+const COORDINATE_EPSILON = 1e-6;
+
+function normalizeEntityText(value: string | undefined): string {
+  return (value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function sameCoordinates(a: ResolvedPlaceRecord, b: ResolvedPlaceRecord): boolean {
+  return (
+    Math.abs(a.lat - b.lat) <= COORDINATE_EPSILON &&
+    Math.abs(a.lng - b.lng) <= COORDINATE_EPSILON
+  );
+}
+
+/**
+ * Two resolved records describe the same verified entity only when they agree on every
+ * authoritative field. Missing values (omitted ID or address) are allowed, but conflicting
+ * IDs, names, addresses, or coordinates are never merged.
+ */
+function areConsistentDuplicates(a: ResolvedPlaceRecord, b: ResolvedPlaceRecord): boolean {
+  const aName = normalizeEntityText(a.place_name);
+  const bName = normalizeEntityText(b.place_name);
+  if (aName && bName && aName !== bName) {
+    return false;
+  }
+
+  const aId = a.google_place_id?.trim();
+  const bId = b.google_place_id?.trim();
+  if (aId && bId && aId !== bId) {
+    return false;
+  }
+
+  if (!sameCoordinates(a, b)) {
+    return false;
+  }
+
+  const aAddress = normalizeEntityText(a.address);
+  const bAddress = normalizeEntityText(b.address);
+  if (aAddress && bAddress && aAddress !== bAddress) {
+    return false;
+  }
+
+  return true;
+}
+
+function compareRecords(a: ResolvedPlaceRecord, b: ResolvedPlaceRecord): number {
+  return (
+    (a.google_place_id || '').localeCompare(b.google_place_id || '') ||
+    normalizeEntityText(a.place_name).localeCompare(normalizeEntityText(b.place_name)) ||
+    normalizeEntityText(a.address).localeCompare(normalizeEntityText(b.address)) ||
+    a.lat - b.lat ||
+    a.lng - b.lng ||
+    (a.query || '').localeCompare(b.query || '') ||
+    (a.display_name || '').localeCompare(b.display_name || '')
+  );
+}
+
+function compareRepresentativePriority(a: ResolvedPlaceRecord, b: ResolvedPlaceRecord): number {
+  const idDiff =
+    Number(Boolean(b.google_place_id?.trim())) - Number(Boolean(a.google_place_id?.trim()));
+  if (idDiff !== 0) return idDiff;
+
+  const addressDiff = Number(Boolean(b.address?.trim())) - Number(Boolean(a.address?.trim()));
+  if (addressDiff !== 0) return addressDiff;
+
+  const nameDiff =
+    Number(Boolean(normalizeEntityText(b.place_name))) -
+    Number(Boolean(normalizeEntityText(a.place_name)));
+  if (nameDiff !== 0) return nameDiff;
+
+  const queryLengthDiff = (b.query || '').length - (a.query || '').length;
+  if (queryLengthDiff !== 0) return queryLengthDiff;
+
+  return (
+    (a.query || '').localeCompare(b.query || '') ||
+    (a.display_name || '').localeCompare(b.display_name || '') ||
+    compareRecords(a, b)
+  );
+}
+
+interface ResolvedPlaceGroup {
+  records: ResolvedPlaceRecord[];
+  representative: ResolvedPlaceRecord;
+  evidenceText: string;
+}
+
+/**
+ * Collapses repeated tool-call evidence for the same verified entity into a single group.
+ * Distinct Place IDs / branches stay separate, and conflicting records are never merged.
+ */
+function buildResolvedPlaceGroups(resolvedPlaces: ResolvedPlaceRecord[]): ResolvedPlaceGroup[] {
+  const sorted = [...resolvedPlaces].sort(compareRecords);
+  const grouped: ResolvedPlaceRecord[][] = [];
+
+  for (const record of sorted) {
+    const existing = grouped.find((group) =>
+      group.every((member) => areConsistentDuplicates(member, record))
+    );
+    if (existing) {
+      existing.push(record);
+    } else {
+      grouped.push([record]);
+    }
+  }
+
+  return grouped.map((records) => {
+    const representative = [...records].sort(compareRepresentativePriority)[0];
+    return {
+      records,
+      representative,
+      // Qualifier evidence comes only from verified entity fields; `query` is provenance
+      // metadata from the model/tool call and must never verify a branch.
+      evidenceText: records
+        .map((r) => `${r.display_name || ''} ${r.address || ''}`)
+        .join(' ')
+        .toLowerCase(),
+    };
+  });
+}
+
 /**
  * Matches and disambiguates a candidate waypoint against grounded resolved places.
  */
@@ -237,35 +360,55 @@ export function matchResolvedPlaceForSuggestion(
     return undefined;
   }
 
-  // 2. Exact google_place_id match
-  if (candidate.google_place_id && candidate.google_place_id.trim().length > 0) {
-    return resolvedPlaces.find((r) => r.google_place_id === candidate.google_place_id);
+  // 2. Exact google_place_id match routed through consistent duplicate grouping
+  const candidatePlaceId = candidate.google_place_id?.trim();
+  if (candidatePlaceId) {
+    const idMatches = resolvedPlaces.filter(
+      (r) => r.google_place_id?.trim() === candidatePlaceId
+    );
+    if (idMatches.length === 0) {
+      return undefined;
+    }
+
+    const idGroups = buildResolvedPlaceGroups(idMatches);
+    // Conflicting records sharing an ID must not be mixed or arbitrarily guessed between.
+    if (idGroups.length !== 1) {
+      return undefined;
+    }
+    return idGroups[0].representative;
   }
+
+  // Collapse repeated evidence for the same verified entity before ambiguity analysis.
+  const resolvedGroups = buildResolvedPlaceGroups(resolvedPlaces);
 
   // 3. Normalized Name Matching & Multi-Branch Disambiguation
   const sugCleanName = cleanPlaceName(candidate.place_name || candidate.name || '').toLowerCase();
-  let nameCandidates: ResolvedPlaceRecord[] = [];
+  let nameCandidates: ResolvedPlaceGroup[] = [];
 
   if (sugCleanName.length > 0) {
-    const exactMatches = resolvedPlaces.filter((r) => {
-      const rPlace = r.place_name.toLowerCase();
-      const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
-      return (
-        (rPlace.length > 0 && rPlace === sugCleanName) ||
-        (rDisplay.length > 0 && rDisplay === sugCleanName)
-      );
-    });
+    const exactMatches = resolvedGroups.filter((group) =>
+      group.records.some((r) => {
+        const rPlace = r.place_name.toLowerCase();
+        const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
+        return (
+          (rPlace.length > 0 && rPlace === sugCleanName) ||
+          (rDisplay.length > 0 && rDisplay === sugCleanName)
+        );
+      })
+    );
 
     if (exactMatches.length > 0) {
       nameCandidates = exactMatches;
     } else if (sugCleanName.length >= 4) {
-      nameCandidates = resolvedPlaces.filter((r) => {
-        const rPlace = r.place_name.toLowerCase();
-        return (
-          rPlace.length >= 4 &&
-          (rPlace.includes(sugCleanName) || sugCleanName.includes(rPlace))
-        );
-      });
+      nameCandidates = resolvedGroups.filter((group) =>
+        group.records.some((r) => {
+          const rPlace = r.place_name.toLowerCase();
+          return (
+            rPlace.length >= 4 &&
+            (rPlace.includes(sugCleanName) || sugCleanName.includes(rPlace))
+          );
+        })
+      );
     }
   }
 
@@ -291,9 +434,15 @@ export function matchResolvedPlaceForSuggestion(
     Number.isFinite(candidate.lng);
 
   if (nameCandidates.length > 0) {
-    let geoCompatible = hasCoords
+    let geoCompatible: ResolvedPlaceGroup[] = hasCoords
       ? nameCandidates.filter(
-          (r) => haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng) <= 10
+          (group) =>
+            haversineMiles(
+              candidate.lat!,
+              candidate.lng!,
+              group.representative.lat,
+              group.representative.lng
+            ) <= 10
         )
       : [...nameCandidates];
 
@@ -302,25 +451,28 @@ export function matchResolvedPlaceForSuggestion(
     }
 
     if (qualifierTokens.length > 0) {
-      const scored = geoCompatible.map((r) => {
-        const recordText = `${r.display_name} ${r.address} ${r.query}`.toLowerCase();
-        const score = qualifierTokens.filter((t) => new RegExp(`\\b${t}\\b`).test(recordText)).length;
-        return { record: r, score };
+      const scored = geoCompatible.map((group) => {
+        const score = qualifierTokens.filter((t) =>
+          new RegExp(`\\b${escapeRegExp(t)}\\b`).test(group.evidenceText)
+        ).length;
+        return { group, score };
       });
       const maxScore = Math.max(0, ...scored.map((s) => s.score));
       if (maxScore === 0) {
         // Explicit qualifier/address/city tokens on the suggestion do not match any candidate record -> do not guess!
         return undefined;
       }
-      const bestTokenMatches = scored.filter((s) => s.score === maxScore).map((s) => s.record);
+      const bestTokenMatches = scored
+        .filter((s) => s.score === maxScore)
+        .map((s) => s.group);
       if (bestTokenMatches.length === 1) {
-        return bestTokenMatches[0];
+        return bestTokenMatches[0].representative;
       }
       geoCompatible = bestTokenMatches;
     }
 
     if (geoCompatible.length === 1) {
-      return geoCompatible[0];
+      return geoCompatible[0].representative;
     }
 
     if (geoCompatible.length > 1) {
@@ -328,9 +480,14 @@ export function matchResolvedPlaceForSuggestion(
         return undefined;
       }
       const sorted = geoCompatible
-        .map((r) => ({
-          record: r,
-          dist: haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng),
+        .map((group) => ({
+          group,
+          dist: haversineMiles(
+            candidate.lat!,
+            candidate.lng!,
+            group.representative.lat,
+            group.representative.lng
+          ),
         }))
         .sort((a, b) => a.dist - b.dist);
 
@@ -340,7 +497,7 @@ export function matchResolvedPlaceForSuggestion(
         best.dist <= 2.0 &&
         (second.dist > 5.0 || (best.dist <= 0.5 && second.dist >= Math.max(0.5, best.dist * 3)))
       ) {
-        return best.record;
+        return best.group.representative;
       }
       return undefined;
     }
@@ -361,11 +518,17 @@ export function matchResolvedPlaceForSuggestion(
     if (candidate.place_name && candidate.place_name.trim().length > 0) {
       return undefined;
     }
-    const proximityCandidates = resolvedPlaces.filter(
-      (r) => haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng) <= 0.15
+    const proximityCandidates = resolvedGroups.filter(
+      (group) =>
+        haversineMiles(
+          candidate.lat!,
+          candidate.lng!,
+          group.representative.lat,
+          group.representative.lng
+        ) <= 0.15
     );
     if (proximityCandidates.length === 1) {
-      return proximityCandidates[0];
+      return proximityCandidates[0].representative;
     }
   }
 

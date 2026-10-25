@@ -192,7 +192,7 @@ const FORBIDDEN_HOST_SUFFIXES = [
   '.traefik.me',
 ];
 
-const ALLOWED_EXTERNAL_PORTS = new Set(['', '80', '443', '8080', '8443']);
+const ALLOWED_EXTERNAL_PORTS = new Set(['', '80', '443']);
 
 /**
  * Validates and normalizes an external URL, rejecting private/internal networks,
@@ -544,6 +544,12 @@ export function htmlToReadableText(html: string): { title?: string; text: string
   return { title, text };
 }
 
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 /**
  * Dispatches an HTTP/HTTPS request using a pinned, pre-validated IP address to prevent DNS rebinding.
  */
@@ -564,12 +570,142 @@ export function requestPinnedUrl(
     }
 
     let settled = false;
-    const onAbort = () => {
-      if (settled) return;
+    let responseDelivered = false;
+    let streamDone = false;
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let incomingRef: http.IncomingMessage | null = null;
+    let decompressorRef: zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | null = null;
+    let bodyStreamRef: NodeJS.ReadableStream | null = null;
+    let reqRef: http.ClientRequest | null = null;
+
+    function finalizeOwnedResources(): void {
+      const decompressor = decompressorRef;
+      const incoming = incomingRef;
+      const request = reqRef;
+      if (decompressor && !decompressor.destroyed) {
+        decompressor.destroy();
+      }
+      if (incoming && !incoming.destroyed) {
+        incoming.destroy();
+      }
+      if (request && !request.destroyed) {
+        request.destroy();
+      }
+      // Keep error listeners attached: a stream can emit a late 'error' after destroy().
+      // The handlers are idempotent and see settled/streamDone, so late failures cannot crash.
+      if (bodyStreamRef) {
+        bodyStreamRef.removeListener('data', onData);
+        bodyStreamRef.removeListener('end', onEnd);
+        bodyStreamRef = null;
+      }
+      decompressorRef = null;
+      incomingRef = null;
+      reqRef = null;
+    }
+
+    function removeAbortListener(): void {
+      signal.removeEventListener('abort', onAbort);
+    }
+
+    function rejectResponse(err: Error): void {
+      if (settled) {
+        errorStream(err);
+        return;
+      }
       settled = true;
-      req.destroy(new Error('Request aborted'));
-      reject(new Error('Request aborted'));
-    };
+      streamDone = true;
+      removeAbortListener();
+      if (controllerRef) {
+        try {
+          controllerRef.error(err);
+        } catch {
+          // The stream controller may already be closed or errored.
+        }
+        controllerRef = null;
+      }
+      finalizeOwnedResources();
+      reject(err);
+    }
+
+    function errorStream(err: Error): void {
+      if (streamDone) {
+        finalizeOwnedResources();
+        return;
+      }
+      streamDone = true;
+      removeAbortListener();
+      if (controllerRef) {
+        try {
+          controllerRef.error(err);
+        } catch {
+          // The stream controller may already be closed or errored.
+        }
+        controllerRef = null;
+      }
+      finalizeOwnedResources();
+    }
+
+    function closeStream(): void {
+      if (streamDone) return;
+      streamDone = true;
+      removeAbortListener();
+      if (controllerRef) {
+        try {
+          controllerRef.close();
+        } catch {
+          // The stream controller may already be closed.
+        }
+        controllerRef = null;
+      }
+      finalizeOwnedResources();
+    }
+
+    function onAbort(): void {
+      const abortError = new Error('Request aborted');
+      if (!settled) {
+        rejectResponse(abortError);
+      } else if (responseDelivered) {
+        errorStream(abortError);
+      }
+    }
+
+    function onData(chunk: Buffer | Uint8Array): void {
+      if (streamDone || !controllerRef) return;
+      try {
+        controllerRef.enqueue(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
+      } catch (err: unknown) {
+        errorStream(new Error(`Failed to enqueue response body chunk: ${describeError(err)}`));
+      }
+    }
+
+    function onEnd(): void {
+      closeStream();
+    }
+
+    function onBodyError(err: Error): void {
+      if (!settled) {
+        rejectResponse(err);
+      } else {
+        errorStream(err);
+      }
+    }
+
+    function onIncomingError(err: Error): void {
+      if (!settled) {
+        rejectResponse(err);
+      } else {
+        errorStream(err);
+      }
+    }
+
+    function onRequestError(err: Error): void {
+      if (!settled) {
+        rejectResponse(err);
+      } else {
+        errorStream(err);
+      }
+    }
+
     signal.addEventListener('abort', onAbort, { once: true });
 
     const reqOptions: https.RequestOptions = {
@@ -620,86 +756,132 @@ export function requestPinnedUrl(
       },
     };
 
-    const req = transport.request(reqOptions, (incoming) => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener('abort', onAbort);
-
-      const resHeaders = new Headers();
-      for (const [key, val] of Object.entries(incoming.headers)) {
-        if (val === undefined) continue;
-        if (Array.isArray(val)) {
-          for (const item of val) {
-            resHeaders.append(key, item);
-          }
-        } else {
-          resHeaders.set(key, val);
+    let req: http.ClientRequest;
+    try {
+      req = transport.request(reqOptions, (incoming: http.IncomingMessage) => {
+        if (settled) {
+          incoming.on('error', onIncomingError);
+          if (!incoming.destroyed) incoming.destroy();
+          return;
         }
-      }
 
-      let bodyStream: NodeJS.ReadableStream = incoming;
-      const contentEncoding = (resHeaders.get('content-encoding') || '').toLowerCase().trim();
-      if (contentEncoding === 'gzip') {
-        const decompressor = zlib.createGunzip();
-        incoming.pipe(decompressor);
-        bodyStream = decompressor;
-        resHeaders.delete('content-encoding');
-      } else if (contentEncoding === 'deflate') {
-        const decompressor = zlib.createInflate();
-        incoming.pipe(decompressor);
-        bodyStream = decompressor;
-        resHeaders.delete('content-encoding');
-      } else if (contentEncoding === 'br') {
-        const decompressor = zlib.createBrotliDecompress();
-        incoming.pipe(decompressor);
-        bodyStream = decompressor;
-        resHeaders.delete('content-encoding');
-      }
+        incomingRef = incoming;
+        incoming.on('error', onIncomingError);
 
-      const webStream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          bodyStream.on('data', (chunk: Buffer | Uint8Array) => {
-            controller.enqueue(chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk));
-          });
-          bodyStream.on('end', () => {
-            try {
-              controller.close();
-            } catch {
-              // already closed
+        let resHeaders: Headers;
+        try {
+          resHeaders = new Headers();
+          for (const [key, val] of Object.entries(incoming.headers)) {
+            if (val === undefined) continue;
+            if (Array.isArray(val)) {
+              for (const item of val) {
+                resHeaders.append(key, item);
+              }
+            } else {
+              resHeaders.set(key, val);
             }
-          });
-          bodyStream.on('error', (err) => {
-            try {
-              controller.error(err);
-            } catch {
-              // already errored
-            }
-          });
-        },
-        cancel() {
-          if ('destroy' in bodyStream && typeof (bodyStream as { destroy?: () => void }).destroy === 'function') {
-            (bodyStream as { destroy: () => void }).destroy();
           }
-          incoming.destroy();
-          req.destroy();
-        },
+        } catch (err: unknown) {
+          rejectResponse(new Error(`Failed to construct response headers: ${describeError(err)}`));
+          return;
+        }
+
+        const status = incoming.statusCode;
+        if (typeof status !== 'number' || !Number.isInteger(status) || status < 200 || status > 599) {
+          rejectResponse(
+            new Error(
+              `Invalid HTTP response status from upstream: ${status === undefined ? 'undefined' : String(status)}`
+            )
+          );
+          return;
+        }
+
+        const statusText = typeof incoming.statusMessage === 'string' ? incoming.statusMessage : '';
+
+        // Null-body statuses cannot be paired with a ReadableStream in the Response constructor.
+        if (NULL_BODY_STATUSES.has(status)) {
+          let response: Response;
+          try {
+            response = new Response(null, { status, statusText, headers: resHeaders });
+          } catch (err: unknown) {
+            rejectResponse(new Error(`Failed to construct HTTP ${status} response: ${describeError(err)}`));
+            return;
+          }
+          settled = true;
+          responseDelivered = true;
+          streamDone = true;
+          removeAbortListener();
+          resolve(response);
+          finalizeOwnedResources();
+          return;
+        }
+
+        let bodyStream: NodeJS.ReadableStream = incoming;
+        const contentEncoding = (resHeaders.get('content-encoding') || '').toLowerCase().trim();
+        try {
+          if (contentEncoding === 'gzip') {
+            const decompressor = zlib.createGunzip();
+            decompressorRef = decompressor;
+            incoming.pipe(decompressor);
+            bodyStream = decompressor;
+            resHeaders.delete('content-encoding');
+          } else if (contentEncoding === 'deflate') {
+            const decompressor = zlib.createInflate();
+            decompressorRef = decompressor;
+            incoming.pipe(decompressor);
+            bodyStream = decompressor;
+            resHeaders.delete('content-encoding');
+          } else if (contentEncoding === 'br') {
+            const decompressor = zlib.createBrotliDecompress();
+            decompressorRef = decompressor;
+            incoming.pipe(decompressor);
+            bodyStream = decompressor;
+            resHeaders.delete('content-encoding');
+          }
+        } catch (err: unknown) {
+          rejectResponse(new Error(`Failed to initialize response decompressor: ${describeError(err)}`));
+          return;
+        }
+
+        bodyStreamRef = bodyStream;
+        let response: Response;
+        try {
+          const webStream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controllerRef = controller;
+              bodyStream.on('data', onData);
+              bodyStream.on('end', onEnd);
+              bodyStream.on('error', onBodyError);
+            },
+            cancel() {
+              if (streamDone) return;
+              streamDone = true;
+              removeAbortListener();
+              controllerRef = null;
+              finalizeOwnedResources();
+            },
+          });
+          response = new Response(webStream, {
+            status,
+            statusText,
+            headers: resHeaders,
+          });
+        } catch (err: unknown) {
+          rejectResponse(new Error(`Failed to construct HTTP ${status} response: ${describeError(err)}`));
+          return;
+        }
+
+        settled = true;
+        responseDelivered = true;
+        resolve(response);
       });
+      reqRef = req;
+    } catch (err: unknown) {
+      rejectResponse(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
 
-      resolve(
-        new Response(webStream, {
-          status: incoming.statusCode ?? 500,
-          statusText: incoming.statusMessage ?? '',
-          headers: resHeaders,
-        })
-      );
-    });
-
-    req.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener('abort', onAbort);
-      reject(err);
-    });
+    req.on('error', onRequestError);
 
     req.on('socket', (socket) => {
       socket.on('connect', () => {
@@ -713,7 +895,11 @@ export function requestPinnedUrl(
       });
     });
 
-    req.end();
+    try {
+      req.end();
+    } catch (err: unknown) {
+      rejectResponse(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 

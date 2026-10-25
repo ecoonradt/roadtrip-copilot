@@ -118,6 +118,7 @@ export async function simulateScheduleCascadeTool(
     if (hasCandLat !== hasCandLng) {
       throw new Error('Both "candidate_lat" and "candidate_lng" must be provided together when updating coordinates');
     }
+    let coordinatesRelocated = false;
     if (hasCandLat && hasCandLng) {
       if (
         typeof args.candidate_lat !== 'number' ||
@@ -131,8 +132,18 @@ export async function simulateScheduleCascadeTool(
       ) {
         throw new Error('Invalid candidate_lat/candidate_lng for action "update": must be finite numbers in [-90, 90] and [-180, 180]');
       }
-      existing.lat = Number((args.candidate_lat as number).toFixed(6));
-      existing.lng = Number((args.candidate_lng as number).toFixed(6));
+      const nextLat = Number((args.candidate_lat as number).toFixed(6));
+      const nextLng = Number((args.candidate_lng as number).toFixed(6));
+      coordinatesRelocated =
+        Math.abs(nextLat - existing.lat) >= 1e-6 || Math.abs(nextLng - existing.lng) >= 1e-6;
+      existing.lat = nextLat;
+      existing.lng = nextLng;
+    }
+    if (coordinatesRelocated) {
+      // The previous zone described the old coordinate. Resolve the zone from the new coordinates only
+      // when the stop actually moves; dwell-only, name-only, and identical-coordinate edits keep the
+      // explicit original zone (a stale zone must not shift local arrival clocks).
+      existing.timezone = detectTimezone(existing.lat, existing.lng);
     }
     if (typeof args.dwell_minutes === 'number') {
       existing.dwell_minutes = args.dwell_minutes;

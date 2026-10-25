@@ -30,7 +30,7 @@ roadtrip-copilot/
 │   │   │   ├── route_scout_cloud_architecture.md # Tier 1 Architectural Blueprint
 │   │   │   ├── WORKING_MODEL.md   # Project planning model, orchestrator-worker protocol & ADR rules
 │   │   │   ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
-│   │   │   ├── decisions/         # Standalone Architecture Decision Record (ADR) files
+│   │   │   ├── decisions/         # Standalone ADRs; 0012 defines verified place-evidence provenance
 │   │   │   └── plan/              # Rolling-wave planning directory
 │   │   │       ├── active/        # Single active Work Package (Tier 3)
 │   │   │       └── archive/       # Completed and retired Work Packages

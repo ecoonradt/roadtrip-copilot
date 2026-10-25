@@ -56,48 +56,78 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
       });
     }
 
-    try {
-      scoutService.validateProvider(preferredEngine);
-      await scoutService.resolveModelId(modelId, preferredEngine);
-    } catch (err: unknown) {
-      if (
-        err instanceof InvalidModelError ||
-        err instanceof UnknownAiProviderError ||
-        (err as { statusCode?: number })?.statusCode === 400
-      ) {
-        return reply.status(400).send({ error: (err as Error).message });
-      }
-      throw err;
-    }
-
     const abortController = new AbortController();
     const socket = request.raw.socket;
+    let chatClosed = Boolean(
+      reply.raw.destroyed ||
+      request.raw.socket?.destroyed ||
+      !request.raw.socket
+    );
+
     const onChatClose = () => {
+      chatClosed = true;
       abortController.abort();
     };
+
     reply.raw.on('close', onChatClose);
     socket?.on('close', onChatClose);
 
+    const isConnectionLost = () =>
+      chatClosed ||
+      abortController.signal.aborted ||
+      reply.raw.destroyed ||
+      Boolean(socket?.destroyed);
+
     try {
-      const response = await scoutService.chat(
-        { scope, messages, tripContext, sessionId, modelId },
-        { apiKey, preferredEngine, modelId, abortSignal: abortController.signal }
-      );
-      return reply.status(200).send(response);
-    } catch (err: unknown) {
-      if (abortController.signal.aborted) {
+      if (isConnectionLost()) {
         return;
       }
-      if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
-        return reply.status(400).send({ error: (err as Error).message });
+
+      try {
+        scoutService.validateProvider(preferredEngine);
+        await scoutService.resolveModelId(modelId, preferredEngine);
+      } catch (err: unknown) {
+        if (isConnectionLost()) {
+          return;
+        }
+        if (
+          err instanceof InvalidModelError ||
+          err instanceof UnknownAiProviderError ||
+          (err as { statusCode?: number })?.statusCode === 400
+        ) {
+          return reply.status(400).send({ error: (err as Error).message });
+        }
+        throw err;
       }
-      if (err instanceof MalformedAiResponseError) {
-        fastify.log.error({ err }, `AI provider returned an unusable Route Scout response: ${err.message}`);
-        return reply.status(502).send({ error: err.message });
+
+      if (isConnectionLost()) {
+        return;
       }
-      const message = err instanceof Error ? err.message : 'Route Scout error';
-      fastify.log.error({ err }, `Route Scout chat failed: ${message}`);
-      return reply.status(500).send({ error: message });
+
+      try {
+        const response = await scoutService.chat(
+          { scope, messages, tripContext, sessionId, modelId },
+          { apiKey, preferredEngine, modelId, abortSignal: abortController.signal }
+        );
+        if (isConnectionLost()) {
+          return;
+        }
+        return reply.status(200).send(response);
+      } catch (err: unknown) {
+        if (isConnectionLost()) {
+          return;
+        }
+        if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
+          return reply.status(400).send({ error: (err as Error).message });
+        }
+        if (err instanceof MalformedAiResponseError) {
+          fastify.log.error({ err }, `AI provider returned an unusable Route Scout response: ${err.message}`);
+          return reply.status(502).send({ error: err.message });
+        }
+        const message = err instanceof Error ? err.message : 'Route Scout error';
+        fastify.log.error({ err }, `Route Scout chat failed: ${message}`);
+        return reply.status(500).send({ error: message });
+      }
     } finally {
       reply.raw.removeListener('close', onChatClose);
       socket?.removeListener('close', onChatClose);
