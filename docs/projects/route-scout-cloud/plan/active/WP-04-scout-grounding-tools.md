@@ -210,7 +210,7 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
   - Sync living docs (`AGENTS.md`, `README.md`, `route-builder/AGENTS.md`, `route-builder/README.md`, `docs/reference/directory-layout.md`, `docs/README.md`).
   - Run `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`.
   - Push `feat/m4-scout-grounding-tools` and open green PR on GitHub.
-- [ ] **Step 7: M4 Consolidated Review Fixes & Unhappy-Path Regression Suite**
+- [x] **Step 7: M4 Consolidated Review Fixes & Unhappy-Path Regression Suite**
   - Add regression tests and apply focused fixes for all 8 reproduced findings:
     1. Bind URL validation to the actual socket connection on every hop (`read_url_content`), preserving `Host` and HTTPS SNI/certificate verification with bounded DNS resolution and cancellation.
     2. Replace residual tag regexes in `htmlToReadableText` with linear-time tag tokenization/scanning (`O(n)` on malformed generic tags and repeated `<`).
@@ -221,7 +221,7 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
     7. Match complete highway designators (`I-40` vs `I-405`, `US-89` vs `US-89A`, Interstate vs US vs State Route) before textual matching.
     8. Make matched place metadata (`place_name`, `address`) authoritative during hydration without overwriting with empty fields.
   - Update review governance rules (`AGENTS.md` and `WORKING_MODEL.md`) separating Contract-First implementation prompts from neutral, unprimed Gate 2B independent-review prompts.
-- [ ] **Step 8: Behavior-Preserving Decomposition of `scoutTools.ts` & Living Docs Sync**
+- [x] **Step 8: Behavior-Preserving Decomposition of `scoutTools.ts` & Living Docs Sync**
   - Extract cohesive modules under `route-builder/server/services/scoutTools/` (`types.ts`, `urlSafety.ts`, `geo.ts`, `scheduleSimulator.ts`, `corridorTools.ts`) while keeping `scoutTools.ts` as the compatible coordinator/facade.
   - Update `docs/reference/directory-layout.md` and `route-builder/AGENTS.md` for the final layout and verify with `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`.
 
@@ -267,10 +267,14 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
    * **Highway Designator Disambiguation & Bounded Audit Concurrency:** Required highway prefix compatibility (`US-89` vs `I-89` vs `AZ-89`) when matching `road_name` in `snap_to_highway_corridor`; bounded `audit_corridor_waypoints` concurrency (`MAX_AUDIT_CONCURRENCY = 4`, `MAX_AUDIT_WAYPOINTS = 50`) and enforced word-boundary regexes so `"Las Vegas"` never triggers fuel-brand warnings for `"gas"`.
    * **Defensive Suggestion Hydration & `delete_waypoint` Integrity:** Cloned suggestion objects in `hydrateSuggestionFromResolvedPlaces`, skipped cross-pollination when `suggestion.google_place_id` is already populated, restricted proximity matching (`<= 0.15` mi) strictly to `add_waypoint` on commercial stops (`meal`, `fuel`, `lodging`) with a single unambiguous candidate, protected `scenic_pull_off` and `scenic_drive_by` coordinates from commercial coordinate overwrites, and enforced authoritative `matchedWp` validation on `delete_waypoint` cards.
    * **Bedrock Tool Loop & CDK Guardrails:** Parsed `toolUse.inputJson` once per tool call with plain-object validation, capped parallel tool calls per iteration at `MAX_TOOLS_PER_ITERATION = 8`, redacted AWS ARNs and SSM parameter paths from model-facing tool error payloads, wired `AbortController` on non-streaming `/api/ai/scout/chat` disconnect, used functional state updates in `App.tsx` (`handleDeleteWaypoint` / `handleAddWaypointFromScout`), and removed ambient `process.env` secret baking from `infra/bin/infra.ts`.
+4. **M4 Consolidated Review Fixes & Module Decomposition (`server/services/scoutTools/`):**
+   * **Pinned External URL Transport (`urlSafety.ts`):** Bound `resolveValidatedUrlWithDns` to `requestPinnedUrl` (`node:http`/`node:https` with `agent: false`, custom `lookup` callback returning only already-validated IPs, socket `remoteAddress` check, and explicit `Host` + HTTPS `servername` SNI preservation across redirect hops) and replaced residual tag regexes in `htmlToReadableText` with linear-time scanning (`stripAndFormatHtmlTagsLinear`).
+   * **Multi-Branch Disambiguation, Authoritative Metadata & Scenic Anchor Protection (`geo.ts`, `scoutService.ts`, `googleMapsUrl.ts`, `RouteScoutDrawer.tsx`, `App.tsx`):** Shared `matchResolvedPlaceForSuggestion` and `isInTransitOrAnchorSuggestion` across coordinate backfill and hydration; enforced authoritative non-empty `place_name`/`address` replacement on matched physical stops; kept scenic drive-bys and route anchors strictly coordinate-only end-to-end through `waypoint_place_ids`.
+   * **Real OSRM Leg Routing in `simulate_schedule_cascade`, Full-Body Deadlines & Complete Highway Designators (`scheduleSimulator.ts`, `corridorTools.ts`, `scoutTools.ts`):** Routed changed schedule legs via `RouteService` while preserving unchanged legs; kept `fetchJsonWithTimeout` deadlines and `AbortSignal` active through full stream consumption with reader cancellation; parsed complete highway designators (`parseHighwayDesignators` / `matchesHighwayRoadName`) before textual matching; and decomposed `scoutTools.ts` into `server/services/scoutTools/{types,urlSafety,geo,scheduleSimulator,corridorTools}.ts`.
 
 ---
 
 ## 6. Next Session Handoff
 
-* **Where We Stopped:** M4 is code complete on `feat/m4-scout-grounding-tools` and has passed both Gate 2A (Orchestrator review) and Gate 2B (Claude Sonnet 5.5 adversarial review), plus all automated verification suites (`./scripts/ci_check.sh` and `npm run test:browser`).
+* **Where We Stopped:** M4 consolidated review fixes (Findings 1–8), regression tests (500 Vitest tests), review governance updates, and behavior-preserving `scoutTools/` module decomposition are complete on `feat/m4-scout-grounding-tools` and verified against `./scripts/ci_check.sh` and `npm run test:browser`. Live AWS deployment and live CloudFront verification remain blocked externally pending AWS Support account recovery.
 * **Next Step:** Once AWS Support restores account access, add `/roadtrip-copilot/google-places-api-key` and `/roadtrip-copilot/brave-search-api-key` `SecureString` parameters in AWS SSM Parameter Store (`us-east-2`), run `./scripts/deploy_cloud.sh` to deploy M3 + M4 to AWS, and complete the live CloudFront manual verification check.

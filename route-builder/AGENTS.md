@@ -109,7 +109,8 @@ route-builder/
 │   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk/S3 storage
 │   │   ├── placeId.ts          # Google Place ID validator & anti-hallucination guard
 │   │   ├── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
-│   │   └── scoutTools.ts       # 7-tool discovery & deterministic domain grounding library
+│   │   ├── scoutTools.ts       # 7-tool discovery & deterministic domain grounding facade & SSM secret lifecycle
+│   │   └── scoutTools/         # Modular grounding tool implementations (types, urlSafety, geo, scheduleSimulator, corridorTools)
 │   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
 ├── src/
 │   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator

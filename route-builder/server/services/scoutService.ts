@@ -17,14 +17,21 @@ import {
   SCOUT_TOOL_DECLARATIONS,
   ScoutToolLibrary,
   createTurnGroundingCache,
-  cleanPlaceName,
-  haversineMiles,
+  isInTransitOrAnchorSuggestion,
+  matchResolvedPlaceForSuggestion,
+  type PlaceMatchCandidate,
   type ResolvedPlaceRecord,
   type ScoutToolLibraryOptions,
   type TurnGroundingCache,
 } from './scoutTools.js';
 
-export { isValidGooglePlaceId, validateScoutPlaceId };
+export {
+  isValidGooglePlaceId,
+  validateScoutPlaceId,
+  isInTransitOrAnchorSuggestion,
+  matchResolvedPlaceForSuggestion,
+  type PlaceMatchCandidate,
+};
 
 /**
  * Builds the comprehensive domain prompt for Route Scout (pure road-trip domain, harness-agnostic).
@@ -307,198 +314,7 @@ export function separateThoughtAndReply(
   return { reply: sanitized };
 }
 
-/**
- * Returns true if a suggestion represents an in-transit scenic drive-by or route-forcing anchor
- * rather than a physical stopping destination.
- */
-export function isInTransitOrAnchorSuggestion(
-  sug: Pick<ScoutSuggestion, 'type' | 'dwell_minutes' | 'is_route_anchor'>
-): boolean {
-  if (sug.type === 'scenic_drive_by' || sug.is_route_anchor === true) {
-    return true;
-  }
-  if (
-    sug.dwell_minutes === 0 &&
-    sug.type !== 'lodging' &&
-    sug.type !== 'destination' &&
-    sug.type !== 'origin'
-  ) {
-    return true;
-  }
-  return false;
-}
 
-export interface PlaceMatchCandidate {
-  action: 'add_waypoint' | 'update_waypoint';
-  name?: string;
-  place_name?: string;
-  address?: string;
-  google_place_id?: string;
-  type?: string;
-  dwell_minutes?: number;
-  is_route_anchor?: boolean;
-  lat?: number;
-  lng?: number;
-}
-
-const GENERIC_STOP_WORDS = new Set([
-  'stop', 'fuel', 'gas', 'station', 'service', 'center', 'travel', 'meal',
-  'lunch', 'dinner', 'breakfast', 'cafe', 'restaurant', 'diner', 'hotel',
-  'motel', 'inn', 'lodge', 'lodging', 'resort', 'scenic', 'overlook',
-  'vista', 'view', 'point', 'pull', 'off', 'byway', 'the', 'and', 'for',
-  'at', 'in', 'on', 'of', 'by', 'to', 'near', 'from', 'exit', 'hwy',
-  'highway', 'route', 'st', 'street', 'ave', 'avenue', 'rd', 'road',
-  'blvd', 'dr', 'drive', 'ln', 'way', 'az', 'ut', 'ca', 'nv', 'nm',
-  'co', 'tx', 'us', 'morning', 'afternoon', 'evening', 'night', 'pit',
-  'quick', 'break', 'rest', 'snack', 'coffee', 'waypoint', 'stopover',
-  'detour', 'option', 'recommended',
-]);
-
-/**
- * Matches and disambiguates a candidate waypoint against grounded resolved places.
- */
-export function matchResolvedPlaceForSuggestion(
-  candidate: PlaceMatchCandidate,
-  resolvedPlaces?: ResolvedPlaceRecord[]
-): ResolvedPlaceRecord | undefined {
-  if (!resolvedPlaces || resolvedPlaces.length === 0) {
-    return undefined;
-  }
-
-  // 2. Exact google_place_id match
-  if (candidate.google_place_id && candidate.google_place_id.trim().length > 0) {
-    return resolvedPlaces.find((r) => r.google_place_id === candidate.google_place_id);
-  }
-
-  // 3. Normalized Name Matching & Multi-Branch Disambiguation
-  const sugCleanName = cleanPlaceName(candidate.place_name || candidate.name || '').toLowerCase();
-  let nameCandidates: ResolvedPlaceRecord[] = [];
-
-  if (sugCleanName.length > 0) {
-    const exactMatches = resolvedPlaces.filter((r) => {
-      const rPlace = r.place_name.toLowerCase();
-      const rDisplay = cleanPlaceName(r.display_name).toLowerCase();
-      return (
-        (rPlace.length > 0 && rPlace === sugCleanName) ||
-        (rDisplay.length > 0 && rDisplay === sugCleanName)
-      );
-    });
-
-    if (exactMatches.length > 0) {
-      nameCandidates = exactMatches;
-    } else if (sugCleanName.length >= 4) {
-      nameCandidates = resolvedPlaces.filter((r) => {
-        const rPlace = r.place_name.toLowerCase();
-        return (
-          rPlace.length >= 4 &&
-          (rPlace.includes(sugCleanName) || sugCleanName.includes(rPlace))
-        );
-      });
-    }
-  }
-
-  // Distinguishing qualifier/address tokens
-  const rawQualifierText = `${candidate.name || ''} ${candidate.address || ''}`.toLowerCase();
-  const nameTokens = new Set(sugCleanName.split(/[^a-z0-9]+/).filter(Boolean));
-  const allTokens = rawQualifierText.split(/[^a-z0-9]+/).filter(Boolean);
-  const qualifierTokens = Array.from(
-    new Set(
-      allTokens.filter((token) => {
-        if (nameTokens.has(token)) return false;
-        if (GENERIC_STOP_WORDS.has(token)) return false;
-        const isNumeric = /^\d+$/.test(token);
-        return token.length >= 3 || (isNumeric && token.length >= 2);
-      })
-    )
-  );
-
-  const hasCoords =
-    typeof candidate.lat === 'number' &&
-    Number.isFinite(candidate.lat) &&
-    typeof candidate.lng === 'number' &&
-    Number.isFinite(candidate.lng);
-
-  if (nameCandidates.length > 0) {
-    let geoCompatible = hasCoords
-      ? nameCandidates.filter(
-          (r) => haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng) <= 10
-        )
-      : [...nameCandidates];
-
-    if (geoCompatible.length === 0) {
-      return undefined;
-    }
-
-    if (qualifierTokens.length > 0) {
-      const scored = geoCompatible.map((r) => {
-        const recordText = `${r.display_name} ${r.address} ${r.query}`.toLowerCase();
-        const score = qualifierTokens.filter((t) => new RegExp(`\\b${t}\\b`).test(recordText)).length;
-        return { record: r, score };
-      });
-      const maxScore = Math.max(0, ...scored.map((s) => s.score));
-      if (maxScore === 0) {
-        // Explicit qualifier/address/city tokens on the suggestion do not match any candidate record -> do not guess!
-        return undefined;
-      }
-      const bestTokenMatches = scored.filter((s) => s.score === maxScore).map((s) => s.record);
-      if (bestTokenMatches.length === 1) {
-        return bestTokenMatches[0];
-      }
-      geoCompatible = bestTokenMatches;
-    }
-
-    if (geoCompatible.length === 1) {
-      return geoCompatible[0];
-    }
-
-    if (geoCompatible.length > 1) {
-      if (!hasCoords) {
-        return undefined;
-      }
-      const sorted = geoCompatible
-        .map((r) => ({
-          record: r,
-          dist: haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng),
-        }))
-        .sort((a, b) => a.dist - b.dist);
-
-      const best = sorted[0];
-      const second = sorted[1];
-      if (
-        best.dist <= 2.0 &&
-        (second.dist > 5.0 || (best.dist <= 0.5 && second.dist >= Math.max(0.5, best.dist * 3)))
-      ) {
-        return best.record;
-      }
-      return undefined;
-    }
-  }
-
-  // 4. Proximity Fallback (<= 0.15 miles)
-  if (
-    nameCandidates.length === 0 &&
-    hasCoords &&
-    candidate.action === 'add_waypoint' &&
-    (candidate.type === 'meal' || candidate.type === 'fuel' || candidate.type === 'lodging') &&
-    !isInTransitOrAnchorSuggestion({
-      type: candidate.type || '',
-      dwell_minutes: candidate.dwell_minutes,
-      is_route_anchor: candidate.is_route_anchor,
-    })
-  ) {
-    if (candidate.place_name && candidate.place_name.trim().length > 0) {
-      return undefined;
-    }
-    const proximityCandidates = resolvedPlaces.filter(
-      (r) => haversineMiles(candidate.lat!, candidate.lng!, r.lat, r.lng) <= 0.15
-    );
-    if (proximityCandidates.length === 1) {
-      return proximityCandidates[0];
-    }
-  }
-
-  return undefined;
-}
 
 /**
  * Hydrates an AI suggestion with verified establishment names, addresses,
