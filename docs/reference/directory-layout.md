@@ -11,12 +11,16 @@ roadtrip-copilot/
 │   └── workflows/
 │       ├── ci.yml             # Pull request and branch verification workflow
 │       └── deploy.yml         # Main branch and manual workflow_dispatch deployment
-├── .opencode/                 # OpenCode harness adapter config, agent profiles & commands
+├── .opencode/                 # OpenCode harness config, profiles, commands & reusable skills
 │   ├── opencode.json          # Project configuration declaring harness rules
+│   ├── README.md              # /review-loop usage, model policy & portability
 │   ├── rules/
 │   │   └── harness.md         # OpenCode delegation mechanics (subagent)
-│   ├── agents/                # Configured worker profiles (impl, infra, test, reviewer)
-│   └── commands/              # Workflow commands (kickoff, wrapup)
+│   ├── agents/                # Worker profiles; review-fix-worker pins DeepSeek V4.1 Flash Free
+│   ├── commands/              # Workflow commands (kickoff, wrapup, review-loop)
+│   └── skills/
+│       └── review-loop/
+│           └── SKILL.md       # Model-independent main review + bounded DeepSeek fix loop
 ├── AGENTS.md                  # Shared developer and agent handbook
 ├── README.md                  # Project overview and setup guide
 ├── itineraries/               # Workspace itineraries directory (git-ignored custom routes)

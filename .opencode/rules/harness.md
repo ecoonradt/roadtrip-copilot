@@ -7,7 +7,7 @@ OpenCode-only. Antigravity does not read `.opencode/`.
 * `agent` — a subagent id. Built-ins: `general` (broad tools; can write files and run shell, but
   CANNOT spawn subagents) and `explore` (read-only search/read).
 * `prompt` — the full task. Workers have fresh context but DO inherit AGENTS.md and this file.
-  * **Implementation workers (`impl-worker` / `test-worker`):** Every implementation prompt MUST follow Gate 1 Contract-First rules (exact file paths, literal TypeScript/Kotlin interfaces, explicit concurrency/cleanup invariants, and negative constraints).
+  * **Implementation workers (`impl-worker` / `infra-worker` / `test-author` / `review-fix-worker`):** Every implementation prompt MUST follow Gate 1 Contract-First rules (exact file paths, literal TypeScript/Kotlin interfaces, explicit concurrency/cleanup invariants, and negative constraints).
   * **Independent reviewers (`diff-reviewer`, Gate 2B):** Use a short neutral prompt (diff/base to inspect, objective/spec and architectural-rule pointers, and a unique `tmp/` findings path if writing incremental output). Never prime an independent reviewer with a prior fix list, earlier findings, or a targeted checklist.
 * `model` — `providerID/modelID`, optional `#variant`. Prefer the model already bound to a
   configured worker profile instead of naming one inline.
@@ -17,6 +17,9 @@ OpenCode-only. Antigravity does not read `.opencode/`.
 ## Prefer the configured worker profiles
 `.opencode/agents/*.md` binds each role's model, permissions, and step budget. Say
 "use the `impl-worker` subagent" rather than naming a model in the prompt.
+
+## Reusable review loop
+`/review-loop [target/constraints]` loads the `review-loop` skill in the current main session; it does not select a main agent or model. The main session remains the reviewer/orchestrator and uses the `review-fix-worker` profile, pinned to **DeepSeek V4.1 Flash Free**, only for bounded fixes. Model/capability checks fail closed to reporting-only, including when the main and worker use the same underlying model. See [`.opencode/README.md`](../README.md) for invocation and portability.
 
 ## Hard limits
 * No nesting, ever. `general` cannot launch subagents, and the worker profiles here also carry
