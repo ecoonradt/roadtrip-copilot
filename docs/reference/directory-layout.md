@@ -81,7 +81,7 @@ roadtrip-copilot/
 │   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
 │   │   ├── hooks/             # Fastify preHandler hooks (authGuard.ts dual-mode OIDC + allowlist gate)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
-│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, aiRegistry, bedrockService, deviceService, itineraryStorageService, placeId, scoutService, scoutTools)
+│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, aiRegistry, bedrockService, deviceService, itineraryStorageService, placeId, scoutService, scoutTools + scoutTools/ modules)
 │   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
