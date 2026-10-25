@@ -48,6 +48,7 @@ flowchart TD
 * **Agent Rule:** **Do not treat archived documents as active roadmaps or source-of-truth specifications.**
 * **Key Files:**
   * **[`archive/route_builder_research_and_architecture.md`](archive/route_builder_research_and_architecture.md):** Original research proposal evaluating Web vs. Native Android vs. CLI for the Route Builder. The Web Studio is now in production in `route-builder/` with 200+ passing tests.
+  * **[`archive/opencode-review-loop.md`](archive/opencode-review-loop.md):** Completed setup/validation record for the reusable review loop. Current invocation instructions live in [`.opencode/README.md`](../.opencode/README.md).
 
 ### 5. [`IDEAS.md`](IDEAS.md) — Uncommitted Backlog & Incubator
 * **Definition:** The holding ground for feature ideas, future enhancements, and user suggestions that have not yet been scoped into active projects or tactical tasks.
