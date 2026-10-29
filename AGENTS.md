@@ -201,7 +201,7 @@ Where this guidance conflicts with the project's own instructions, the project's
 - **IAM & Security Best Practices:**
   - Use least-privilege IAM execution roles for Lambda and CI deployers.
   - Never hardcode credentials; resolve runtime secrets via SSM Parameter Store under `/roadtrip-copilot/*`.
-  - Machine deployments currently use a scoped IAM deployer user; keyless GitHub Actions OIDC federation is tracked in Issue #7.
+  - Machine deployments use keyless GitHub Actions OIDC federation assuming the scoped `roadtrip-copilot-github-actions-deploy` IAM role via `token.actions.githubusercontent.com`.
 
 ### Help level
 

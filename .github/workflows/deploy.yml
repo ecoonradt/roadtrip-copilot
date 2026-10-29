@@ -46,25 +46,21 @@ jobs:
             echo "::error::GitHub Actions variable 'AWS_REGION' is not set. This must be set to your primary AWS Region (e.g. us-east-2)." >&2
             exit 1
           fi
-          if [ -z "${{ vars.AWS_ROLE_ARN }}" ] && [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-            echo "::error::Neither 'vars.AWS_ROLE_ARN' nor 'secrets.AWS_ACCESS_KEY_ID' is set. At least one authentication mechanism is required for deployment." >&2
+          if [ -z "${{ vars.AWS_ROLE_ARN }}" ]; then
+            echo "::error::GitHub Actions variable 'AWS_ROLE_ARN' is not set. This must be set to the deployment role ARN (e.g. arn:aws:iam::597787441620:role/roadtrip-copilot-github-actions-deploy)." >&2
             exit 1
           fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-skip-session-tagging: true
 
       - name: Deploy to AWS
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
           GITHUB_REPO: ${{ github.repository }}
-          GITHUB_OIDC_PROVIDER_ARN: ${{ vars.GITHUB_OIDC_PROVIDER_ARN }}
           ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET }}
           ALLOWED_HOSTS: ${{ vars.ALLOWED_HOSTS }}
           PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}

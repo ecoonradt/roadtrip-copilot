@@ -53,6 +53,5 @@ Chosen Option: **Option 1 (Scoped IAM CI Deployer in CDK with Optional External 
 ## 6. Addendum (2026-10-23): Activation of Advanced Features & Keyless OIDC Roadmap
 On 2026-10-23, the AWS account upgraded to Paid and activated Advanced Features, transitioning to a standard AWS account model with full AWS Organizations capabilities. This permanently lifted the `DenyIAMRestrictedActions` SCP that originally blocked `iam:CreateOpenIDConnectProvider`.
 
-* **Current Status:** Existing scoped IAM machine user credentials (`roadtrip-copilot-github-actions-deployer`) continue to operate without disruption.
-* **Keyless OIDC Migration:** Tracked under GitHub Issue [#7](https://github.com/ecoonradt/roadtrip-copilot/issues/7) as scheduled technical debt cleanup to migrate CI/CD authentication to native GitHub Actions OIDC federation (`token.actions.githubusercontent.com`).
+* **Current Status (Resolved):** Migrated to keyless GitHub Actions OIDC federation ([GitHub Issue #7](https://github.com/ecoonradt/roadtrip-copilot/issues/7)). `RoadtripCopilotCloudStack` configures `roadtrip-copilot-github-actions-deploy` with `sts:AssumeRoleWithWebIdentity` federated from `token.actions.githubusercontent.com` scoped to `repo:ecoonradt/roadtrip-copilot:*`. The static IAM user `roadtrip-copilot-github-actions-deployer` has been deleted from the CDK stack, and `.github/workflows/deploy.yml` authenticates keylessly with short-lived OIDC tokens.
 

@@ -45,7 +45,6 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
   public readonly functionUrl: lambda.FunctionUrl;
   public readonly distribution: cloudfront.Distribution;
   public readonly apiForwardedHostFunction: cloudfront.Function;
-  public readonly githubActionsUser?: iam.User;
   public readonly githubActionsRole?: iam.Role;
 
   constructor(scope: Construct, id: string, props?: RoadtripCopilotCloudStackProps) {
@@ -262,69 +261,33 @@ function handler(event) {
       },
     });
 
-    // 6. GitHubActionsDeployRole & DeployUser (IAM Deployer compliant with AWS Project SCPs)
+    // 6. GitHubActionsDeployRole (Keyless IAM Deployer via GitHub Actions OIDC)
     const githubRepo = props?.githubRepo ?? 'ecoonradt/roadtrip-copilot';
     if (githubRepo) {
-      let githubActionsRole: iam.Role;
+      const oidcProviderArn =
+        props?.githubOidcProviderArn ??
+        `arn:${cdk.Aws.PARTITION}:iam::${cdk.Aws.ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com`;
 
-      if (props?.githubOidcProviderArn) {
-        // Opt-in external OIDC Provider (e.g. pre-existing or advanced AWS project)
-        const oidcProvider = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
-          this,
-          'GitHubOidcProvider',
-          props.githubOidcProviderArn,
-        );
+      const oidcProvider = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+        this,
+        'GitHubOidcProvider',
+        oidcProviderArn,
+      );
 
-        githubActionsRole = new iam.Role(this, 'GitHubActionsDeployRole', {
-          roleName: 'roadtrip-copilot-github-actions-deploy',
-          assumedBy: new iam.WebIdentityPrincipal(oidcProvider.openIdConnectProviderArn, {
-            StringEquals: {
-              'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-            },
-            StringLike: {
-              'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:*`,
-            },
-          }),
-        });
-      } else {
-        // Default for AWS Projects: Dedicated deployer user + assume role (avoids iam:CreateOpenIDConnectProvider blocked by DenyIAMRestrictedActions SCP)
-        const githubActionsUser = new iam.User(this, 'GitHubActionsDeployUser', {
-          userName: 'roadtrip-copilot-github-actions-deployer',
-        });
-
-        githubActionsRole = new iam.Role(this, 'GitHubActionsDeployRole', {
-          roleName: 'roadtrip-copilot-github-actions-deploy',
-          assumedBy: new iam.AccountRootPrincipal().withConditions({
-            StringEquals: { 'aws:PrincipalArn': githubActionsUser.userArn },
-          }),
-        });
-
-        githubActionsRole.grantAssumeRole(githubActionsUser);
-
-        // Authorize session tagging for CI role assumption
-        githubActionsRole.assumeRolePolicy?.addStatements(
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            actions: ['sts:TagSession'],
-            principals: [new iam.AccountRootPrincipal()],
-            conditions: {
-              StringEquals: { 'aws:PrincipalArn': githubActionsUser.userArn },
-            },
-          }),
-        );
-
-        githubActionsUser.addToPolicy(
-          new iam.PolicyStatement({
-            actions: ['sts:TagSession'],
-            resources: [githubActionsRole.roleArn],
-          }),
-        );
-
-        this.githubActionsUser = githubActionsUser;
-      }
+      const githubActionsRole = new iam.Role(this, 'GitHubActionsDeployRole', {
+        roleName: 'roadtrip-copilot-github-actions-deploy',
+        assumedBy: new iam.WebIdentityPrincipal(oidcProvider.openIdConnectProviderArn, {
+          StringEquals: {
+            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          },
+          StringLike: {
+            'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:*`,
+          },
+        }),
+      });
 
       // Attach least-privilege deployment permissions
-      const attachDeployPermissions = (target: iam.Role | iam.User) => {
+      const attachDeployPermissions = (target: iam.Role) => {
         target.addToPolicy(
           new iam.PolicyStatement({
             actions: ['sts:AssumeRole', 'sts:TagSession'],
@@ -389,9 +352,6 @@ function handler(event) {
       };
 
       attachDeployPermissions(githubActionsRole);
-      if (this.githubActionsUser) {
-        attachDeployPermissions(this.githubActionsUser);
-      }
 
       this.githubActionsRole = githubActionsRole;
     }
@@ -421,13 +381,6 @@ function handler(event) {
       value: this.functionUrl.url,
       description: 'The Fastify Lambda function URL',
     });
-
-    if (this.githubActionsUser) {
-      new cdk.CfnOutput(this, 'GitHubActionsUserName', {
-        value: this.githubActionsUser.userName,
-        description: 'The GitHub Actions deploy IAM user name',
-      });
-    }
 
     if (this.githubActionsRole) {
       new cdk.CfnOutput(this, 'GitHubActionsRoleArn', {

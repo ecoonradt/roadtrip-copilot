@@ -494,31 +494,34 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
-  it('provisions scoped IAM user and role for GitHub Actions deployment without OIDC provider', () => {
+  it('provisions keyless IAM role for GitHub Actions deployment via OIDC', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
 
-    // Never triggers iam:CreateOpenIDConnectProvider
+    // Never triggers Custom::AWSCDKOpenIdConnectProvider
     template.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 0);
 
-    // Provisions dedicated IAM machine user
-    template.hasResourceProperties('AWS::IAM::User', {
-      UserName: 'roadtrip-copilot-github-actions-deployer',
-    });
+    // No static IAM machine user
+    template.resourceCountIs('AWS::IAM::User', 0);
 
-    // Provisions deployer IAM role
+    // Provisions deployer IAM role with WebIdentity principal
     template.hasResourceProperties('AWS::IAM::Role', {
       RoleName: 'roadtrip-copilot-github-actions-deploy',
-    });
-
-    // Authorizes sts:AssumeRole and sts:TagSession
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
+      AssumeRolePolicyDocument: {
+        Statement: [
           Match.objectLike({
-            Action: ['sts:AssumeRole', 'sts:TagSession'],
+            Action: 'sts:AssumeRoleWithWebIdentity',
+            Effect: 'Allow',
+            Condition: {
+              StringEquals: {
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+              },
+              StringLike: {
+                'token.actions.githubusercontent.com:sub': 'repo:ecoonradt/roadtrip-copilot:*',
+              },
+            },
           }),
-        ]),
+        ],
       },
     });
   });
@@ -589,7 +592,7 @@ describe('RoadtripCopilotCloudStack', () => {
     expect(outputKeys).toContain('AppDataBucketName');
     expect(outputKeys).toContain('LambdaFunctionUrl');
     expect(outputKeys).toContain('GitHubActionsRoleArn');
-    expect(outputKeys).toContain('GitHubActionsUserName');
+    expect(outputKeys).not.toContain('GitHubActionsUserName');
   });
 
   it('uses existing OIDC provider when githubOidcProviderArn is specified', () => {
