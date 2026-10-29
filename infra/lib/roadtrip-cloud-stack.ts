@@ -292,6 +292,9 @@ function handler(event) {
         }),
       });
 
+      // Retain the IAM role when decoupled from CloudFormation to avoid deleting CI/CD deploy credentials
+      githubActionsRole.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+
       // Attach least-privilege deployment permissions
       const attachDeployPermissions = (target: iam.Role) => {
         target.addToPolicy(

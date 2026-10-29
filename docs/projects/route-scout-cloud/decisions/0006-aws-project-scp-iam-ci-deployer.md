@@ -53,5 +53,10 @@ Chosen Option: **Option 1 (Scoped IAM CI Deployer in CDK with Optional External 
 ## 6. Addendum (2026-10-23): Activation of Advanced Features & Keyless OIDC Roadmap
 On 2026-10-23, the AWS account upgraded to Paid and activated Advanced Features, transitioning to a standard AWS account model with full AWS Organizations capabilities. This permanently lifted the `DenyIAMRestrictedActions` SCP that originally blocked `iam:CreateOpenIDConnectProvider`.
 
-* **Current Status (Resolved):** Migrated to keyless GitHub Actions OIDC federation ([GitHub Issue #7](https://github.com/ecoonradt/roadtrip-copilot/issues/7)). `RoadtripCopilotCloudStack` configures `roadtrip-copilot-github-actions-deploy` with `sts:AssumeRoleWithWebIdentity` federated from `token.actions.githubusercontent.com` scoped to `repo:ecoonradt/roadtrip-copilot:*`. The static IAM user `roadtrip-copilot-github-actions-deployer` has been deleted from the CDK stack, and `.github/workflows/deploy.yml` authenticates keylessly with short-lived OIDC tokens.
+* **Current Status (Resolved):** Migrated to keyless GitHub Actions OIDC federation ([GitHub Issue #7](https://github.com/ecoonradt/roadtrip-copilot/issues/7)). 
+  * The static IAM user `roadtrip-copilot-github-actions-deployer` has been deleted from AWS, and `.github/workflows/deploy.yml` authenticates keylessly with short-lived OIDC tokens.
+  * Static GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) are deprecated and removed.
+  * Day-0 bootstrapping for new AWS environments is managed via `scripts/bootstrap_ci_oidc.sh`, which provisions the OpenID Connect Provider (`token.actions.githubusercontent.com`) and the deployment IAM role (`roadtrip-copilot-github-actions-deploy`) with dual-format GitHub subject matching (`repo:org/repo:*` and `repo:owner@id/repo@id:*`).
+  * In `RoadtripCopilotCloudStack`, `GitHubActionsDeployRole` is marked with `applyRemovalPolicy(cdk.RemovalPolicy.RETAIN)` to prevent CloudFormation from deleting CI/CD deploy credentials during stack lifecycle decoupling.
+
 

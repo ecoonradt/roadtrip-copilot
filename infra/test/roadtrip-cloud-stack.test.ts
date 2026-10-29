@@ -504,27 +504,31 @@ describe('RoadtripCopilotCloudStack', () => {
     // No static IAM machine user
     template.resourceCountIs('AWS::IAM::User', 0);
 
-    // Provisions deployer IAM role with WebIdentity principal
-    template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'roadtrip-copilot-github-actions-deploy',
-      AssumeRolePolicyDocument: {
-        Statement: [
-          Match.objectLike({
-            Action: 'sts:AssumeRoleWithWebIdentity',
-            Effect: 'Allow',
-            Condition: {
-              StringEquals: {
-                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+    // Provisions deployer IAM role with WebIdentity principal and Retain deletion policy
+    template.hasResource('AWS::IAM::Role', {
+      DeletionPolicy: 'Retain',
+      UpdateReplacePolicy: 'Retain',
+      Properties: {
+        RoleName: 'roadtrip-copilot-github-actions-deploy',
+        AssumeRolePolicyDocument: {
+          Statement: [
+            Match.objectLike({
+              Action: 'sts:AssumeRoleWithWebIdentity',
+              Effect: 'Allow',
+              Condition: {
+                StringEquals: {
+                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+                },
+                StringLike: {
+                  'token.actions.githubusercontent.com:sub': [
+                    'repo:ecoonradt/roadtrip-copilot:*',
+                    'repo:ecoonradt@*/roadtrip-copilot@*:*',
+                  ],
+                },
               },
-              StringLike: {
-                'token.actions.githubusercontent.com:sub': [
-                  'repo:ecoonradt/roadtrip-copilot:*',
-                  'repo:ecoonradt@*/roadtrip-copilot@*:*',
-                ],
-              },
-            },
-          }),
-        ],
+            }),
+          ],
+        },
       },
     });
   });
