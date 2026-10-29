@@ -22,6 +22,7 @@ const githubRepo =
 
 const githubOidcProviderArn =
   (app.node.tryGetContext('githubOidcProviderArn') as string | undefined) ||
+  process.env.AWS_OIDC_PROVIDER_ARN ||
   process.env.GITHUB_OIDC_PROVIDER_ARN;
 
 const authEnabled =
