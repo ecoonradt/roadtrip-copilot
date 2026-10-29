@@ -3,7 +3,7 @@
 * **Date:** 2026-10-25
 * **Status:** Accepted
 * **Deciders:** GPT-6.1 Sol, within the approved M4 review-remediation scope
-* **Related Work Package:** [`WP-04`](../plan/active/WP-04-scout-grounding-tools.md)
+* **Related Work Package:** [`WP-04`](../plan/archive/WP-04-scout-grounding-tools.md)
 
 ## 1. Context & Problem Statement
 

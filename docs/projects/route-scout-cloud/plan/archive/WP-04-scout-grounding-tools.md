@@ -1,7 +1,7 @@
 # WP-04: Discovery + Deterministic Domain Grounding Tool Library
 
 * **Milestone:** Milestone 4 (M4) — Discovery + Deterministic Domain Grounding Tool Library
-* **Status:** Completed (Live Bedrock Invocation Pending AWS Support Case 179276529500150)
+* **Status:** Code Complete, Live Verification Pending (AWS Support Case 179276529500150)
 * **Branch:** `feat/m4-scout-grounding-tools` (ready for merge)
 * **Governing Documents:**
   * Architecture Blueprint: [`route_scout_cloud_architecture.md`](../../route_scout_cloud_architecture.md)
