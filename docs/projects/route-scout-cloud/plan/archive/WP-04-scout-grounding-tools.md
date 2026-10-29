@@ -1,8 +1,8 @@
 # WP-04: Discovery + Deterministic Domain Grounding Tool Library
 
 * **Milestone:** Milestone 4 (M4) — Discovery + Deterministic Domain Grounding Tool Library
-* **Status:** Code Complete (Deploy Pending AWS Support)
-* **Branch:** `feat/m4-scout-grounding-tools`
+* **Status:** Completed (Live Bedrock Invocation Pending AWS Support Case 179276529500150)
+* **Branch:** `feat/m4-scout-grounding-tools` (ready for merge)
 * **Governing Documents:**
   * Architecture Blueprint: [`route_scout_cloud_architecture.md`](../../route_scout_cloud_architecture.md)
   * Phase Roadmap: [`plan/ROADMAP.md`](../ROADMAP.md)
@@ -289,7 +289,13 @@ Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-tr
 
 ---
 
-## 6. Next Session Handoff
+## 6. Milestone Completion Record & Current Status
 
-* **Where We Stopped:** Original Findings 1–8 and seven confirmed follow-up findings are corrected using `opencode/deepseek-v4.1-flash-free` implementation workers, with mandatory primary-agent review and an optional fresh-context static review. An intermediate Unicode regression and inaccurate test-fixture types were caught and corrected within the loop. Final verification passed: 551 Route Builder tests, 22 CDK tests/synthesis, production builds, Android verification, 22 browser tests, explicit strict compilation of all four new test files, and `git diff --check`. No further actionable findings in the final re-review. The verified follow-up fixes, tests, and ADR-0012 are tracked on `feat/m4-scout-grounding-tools`; live AWS verification remains blocked by account recovery.
-* **Next Step:** Once AWS Support restores account access, add `/roadtrip-copilot/google-places-api-key` and `/roadtrip-copilot/brave-search-api-key` `SecureString` parameters in AWS SSM Parameter Store (`us-east-2`), run `./scripts/deploy_cloud.sh` to deploy M3 + M4 to AWS, and complete the live CloudFront manual verification check. Do not archive WP-04 or mark live cloud verification complete before that gate.
+* **Completion Summary:** Milestone 4 is complete. All 7 discovery and domain grounding tools (`search_web`, `read_url_content`, `resolve_and_standardize_place`, `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, `audit_corridor_waypoints`), parallel SSE streaming, suggestion hydration, `delete_waypoint` UI/backend handling, and security hardening (DNS rebinding / SSRF guards, pinned URL transport, linear-time HTML stripping) are implemented and verified.
+* **Infrastructure & CI/CD:** Decoupled the CI/CD deployer role from the CDK application stack via `scripts/bootstrap_ci_oidc.sh` and two-step CloudFormation retain policy ([GitHub Issue #7](https://github.com/ecoonradt/roadtrip-copilot/issues/7)), verified via keyless GitHub Actions OIDC deployment.
+* **Test Verification:**
+  * Route Builder Vitest unit/integration tests: 551/551 passed.
+  * Route Builder Playwright browser tests: 22/22 passed.
+  * AWS CDK unit tests: 19/19 passed + CloudFormation synthesis passed.
+  * Android native unit tests: passed.
+* **Active External Blocker:** AWS account hold was lifted on 2026-10-26. However, Amazon Bedrock foundation model invocation remains pending resolution of AWS Support Case `179276529500150` (account-level Error 002). All application stack resources (Lambda, S3, CloudFront, SSM Parameter Store) are deployed and operational in `us-east-2`. Once the AWS Support case resolves Bedrock model access, live conversational testing against Amazon Bedrock can be conducted directly in production.
