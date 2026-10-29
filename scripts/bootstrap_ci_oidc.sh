@@ -50,11 +50,10 @@ if aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_PR
   echo "✓ GitHub OIDC Provider already exists."
 else
   echo "Creating GitHub OIDC Provider..."
-  # Standard GitHub Actions thumbprints
+  # Thumbprint omitted: AWS validates GitHub's certificate via its trusted CA library.
   aws iam create-open-id-connect-provider \
     --url "https://${OIDC_PROVIDER_URL}" \
-    --client-id-list "sts.amazonaws.com" \
-    --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aea1" "1c587610272c7a0328ff488e00248070b181fed"
+    --client-id-list "sts.amazonaws.com"
   echo "✓ Created GitHub OIDC Provider: $OIDC_PROVIDER_ARN"
 fi
 
