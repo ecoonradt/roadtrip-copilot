@@ -15,16 +15,6 @@ if (!selectedRegion) {
   );
 }
 
-const githubRepo =
-  (app.node.tryGetContext('githubRepo') as string | undefined) ||
-  process.env.GITHUB_REPO ||
-  'ecoonradt/roadtrip-copilot';
-
-const githubOidcProviderArn =
-  (app.node.tryGetContext('githubOidcProviderArn') as string | undefined) ||
-  process.env.AWS_OIDC_PROVIDER_ARN ||
-  process.env.GITHUB_OIDC_PROVIDER_ARN;
-
 const authEnabled =
   process.env.AUTH_ENABLED ||
   (app.node.tryGetContext('authEnabled') as string | undefined);
@@ -97,8 +87,6 @@ const bedrockCopywriterModelId =
 
 new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   env: { account, region: selectedRegion },
-  githubRepo,
-  githubOidcProviderArn,
   authEnabled,
   allowedEmails,
   googleClientId,

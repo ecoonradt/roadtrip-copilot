@@ -13,8 +13,6 @@ import { Construct } from 'constructs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
-  githubRepo?: string;
-  githubOidcProviderArn?: string;
   authEnabled?: string;
   allowedEmails?: string;
   googleClientId?: string;
@@ -45,7 +43,6 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
   public readonly functionUrl: lambda.FunctionUrl;
   public readonly distribution: cloudfront.Distribution;
   public readonly apiForwardedHostFunction: cloudfront.Function;
-  public readonly githubActionsRole?: iam.Role;
 
   constructor(scope: Construct, id: string, props?: RoadtripCopilotCloudStackProps) {
     super(scope, id, props);
@@ -261,110 +258,6 @@ function handler(event) {
       },
     });
 
-    // 6. GitHubActionsDeployRole (Keyless IAM Deployer via GitHub Actions OIDC)
-    const githubRepo = props?.githubRepo ?? 'ecoonradt/roadtrip-copilot';
-    if (githubRepo) {
-      const oidcProviderArn =
-        props?.githubOidcProviderArn ??
-        `arn:${cdk.Aws.PARTITION}:iam::${cdk.Aws.ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com`;
-
-      const oidcProvider = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
-        this,
-        'GitHubOidcProvider',
-        oidcProviderArn,
-      );
-
-      const [owner, repo] = githubRepo.split('/');
-      const subConditions =
-        owner && repo
-          ? [`repo:${githubRepo}:*`, `repo:${owner}@*/${repo}@*:*`]
-          : [`repo:${githubRepo}:*`];
-
-      const githubActionsRole = new iam.Role(this, 'GitHubActionsDeployRole', {
-        roleName: 'roadtrip-copilot-github-actions-deploy',
-        assumedBy: new iam.WebIdentityPrincipal(oidcProvider.openIdConnectProviderArn, {
-          StringEquals: {
-            'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-          },
-          StringLike: {
-            'token.actions.githubusercontent.com:sub': subConditions,
-          },
-        }),
-      });
-
-      // Retain the IAM role when decoupled from CloudFormation to avoid deleting CI/CD deploy credentials
-      githubActionsRole.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
-
-      // Attach least-privilege deployment permissions
-      const attachDeployPermissions = (target: iam.Role) => {
-        target.addToPolicy(
-          new iam.PolicyStatement({
-            actions: ['sts:AssumeRole', 'sts:TagSession'],
-            resources: [`arn:${cdk.Aws.PARTITION}:iam::${cdk.Aws.ACCOUNT_ID}:role/cdk-*`],
-          }),
-        );
-
-        target.addToPolicy(
-          new iam.PolicyStatement({
-            actions: [
-              'cloudformation:DescribeStacks',
-              'sts:GetCallerIdentity',
-              'ecr:GetAuthorizationToken',
-            ],
-            resources: ['*'],
-          }),
-        );
-
-        // Authenticated Amazon ECR Public pulls for the container build (ADR-0009).
-        // Anonymous `public.ecr.aws` pulls share a non-adjustable monthly data quota per
-        // source IP, which GitHub-hosted runners exhaust collectively, failing the
-        // `DockerImageFunction` asset build with "429 Too Many Requests".
-        target.addToPolicy(
-          new iam.PolicyStatement({
-            actions: ['ecr-public:GetAuthorizationToken', 'sts:GetServiceBearerToken'],
-            resources: ['*'],
-          }),
-        );
-
-        this.staticSiteBucket.grantReadWrite(target);
-
-        target.addToPolicy(
-          new iam.PolicyStatement({
-            actions: ['cloudfront:CreateInvalidation', 'cloudfront:GetInvalidation'],
-            resources: [
-              `arn:${cdk.Aws.PARTITION}:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.distribution.distributionId}`,
-            ],
-          }),
-        );
-
-        // Grant least-privilege permissions to read/write SSM parameters and KMS encryption/decryption
-        target.addToPolicy(
-          new iam.PolicyStatement({
-            actions: ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:PutParameter'],
-            resources: [
-              `arn:${cdk.Aws.PARTITION}:ssm:${this.region}:${this.account}:parameter/roadtrip-copilot/*`,
-            ],
-          }),
-        );
-
-        target.addToPolicy(
-          new iam.PolicyStatement({
-            actions: ['kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey'],
-            resources: ['*'],
-            conditions: {
-              StringEquals: {
-                'kms:ViaService': `ssm.${this.region}.amazonaws.com`,
-              },
-            },
-          }),
-        );
-      };
-
-      attachDeployPermissions(githubActionsRole);
-
-      this.githubActionsRole = githubActionsRole;
-    }
-
     // 6. CfnOutput Exports
     new cdk.CfnOutput(this, 'CloudFrontUrl', {
       value: `https://${this.distribution.distributionDomainName}`,
@@ -390,12 +283,5 @@ function handler(event) {
       value: this.functionUrl.url,
       description: 'The Fastify Lambda function URL',
     });
-
-    if (this.githubActionsRole) {
-      new cdk.CfnOutput(this, 'GitHubActionsRoleArn', {
-        value: this.githubActionsRole.roleArn,
-        description: 'The GitHub Actions deploy IAM role ARN',
-      });
-    }
   }
 }

@@ -57,6 +57,6 @@ On 2026-10-23, the AWS account upgraded to Paid and activated Advanced Features,
   * The static IAM user `roadtrip-copilot-github-actions-deployer` has been deleted from AWS, and `.github/workflows/deploy.yml` authenticates keylessly with short-lived OIDC tokens.
   * Static GitHub repository secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) are deprecated and removed.
   * Day-0 bootstrapping for new AWS environments is managed via `scripts/bootstrap_ci_oidc.sh`, which provisions the OpenID Connect Provider (`token.actions.githubusercontent.com`) and the deployment IAM role (`roadtrip-copilot-github-actions-deploy`) with dual-format GitHub subject matching (`repo:org/repo:*` and `repo:owner@id/repo@id:*`).
-  * In `RoadtripCopilotCloudStack`, `GitHubActionsDeployRole` is marked with `applyRemovalPolicy(cdk.RemovalPolicy.RETAIN)` to prevent CloudFormation from deleting CI/CD deploy credentials during stack lifecycle decoupling.
+  * The deployer role has been completely decoupled and removed from `RoadtripCopilotCloudStack` after being retained via `cdk.RemovalPolicy.RETAIN`, keeping the CDK stack strictly focused on application resources while `scripts/bootstrap_ci_oidc.sh` manages the standalone CI/CD deployment role.
 
 
