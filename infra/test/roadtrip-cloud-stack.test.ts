@@ -494,99 +494,23 @@ describe('RoadtripCopilotCloudStack', () => {
     });
   });
 
-  it('provisions keyless IAM role for GitHub Actions deployment via OIDC', () => {
+  it('does not provision CI/CD deployment roles or OIDC providers inside the application stack', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
 
-    // Never triggers Custom::AWSCDKOpenIdConnectProvider
+    // No custom OIDC providers or static IAM users
     template.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 0);
-
-    // No static IAM machine user
     template.resourceCountIs('AWS::IAM::User', 0);
 
-    // Provisions deployer IAM role with WebIdentity principal and Retain deletion policy
-    template.hasResource('AWS::IAM::Role', {
-      DeletionPolicy: 'Retain',
-      UpdateReplacePolicy: 'Retain',
-      Properties: {
-        RoleName: 'roadtrip-copilot-github-actions-deploy',
-        AssumeRolePolicyDocument: {
-          Statement: [
-            Match.objectLike({
-              Action: 'sts:AssumeRoleWithWebIdentity',
-              Effect: 'Allow',
-              Condition: {
-                StringEquals: {
-                  'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-                },
-                StringLike: {
-                  'token.actions.githubusercontent.com:sub': [
-                    'repo:ecoonradt/roadtrip-copilot:*',
-                    'repo:ecoonradt@*/roadtrip-copilot@*:*',
-                  ],
-                },
-              },
-            }),
-          ],
-        },
-      },
-    });
+    // The stack only provisions application execution roles (Lambda execution role and S3 auto-delete role),
+    // and never provisions the CI/CD deployment role (which is managed via scripts/bootstrap_ci_oidc.sh).
+    const roles = template.findResources('AWS::IAM::Role');
+    for (const roleResource of Object.values(roles)) {
+      expect(roleResource.Properties?.RoleName).not.toBe('roadtrip-copilot-github-actions-deploy');
+    }
   });
 
-  it('grants deployer IAM role and user permissions to manage SSM parameters and KMS encryption/decryption', () => {
-    const stack = createStack();
-    const template = Template.fromStack(stack);
-
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: ['ssm:GetParameter', 'ssm:GetParameters', 'ssm:PutParameter'],
-            Effect: 'Allow',
-            Resource: {
-              'Fn::Join': [
-                '',
-                [
-                  'arn:',
-                  { Ref: 'AWS::Partition' },
-                  ':ssm:us-east-2:123456789012:parameter/roadtrip-copilot/*',
-                ],
-              ],
-            },
-          }),
-          Match.objectLike({
-            Action: ['kms:Decrypt', 'kms:Encrypt', 'kms:GenerateDataKey'],
-            Effect: 'Allow',
-            Resource: '*',
-            Condition: {
-              StringEquals: {
-                'kms:ViaService': 'ssm.us-east-2.amazonaws.com',
-              },
-            },
-          }),
-        ]),
-      },
-    });
-  });
-
-  it('grants deployer IAM role and user permissions to authenticate to Amazon ECR Public', () => {
-    const stack = createStack();
-    const template = Template.fromStack(stack);
-
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: Match.arrayWith([
-          Match.objectLike({
-            Action: ['ecr-public:GetAuthorizationToken', 'sts:GetServiceBearerToken'],
-            Effect: 'Allow',
-            Resource: '*',
-          }),
-        ]),
-      },
-    });
-  });
-
-  it('synthesizes all required CfnOutput keys', () => {
+  it('synthesizes all required CfnOutput keys and omits CI deployment credentials', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
 
@@ -598,41 +522,7 @@ describe('RoadtripCopilotCloudStack', () => {
     expect(outputKeys).toContain('StaticSiteBucketName');
     expect(outputKeys).toContain('AppDataBucketName');
     expect(outputKeys).toContain('LambdaFunctionUrl');
-    expect(outputKeys).toContain('GitHubActionsRoleArn');
+    expect(outputKeys).not.toContain('GitHubActionsRoleArn');
     expect(outputKeys).not.toContain('GitHubActionsUserName');
-  });
-
-  it('uses existing OIDC provider when githubOidcProviderArn is specified', () => {
-    const stack = createStack({
-      githubRepo: 'test/repo',
-      githubOidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
-    });
-    const template = Template.fromStack(stack);
-
-    // When ARN is passed, Custom::AWSCDKOpenIdConnectProvider is not created
-    template.resourceCountIs('Custom::AWSCDKOpenIdConnectProvider', 0);
-
-    template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'roadtrip-copilot-github-actions-deploy',
-      AssumeRolePolicyDocument: {
-        Statement: [
-          Match.objectLike({
-            Action: 'sts:AssumeRoleWithWebIdentity',
-            Effect: 'Allow',
-            Condition: {
-              StringEquals: {
-                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-              },
-              StringLike: {
-                'token.actions.githubusercontent.com:sub': [
-                  'repo:test/repo:*',
-                  'repo:test@*/repo@*:*',
-                ],
-              },
-            },
-          }),
-        ],
-      },
-    });
   });
 });

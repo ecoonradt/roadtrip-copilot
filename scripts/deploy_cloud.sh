@@ -105,8 +105,7 @@ console.log('STATIC_BUCKET=' + JSON.stringify(all.StaticSiteBucketName || ''));
 console.log('DISTRIBUTION_ID=' + JSON.stringify(all.DistributionId || ''));
 console.log('CLOUDFRONT_URL=' + JSON.stringify(all.CloudFrontUrl || ''));
 console.log('LAMBDA_FUNCTION_URL=' + JSON.stringify(all.LambdaFunctionUrl || ''));
-console.log('GITHUB_USER_NAME=' + JSON.stringify(all.GitHubActionsUserName || ''));
-console.log('GITHUB_ROLE_ARN=' + JSON.stringify(all.GitHubActionsRoleArn || ''));
+console.log('GITHUB_ROLE_ARN=' + JSON.stringify(all.GitHubActionsRoleArn || process.env.AWS_ROLE_ARN || ''));
 " "$OUTPUTS_FILE")"
 
 if [ -z "$STATIC_BUCKET" ] || [ -z "$DISTRIBUTION_ID" ] || [ -z "$CLOUDFRONT_URL" ]; then
@@ -156,8 +155,7 @@ echo "================ Deployment Summary ================"
 echo "CloudFront URL:          $CLOUDFRONT_URL"
 echo "Lambda Function URL:     $LAMBDA_FUNCTION_URL"
 echo "Static Site Bucket:      $STATIC_BUCKET"
-echo "GitHub Actions IAM User: ${GITHUB_USER_NAME:-None}"
-echo "GitHub Actions Role ARN: ${GITHUB_ROLE_ARN:-None}"
+echo "CI Deploy Role ARN:      ${GITHUB_ROLE_ARN:-External / Standalone}"
 echo "Region:                  $AWS_REGION"
 echo "====================================================="
 
@@ -170,8 +168,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
 | **CloudFront URL** | [$CLOUDFRONT_URL]($CLOUDFRONT_URL) |
 | **Lambda Function URL** | \`$LAMBDA_FUNCTION_URL\` |
 | **Static Site Bucket** | \`$STATIC_BUCKET\` |
-| **GitHub Actions IAM User** | \`${GITHUB_USER_NAME:-None}\` |
-| **GitHub Actions Role ARN** | \`${GITHUB_ROLE_ARN:-None}\` |
+| **CI Deploy Role ARN** | \`${GITHUB_ROLE_ARN:-External / Standalone}\` |
 | **Region** | \`$AWS_REGION\` |
 EOF
 fi
