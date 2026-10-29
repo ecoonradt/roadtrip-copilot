@@ -274,6 +274,12 @@ function handler(event) {
         oidcProviderArn,
       );
 
+      const [owner, repo] = githubRepo.split('/');
+      const subConditions =
+        owner && repo
+          ? [`repo:${githubRepo}:*`, `repo:${owner}@*/${repo}@*:*`]
+          : [`repo:${githubRepo}:*`];
+
       const githubActionsRole = new iam.Role(this, 'GitHubActionsDeployRole', {
         roleName: 'roadtrip-copilot-github-actions-deploy',
         assumedBy: new iam.WebIdentityPrincipal(oidcProvider.openIdConnectProviderArn, {
@@ -281,7 +287,7 @@ function handler(event) {
             'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
           },
           StringLike: {
-            'token.actions.githubusercontent.com:sub': `repo:${githubRepo}:*`,
+            'token.actions.githubusercontent.com:sub': subConditions,
           },
         }),
       });

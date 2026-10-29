@@ -517,7 +517,10 @@ describe('RoadtripCopilotCloudStack', () => {
                 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
               },
               StringLike: {
-                'token.actions.githubusercontent.com:sub': 'repo:ecoonradt/roadtrip-copilot:*',
+                'token.actions.githubusercontent.com:sub': [
+                  'repo:ecoonradt/roadtrip-copilot:*',
+                  'repo:ecoonradt@*/roadtrip-copilot@*:*',
+                ],
               },
             },
           }),
@@ -617,7 +620,10 @@ describe('RoadtripCopilotCloudStack', () => {
                 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
               },
               StringLike: {
-                'token.actions.githubusercontent.com:sub': 'repo:test/repo:*',
+                'token.actions.githubusercontent.com:sub': [
+                  'repo:test/repo:*',
+                  'repo:test@*/repo@*:*',
+                ],
               },
             },
           }),
