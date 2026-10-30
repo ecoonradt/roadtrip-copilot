@@ -1,9 +1,11 @@
 # ADR-0013: Single-User Accurate Per-User Spend Ledger Ahead of Deferred Multi-User Stripe Billing
 
 * **Date:** 2026-10-28
-* **Status:** Accepted
+* **Status:** Superseded by [ADR-0014](0014-auditable-spend-events-and-reconciliation.md) (2026-10-30)
 * **Deciders:** Eric (Project Owner), Antigravity (Orchestrator)
 * **Related Work Package:** [`WP-04.5`](../plan/active/WP-04.5-user-spend-tracking.md)
+
+> Historical decision, not an implementation contract. ADR-0014 and the rewritten active WP replace the mutable ledger, exact/zero-drop claims, interrupted-call token guesses, free-tier billing assumptions, and funded-reserve terminology below. The single-user instrumentation objective is retained.
 
 ## 1. Context & Problem Statement
 

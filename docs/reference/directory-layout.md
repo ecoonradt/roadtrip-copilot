@@ -31,12 +31,13 @@ roadtrip-copilot/
 │   ├── IDEAS.md               # Feature backlog and uncommitted ideas (incubator)
 │   ├── projects/              # Major multi-session initiatives (with 3-tier planning & ADRs)
 │   │   ├── route-scout-cloud/ # [ACTIVE PROJECT] Production Cloud Architecture, Auth, Bedrock AI & AWS Deployment
-│   │   │   ├── route_scout_cloud_architecture.md # Tier 1 Architectural Blueprint
+│   │   │   ├── route_scout_cloud_architecture.md # Tier 1 Blueprint; M4.5 evidence informs deferred Phase 2 pricing
 │   │   │   ├── WORKING_MODEL.md   # Project planning model, orchestrator-worker protocol & ADR rules
 │   │   │   ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
-│   │   │   ├── decisions/         # Standalone ADRs; 0012 defines verified place-evidence provenance
+│   │   │   ├── decisions/         # ADRs; 0014 supersedes 0013 with auditable spend evidence/reconciliation
 │   │   │   └── plan/              # Rolling-wave planning directory
-│   │   │       ├── active/        # Single active Work Package (Tier 3)
+│   │   │       ├── M4.5-spend-instrumentation-spec.md # Planned milestone contracts/test gates; not implemented modules
+│   │   │       ├── active/        # Single active WP; WP-04.5 currently bounds spend checkpoint A
 │   │   │       └── archive/       # Completed and retired Work Packages
 │   │   └── android-route-client/  # [QUEUED PROJECT — Phase 2, blocked by cloud] Android Route Editing & Cloud Co-Pilot
 │   │       ├── android_route_editing_and_cloud_client.md # Tier 1 Architectural Blueprint

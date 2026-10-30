@@ -240,7 +240,9 @@ A critical security question is: *What email is this allowlist checked against, 
 
 ## 5. Payment Architecture: Total Cost Recovery & Multi-Client Wallet
 
-While payment is deferred during Phase 1 (when Eric is the sole authorized user), the architecture guarantees **Total Cost Neutrality** before opening the app to other users in Phase 2.
+While payment is deferred during Phase 1 (when Eric is the sole authorized user), the Phase 2 design target is **Total Cost Neutrality**. A prepaid wallet or percentage markup alone does not prove that target.
+
+**Phase 1 M4.5 instrumentation:** [ADR-0014](decisions/0014-auditable-spend-events-and-reconciliation.md) and the [M4.5 specification](plan/M4.5-spend-instrumentation-spec.md) govern observed usage, unknown calls, versioned list valuations, infrastructure estimates and matching-period provider reconciliation. Payment amounts/rates/multipliers below are illustrative future assumptions, not measured costs, a funded reserve, or an implemented billing guarantee. Phase 2 pricing must be validated against that evidence.
 
 ### The Total Cost Neutrality Principle
 This system is not about high-margin SaaS subscriptions. The non-negotiable rule is: **Eric must never spend a single cent of his own money for other people to use his app.**
@@ -275,7 +277,7 @@ Under the **Prepaid Credit Wallet pattern**:
 * Users deposit $5.00 or $10.00 upfront via Stripe Checkout.
 * Funds are captured before a single AI token or paid Places lookup is executed.
 * When the user's credit balance reaches $0.00, AI features immediately lock (`HTTP 402`) across both the Web Studio and the Android app until they top up.
-* **Zero Financial Risk:** It is mathematically impossible for a user to incur debt on Eric's credit card.
+* **Financial Risk Reduction:** Prepayment limits exposure, but Phase 2 must still specify reservations/concurrent requests, unknown usage liabilities and fee/overhead recovery before claiming cost neutrality. Those mechanisms are not implemented by M4.5.
 
 ### Covering Stripe, Tool & Infrastructure Fees
 When a user pays via Stripe, Stripe charges **2.9% + $0.30** per transaction ($0.59 on a $10.00 deposit).
@@ -291,7 +293,7 @@ When a user pays via Stripe, Stripe charges **2.9% + $0.30** per transaction ($0
   * User deposits $10.00 $\to$ Wallet credited with **$10.00**.
   * Each AI turn deducts:
     $$\text{Turn Deduction} = (\text{Bedrock Token Cost} + \text{Tool Call Cost}) \times 1.25$$
-  * That $1.25\times$ recovery multiplier absorbs the Stripe fee and AWS Lambda/S3/CloudFront overhead automatically as credits are consumed.
+  * The illustrative $1.25\times$ multiplier must be tested against actual usage, shared overhead and payment assumptions; it does not automatically guarantee recovery.
 
 ### Multi-Client Wallet Consumption (Avoiding Play Store 30% Tax)
 When the Android app uses Route Scout in Phase 2, how does billing work without triggering Google Play Store's 15–30% commission or requiring the Google Play Billing SDK?

@@ -26,6 +26,7 @@ flowchart TD
 * **Execution Protocol:** Work in this directory strictly adheres to the **Orchestrator-Worker delegation model** (Frontier models orchestrate; worker models implement per the active harness adapter) as defined in [`AGENTS.md`](../AGENTS.md#6-planning--execution-working-models).
 * **Current Projects:**
   * **[`projects/route-scout-cloud/`](projects/route-scout-cloud/WORKING_MODEL.md) `[ACTIVE — Phase 1]`:** Transitioning Route Scout from local CLI execution to a production AWS cloud architecture with Amazon Bedrock AI, a 7-tool discovery & deterministic domain grounding library (`scoutTools.ts`), Fastify on Lambda with response streaming, S3 persistence, and dual-mode Google OIDC auth, built on an AWS CDK (`infra/`) and GitHub Actions CI/CD foundation (`scripts/ci_check.sh`, `scripts/deploy_cloud.sh`).
+    * **M4.5 `[PLANNED]`:** [Auditable spend instrumentation specification](projects/route-scout-cloud/plan/M4.5-spend-instrumentation-spec.md) defines immutable usage evidence, visible uncertainty and provider reconciliation; [the active WP](projects/route-scout-cloud/plan/active/WP-04.5-user-spend-tracking.md) covers types/pricing checkpoint A only. No spend modules are implemented yet.
   * **[`projects/android-route-client/`](projects/android-route-client/WORKING_MODEL.md) `[QUEUED — Phase 2]`:** Android on-the-fly offline route editing (Tier 1) and cloud co-pilot client sync (Tier 2). *Strictly blocked until Phase 1 reaches completion.*
 
 ### 2. [`reference/`](reference/) — Living Architecture & Platform Invariants
