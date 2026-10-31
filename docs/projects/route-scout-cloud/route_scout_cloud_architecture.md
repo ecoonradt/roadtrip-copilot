@@ -242,7 +242,7 @@ A critical security question is: *What email is this allowlist checked against, 
 
 While payment is deferred during Phase 1 (when Eric is the sole authorized user), the Phase 2 design target is **Total Cost Neutrality**. A prepaid wallet or percentage markup alone does not prove that target.
 
-**Phase 1 M4.5 instrumentation:** [ADR-0014](decisions/0014-auditable-spend-events-and-reconciliation.md) and the [M4.5 specification](plan/M4.5-spend-instrumentation-spec.md) govern observed usage, unknown calls, versioned list valuations, infrastructure estimates and matching-period provider reconciliation. Payment amounts/rates/multipliers below are illustrative future assumptions, not measured costs, a funded reserve, or an implemented billing guarantee. Phase 2 pricing must be validated against that evidence.
+**Phase 1 M4.5 instrumentation:** [ADR-0013](decisions/0013-auditable-spend-events-and-reconciliation.md) and the [M4.5 specification](plan/M4.5-spend-instrumentation-spec.md) govern observed usage, unknown calls, versioned list valuations, infrastructure estimates and matching-period provider reconciliation. Payment amounts/rates/multipliers below are illustrative future assumptions, not measured costs, a funded reserve, or an implemented billing guarantee. Phase 2 pricing must be validated against that evidence.
 
 ### The Total Cost Neutrality Principle
 This system is not about high-margin SaaS subscriptions. The non-negotiable rule is: **Eric must never spend a single cent of his own money for other people to use his app.**

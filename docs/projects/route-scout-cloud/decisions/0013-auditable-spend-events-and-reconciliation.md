@@ -1,15 +1,15 @@
-# ADR-0014: Auditable Spend Events, Explicit Uncertainty & Matching-Scope Reconciliation
+# ADR-0013: Auditable Spend Events, Explicit Uncertainty & Matching-Scope Reconciliation
 
-* **Date:** 2026-10-30
+* **Date:** 2026-10-28
+* **Last revised:** 2026-10-31 (consolidated before implementation)
 * **Status:** Accepted
-* **Deciders:** Eric (requested plan hardening), GPT-6.1 Sol (OpenCode orchestrator)
-* **Supersedes:** [ADR-0013](0013-accurate-per-user-spend-ledger.md) accounting and implementation contracts; retains its single-user instrumentation objective.
+* **Deciders:** Eric (requested plan hardening and consolidation), GPT-6.1 Sol (OpenCode orchestrator)
 * **Related Work Package:** [WP-04.5](../plan/active/WP-04.5-user-spend-tracking.md)
 * **Milestone contract:** [M4.5 specification](../plan/M4.5-spend-instrumentation-spec.md); the active WP covers checkpoint A only.
 
 ## 1. Context & Problem Statement
 
-The owner wants to learn from personal use before introducing multiple users: inspect attributable usage, estimate user costs without promotional credits masking consumption, and explain differences against provider charges. Review of ADR-0013 found that its "100% accurate" / "zero-drop" / "guaranteed break-even" claims were not supported by its contracts:
+The application remains a private single-owner deployment. Stripe checkout, prepaid wallets and multi-user billing are deferred to Phase 2. The owner wants to learn from personal use first: inspect attributable usage, estimate user costs without promotional credits masking consumption, and explain differences against provider charges. Review of the initial M4.5 proposal found that its "100% accurate" / "zero-drop" / "guaranteed break-even" claims were not supported by its contracts:
 
 * Missing usage became an exact zero; interrupted calls used character/4 estimates that cannot establish billed tokens.
 * A final `finally` write cannot survive process termination. ETags prevent lost updates, not duplicate application after ambiguous write acknowledgements.
@@ -31,7 +31,7 @@ These are architectural corrections, not permission to introduce silent fallback
 
 ## 3. Considered Options
 
-* **A — Patch the mutable `spend.json` counter:** rejected; does not provide durable intent, replayable evidence, or a historical audit trail.
+* **A — Use a mutable `spend.json` counter:** rejected; does not provide durable intent, replayable evidence, or a historical audit trail.
 * **B — Add a transactional database/queue and a billing platform:** deferred; unnecessary infrastructure and scope for private single-user observation.
 * **C — Immutable intent/observation events with read-time projections:** chosen. Write intent before paid dispatch, persist observations before parsing/output checks, retain every event, and compute summaries from that evidence. An intent without an observation is unknown, not zero. Provider reconciliation supplies aggregate cross-checks, not invented per-call precision.
 

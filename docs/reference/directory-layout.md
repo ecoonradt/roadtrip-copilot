@@ -34,7 +34,7 @@ roadtrip-copilot/
 │   │   │   ├── route_scout_cloud_architecture.md # Tier 1 Blueprint; M4.5 evidence informs deferred Phase 2 pricing
 │   │   │   ├── WORKING_MODEL.md   # Project planning model, orchestrator-worker protocol & ADR rules
 │   │   │   ├── DECISIONS.md       # ADR Table of Contents & high-level decision index
-│   │   │   ├── decisions/         # ADRs; 0014 supersedes 0013 with auditable spend evidence/reconciliation
+│   │   │   ├── decisions/         # ADRs; consolidated 0013 defines auditable spend evidence/reconciliation
 │   │   │   └── plan/              # Rolling-wave planning directory
 │   │   │       ├── M4.5-spend-instrumentation-spec.md # Planned milestone contracts/test gates; not implemented modules
 │   │   │       ├── active/        # Single active WP; WP-04.5 currently bounds spend checkpoint A
