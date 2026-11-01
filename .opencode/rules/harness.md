@@ -35,9 +35,13 @@ choice; nothing here binds it.** No skill may hardcode a model id — resolve ro
 | Test authoring | `test-author` | `opencode-go/kimi-k2.7-code` | `opencode-go/deepseek-v4.1-flash` | 1,350 |
 | Bounded fixes | `review-fix-worker` | `opencode-go/deepseek-v4.1-flash` | `opencode-go/mimo-v2.6-flash`, `opencode-go/glm-5.3-flash`, `opencode/deepseek-v4.1-flash-free` | 43,330 |
 | Independent code review | `diff-reviewer` | `opencode-go/deepseek-v4-pro#max` | `opencode-go/hy4-preview` | 1,050 |
-| Adversarial plan review | `plan-reviewer` | `opencode-go/hy4-preview` | `opencode-go/step-5-preview`, `opencode-go/kimi-k3.1-pro` | 1,350 |
+| Adversarial plan review | `plan-reviewer` | `opencode-go/step-5-preview` | `opencode-go/hy4-preview`, `opencode-go/kimi-k3.1-pro` | 1,350 |
 | Scout / bulk search | built-in `explore` (no profile binding) | `opencode-go/deepseek-v4.1-flash` | `opencode-go/mimo-v2.6-flash`, `opencode-go/claude-haiku-5-5` | 43,330 |
 
+* **Plan-review row is opt-in:** the `plan-review` skill audits in the main session by default, so
+  this row only binds when the user explicitly asks for a truly independent subagent review. Its
+  default is not `hy4-preview` because the main authoring session frequently is — surface any
+  collision loudly and let the user pick among the sanctioned alternatives instead of switching.
 * Do NOT shadow built-ins (`explore`, `general`) with same-id agent files; a Markdown body would
   replace their internal prompts. Pass the scout model explicitly instead.
 * Free-tier aliases (`opencode/*-free`) remain available on explicit request via a `model=` token;
@@ -83,8 +87,11 @@ Report: files changed, exact commands, raw results, anything unresolved.
 ## Workflow skills
 * `/plan` → `planning` skill: adversarial main-session interrogation that produces or revises a
   Gate 1 Contract-First Work Package. The main session authors plans; workers never do.
-* `/plan-review` → `plan-review` skill: **Gate 1B** fresh-context adversarial review of a finished
-  plan before any code is touched.
+* `/plan-review` → `plan-review` skill: **executed in the main session.** The invoking session
+  keeps its own agent and model as the reviewer; it audits the plan against the sources of truth,
+  writes findings to `tmp/`, emits a labeled verdict, and **waits for user triage before editing the
+  plan** (skill Phase 1 is read-only). Dispatching the `plan-reviewer` profile is **opt-in only** —
+  see the skill's "Optional independent review" section; the registry row above only governs that case.
 * `/implement` → `implement` skill: bounded dispatch → implement → Gate 2A personal audit → fix
   loop over the approved Work Package. A task closes only when the optional Gate 2B reviewer emits
   APPROVED **and** the orchestrator's own 8-point audit plus the required suites pass. No worker or
