@@ -1,6 +1,6 @@
 ---
 name: review-loop
-description: Run an explicitly requested review-and-fix loop with the current main session as reviewer/orchestrator and DeepSeek V4.1 Flash Free fix workers. Plain review requests remain reporting-only.
+description: Run an explicitly requested review-and-fix loop with the current main session as reviewer/orchestrator and registry-model fix workers. Plain review requests remain reporting-only.
 ---
 
 # Review Loop
@@ -8,6 +8,8 @@ description: Run an explicitly requested review-and-fix loop with the current ma
 Keep the current main model as reviewer/orchestrator; only `review-fix-worker` implements fixes.
 Fixes require the user's explicit loop invocation or fix request. A generic PR review request or
 automatic skill loading is reporting-only. Honor report-only constraints and skip fix delegation.
+No model ids are hardcoded in this skill: defaults, override tokens, and the fallback policy live
+in the harness Subagent Model Registry (OpenCode: `.opencode/rules/harness.md`).
 
 ## Roles and preflight
 
@@ -16,23 +18,27 @@ automatic skill loading is reporting-only. Honor report-only constraints and ski
    directory. Read governing files (`AGENTS.md`, subproject guides, active Work Package,
    `DECISIONS.md` / ADRs) only where they exist; skip absent ones so the loop stays portable.
 2. Discover the **actual active main model** from harness or session metadata. Do not guess a
-   provider. Compare it with the worker's underlying model before launching anything. A variant or
-   alias of the main model is not a different underlying model.
-3. Verify the worker model through the available model catalog plus the registered
-   `review-fix-worker` profile and session metadata. The canonical ID is
-   `opencode/deepseek-v4.1-flash-free`; confirm the profile binds exactly that ID, denies subagent
-   nesting, and has a bounded step budget. A child agent's self-description is not model evidence.
-4. If the main identity is unknown or is the same underlying model, do not launch a worker:
-   continue the read-only review you can perform, report the findings and the blocker, and make no
-   automatic fixes. If even the target or read tooling is undetermined, report that instead of
-   guessing.
+   provider. Compare it with each worker's underlying model before launching anything. A variant,
+   free/paid alias, or provider mirror of the main model is not a different underlying model.
+3. Resolve the **fix role's model**: the `review-fix-worker` profile's bound default governs,
+   unless the user passed `fix-model=` / `model=` (sanctioned alternatives only) or a
+   pre-authorized `fallback=` in this invocation. Verify the model exists in the available model
+   catalog; confirm the profile denies subagent nesting and has a bounded step budget. A child
+   agent's self-description is not model evidence.
+4. If the resolved worker's underlying model equals the main session's (after stripping the
+   provider alias, a trailing `-free`, and `#variant`), or the main identity is unknown, do not
+   launch a worker: continue the read-only review you can perform, report the findings and the
+   blocker plus sanctioned alternatives for re-invocation, and make no automatic fixes. If even
+   the target or read tooling is undetermined, report that instead of guessing.
 5. Otherwise launch the configured profile with a minimal **no-edit READY check**. READY proves
    the profile can actually be invoked; it is not identity evidence. If the check, catalog,
    profile, permissions, or launch capability is unavailable, still finish the read-only review
-   and report findings plus the blocker. Never switch or inherit models, and never fall back to a
-   paid or different one.
+   and report findings plus the blocker. Never switch or inherit any model not explicitly
+   pre-authorized in this invocation.
 6. If the worker fails on quota or permission mid-loop, stop, preserve all partial work and
-   findings, and report. Do not present a blocked or partial loop as clean.
+   findings, and report the exact model and raw error. Do not present a blocked or partial loop
+   as clean. Substitute a pre-authorized `fallback=` model only after that loud failure, and log
+   the substitution in the findings file.
 
 ## Primary review
 
@@ -53,25 +59,13 @@ automatic skill loading is reporting-only. Honor report-only constraints and ski
 
 ## Bounded workers
 
-Delegate only confirmed, bounded fixes. A prompt must state exact file paths, literal interfaces
-and status codes, lifecycle and concurrency invariants (`AbortController`, `clearInterval`,
-revision refs, cleanup), negative constraints (no new dependency or silent fallback), the failing
-regression test, and the focused command that must pass. Use fresh context and the configured
-profile; never override its model. Workers cannot nest. Parallelize only nonoverlapping file
-ownership; otherwise run serially.
-
-Reusable prompt shape:
-
-```text
-Confirmed defect: <one sentence, reproduced how>
-Files (only these): <paths>
-Required behavior: <literal signatures / status codes / data shapes>
-Invariants: <abort, timers, cleanup, concurrency, region/offline rules>
-Do not: <project-specific negatives>, spawn nested agents, commit, push, deploy,
-         run destructive git commands, or make unrelated edits
-Tests: add a failing regression first, then run: <exact commands>
-Report: files changed, exact commands, raw results, anything unresolved.
-```
+Delegate only confirmed, bounded fixes using the shared Gate 1 Contract-First prompt shape defined
+in the harness rules: exact file paths, literal interfaces and status codes, lifecycle and
+concurrency invariants (`AbortController`, `clearInterval`, revision refs, cleanup), negative
+constraints (no new dependencies, no silent fallbacks, no placeholder code), the failing regression
+test, and the focused command that must pass. Use fresh context and the configured profile; never
+override its model beyond the resolution above. Workers cannot nest. Parallelize only nonoverlapping
+file ownership; otherwise run serially.
 
 ## Verify and repeat
 
@@ -92,15 +86,15 @@ from genuine failures, and say which were not run.
 
 ## Optional independent reviewer
 
-A fresh, eligible read-only `diff-reviewer` is a supplement, never a replacement. If its profile
-does not bind a model and would inherit the main model, pass the explicit verified DeepSeek ID for
-that invocation; never override the fix worker's or main model. If no eligible read-only profile
-is available, skip this optional step and say so rather than reuse a write worker. Give it a
-neutral prompt containing only the diff or base, pointers to the objective and architectural
-rules, a unique target-root-relative `tmp/` report path, and read-only/no-nesting boundaries.
-Never include prior fixes, earlier findings, or a list of expected issues, and never reuse an
-implementation or fix worker as the independent reviewer. If the tooling cannot write the report,
-save its returned findings yourself.
+A fresh, eligible read-only `diff-reviewer` is a supplement, never a replacement. Its profile binds
+the registry's code-review default; pass the resolved catalog ID explicitly only if the profile has
+no binding or the user overrode it for this invocation; never override the fix worker's or main
+model's binding. If no eligible read-only profile is available, skip this optional step and say so
+rather than reuse a write worker. Give it a neutral prompt containing only the diff or base,
+pointers to the objective and architectural rules, a unique target-root-relative `tmp/` report
+path, and read-only/no-nesting boundaries. Never include prior fixes, earlier findings, or a list
+of expected issues, and never reuse an implementation or fix worker as the independent reviewer.
+If the tooling cannot write the report, save its returned findings yourself.
 
 ## Stop and report
 
@@ -119,4 +113,5 @@ may narrow the target, but it does not waive this workflow's safety and verifica
 
 - `/review-loop` — review the current branch PR plus intended local changes.
 - `/review-loop origin/main` — use the given ref as the comparison base.
+- `/review-loop PR #8; fix-model=gpt-5.6-luna` — override the fix role for this run.
 - `@review-loop Review this PR and fix confirmed issues` — invoke as a mention.

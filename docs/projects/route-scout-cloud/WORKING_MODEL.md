@@ -105,7 +105,7 @@ sequenceDiagram
   * Running final verification test suites and writing handoff notes.
 
 ### Subagent Workers (Delegated Implementers)
-* **Model & Harness Delegation:** Delegated per the active harness adapter (Antigravity: [`.agents/rules/antigravity-harness.md`](file:///home/eric/code/roadtrip-copilot/.agents/rules/antigravity-harness.md); OpenCode: [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)). Bound to cost-effective worker models / configured worker profiles to optimize developer quota.
+* **Model & Harness Delegation:** Delegated per the active harness adapter (Antigravity: [`.agents/rules/antigravity-harness.md`](file:///home/eric/code/roadtrip-copilot/.agents/rules/antigravity-harness.md); OpenCode: [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)), using the harness adapter's **Subagent Model Registry** — role→default model bindings with per-invocation `model=` / `fallback=` override tokens. Defaults bind subagents only; the main session model is always the developer's manual choice. Auto-substituting a worker model mid-run without a user pre-authorization in the same invocation is a forbidden silent fallback (AGENTS.md Rule 12).
 * **Responsibilities:**
   * Implementing concrete functions, endpoints, or utility classes specified by the orchestrator.
   * Writing unit tests against mock fixtures.
@@ -117,7 +117,7 @@ sequenceDiagram
 Earlier milestones suffered from multi-round PR review cycles when worker subagents were given underspecified prompts or when the orchestrator relied solely on happy-path test runs. The orchestrator is strictly accountable for first-pass PR quality through two mandatory gates:
 
 #### Gate 1: Contract-First Work Package & Worker Prompts (Pre-Delegation)
-Before dispatching any `flash` worker, the Orchestrator must verify live external dependencies (e.g., read-only AWS CLI checks against the project's assigned Region) and include the following in both the active Work Package (`WP-XX`) and the worker's prompt:
+Before dispatching any worker subagent, the Orchestrator must verify live external dependencies (e.g., read-only AWS CLI checks against the project's assigned Region) and include the following in both the active Work Package (`WP-XX`) and the worker's prompt:
 1. **Exact TypeScript Interfaces & Route Schemas:** Literal type signatures, request/response shapes, and explicit HTTP status codes (`200`, `400`, `401`, `403`, `404`, `412`, `500`, `503`). Never leave error status codes or fallback precedence to worker guesswork.
 2. **Concurrency, Lifecycle & Resource Cleanup Invariants:**
    * **Frontend Async Flows:** Specify `AbortController` and/or monotonic request revision counters whenever React state is updated after an `await` (switching scopes, switching models, retrying, or closing modals must never allow a late-resolving response to overwrite newer state).
@@ -131,6 +131,16 @@ Before dispatching any `flash` worker, the Orchestrator must verify live externa
    * Check how new UI controls and mount-time `fetch` calls interact with existing UI harnesses (`tests/ui/harness.tsx`) and Playwright browser tests (`tests/browser/appHeader.browser.ts`, which enforces single-row `56px` header height across `1024px–1920px` viewports and fails on any unmocked `/api/*` request).
 6. **Zero Silent Fallbacks or Mock Degradation:**
    * Never instruct workers to build silent fallbacks to mock templates, client-side mocks, or local CLIs (`agy`). External API failures must fail loudly and transparently with explicit HTTP status codes (`502`, `503`, `400`). Building any fallback mechanism requires prior user consultation and explicit written approval.
+
+#### Gate 1B: Adversarial Independent Plan Review (Pre-Implementation)
+Every new or materially revised Work Package is interrogated by a **fresh, unprimed plan-reviewer subagent** before any implementation dispatch — the plan analogue of code review:
+
+* **Neutral dispatch:** the reviewer receives only the WP path, pointers to the Tier-1 spec, this Gate 1 checklist, `AGENTS.md`, and `DECISIONS.md`, plus a unique `tmp/` findings path. Never prime it with suspected gaps or an expected-findings list.
+* **Attack surface:** contract gaps (non-literal interfaces or status codes), concurrency & cleanup holes, unhandled failure modes, region/offline/rule violations, and ambiguous or unbounded worker tasks.
+* **Convergence:** the orchestrator personally confirms or rejects every finding against the sources of truth, revises the WP, and re-dispatches a *new* reviewer until `VERDICT: APPROVED` coincides with zero open confirmed findings. A reviewer verdict alone is never clearance.
+* **Loop-exit rule:** the dispatch → implement → audit → fix loop closes a task only when both the (optional) Gate 2B reviewer emits APPROVED **and** the orchestrator's personal Gate 2A audit plus the required verification suites pass. Any subagent's self-report is insufficient evidence.
+
+OpenCode entry points: `/plan` → `/plan-review` → `/implement` (see [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)).
 
 #### Gate 2: Orchestrator Adversarial Diff Audit (Gate 2A) & Independent Review (Gate 2B)
 

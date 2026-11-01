@@ -128,6 +128,8 @@ For full architectural details and mechanics, see [`docs/README.md`](docs/README
 2. Tier 2 Phase Roadmap (`plan/ROADMAP.md`): milestones and strict Definition of Done.
    Never break milestone N+1 into micro-tasks before N is merged and verified.
 3. Tier 3 Active Work Package (`plan/active/WP-XX-*.md`): exactly ONE at a time, 1-2 session scope.
+   New or materially revised WPs pass adversarial independent plan review (Gate 1B, `WORKING_MODEL.md`)
+   before any implementation dispatch.
 4. ADRs (`DECISIONS.md` + `decisions/`): scan the index first; record surprises before coding on.
 
 ### B. Smaller Tactical Tasks & Spikes (`docs/tasks/`) — Single-File Plan
@@ -154,6 +156,7 @@ Non-negotiable properties:
 5. **Adversarial verification & independent review governance (Gate 2A vs. Gate 2B).**
    * **Gate 2A (Mandatory Orchestrator Audit):** Never delegated. The orchestrator personally audits the full `git diff` against the 8-point Adversarial Review Checklist in `WORKING_MODEL.md` (region/IAM accuracy, async race/abort safety, timer/stream leak cleanup, input allowlist validation, output/reasoning tag hygiene, zero silent fallbacks, unhappy-path test coverage, and UI layout geometry) and runs both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`. A worker's own report of success is not evidence.
    * **Gate 2B (Optional Independent Review):** Supplements, never replaces, Gate 2A. Unlike Contract-First implementation prompts (item 1), an independent reviewer must be invoked as a fresh-context, read-only agent with a short neutral prompt containing only: the diff/base to inspect, pointers to the objective/spec (`WP-XX`) and architectural rules (`AGENTS.md`, `DECISIONS.md`), a unique `tmp/` findings output path for incremental reporting, and standard read-only/no-nesting boundaries. Never prime an independent reviewer with a prior fix list, earlier findings, or a targeted checklist, and never claim review independence if the reviewer was primed.
+6. **Model selection is explicit and loud.** Subagent role→model defaults, `model=` / `fallback=` override tokens, and main-≠-worker independence checks live in the harness adapter's Subagent Model Registry (OpenCode: `.opencode/rules/harness.md`; Antigravity: the analogous `.agents/rules/` adapter). The invoking session's model is always the user's manual choice. Auto-substituting a subagent model without a user pre-authorization in the same invocation is a forbidden silent fallback (Rule 12).
 
 **Harness-specific mechanics are deliberately NOT defined here.** Which delegation tool to call,
 which worker types exist, and how models are bound belong to the harness in use. Consult your

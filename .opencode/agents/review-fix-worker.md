@@ -1,7 +1,7 @@
 ---
 description: Implements bounded review fixes and regression tests
 mode: subagent
-model: opencode/deepseek-v4.1-flash-free
+model: opencode-go/deepseek-v4.1-flash
 steps: 40
 permissions:
   - action: subagent
