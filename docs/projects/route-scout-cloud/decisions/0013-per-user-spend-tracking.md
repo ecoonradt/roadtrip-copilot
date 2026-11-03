@@ -24,7 +24,7 @@ At the same time, the application's AI layer is built around the provider-neutra
 * **Encapsulated Bedrock Pricing Resolution:** Because Amazon Bedrock's `Converse` and `ConverseStream` APIs return token counts rather than dollar amounts, `AwsBedrockHarnessAdapter` needs an internal mechanism to price discovered models in `us-east-2` automatically without adding latency to user requests or requiring manual per-model code edits.
 * **True Marginal Unit Costs (List-Rate Valuation):** All AI, tool, and infrastructure usage must be valued at standard list rates (using exact integer nanodollars, $1\text{ USD} = 10^9\text{ nanos}$) rather than subtracting monthly free tiers or promotional credits.
 * **Zero-Drop Turn Accounting & Simple Atomic Storage:** Usage incurred during a turn—including earlier iterations of a multi-step tool loop or calls that subsequently fail output validation or abort—must be captured and persisted atomically to a single human-readable per-user JSON ledger (`users/{email}/spend.json` in S3; `itineraries/.spend/{safeEmail}.json` in local dev) following [ADR-0003](0003-s3-atomic-json-persistence.md).
-* **Zero Web Studio UI Clutter:** Spend inspection in M4.5 is served via an authenticated `GET /api/spend` endpoint and a terminal helper script (`scripts/check_spend.sh`).
+* **Zero Web Studio UI Clutter:** Spend inspection is served via an authenticated `GET /api/spend` endpoint and a terminal helper script (`scripts/check_spend.sh`).
 
 ## 3. Considered Options
 

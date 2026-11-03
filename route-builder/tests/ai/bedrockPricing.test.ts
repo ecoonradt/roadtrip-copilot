@@ -154,8 +154,10 @@ function claudeMarketplaceEntries(): string[] {
     marketplaceEntry('USE2-MP:USE2_InputTokenCount_Global-Units', 'Claude Sonnet 4.6', 'Input tokens', '3.0000000000'),
     marketplaceEntry('USE2-MP:USE2_OutputTokenCount_Global-Units', 'Claude Sonnet 4.6', 'Output tokens', '15.0000000000'),
     marketplaceEntry('USE2-MP:USE2_CacheWrite1hInputTokenCount-Units', 'Claude Sonnet 4.6', 'Cache write tokens', '6.6000000000'),
-    marketplaceEntry('USE2-MP:USE2_InputTokenCount-Units', 'OpenAI GPT-6 Astra', 'Input tokens', '2.5000000000', 'OpenAI'),
-    marketplaceEntry('USE2-MP:USE2_OutputTokenCount-Units', 'OpenAI GPT-6 Astra', 'Output tokens', '10.0000000000', 'OpenAI'),
+    marketplaceEntry('USE2-MP:USE2_input_tokens_standard-Units', 'OpenAI GPT-6 Astra', 'Input tokens', '11.0000000000', 'OpenAI'),
+    marketplaceEntry('USE2-MP:USE2_output_tokens_standard-Units', 'OpenAI GPT-6 Astra', 'Output tokens', '55.0000000000', 'OpenAI'),
+    marketplaceEntry('USE2-MP:USE2_input_tokens_long_ctx_standard-Units', 'OpenAI GPT-6 Astra', 'Input tokens', '22.0000000000', 'OpenAI'),
+    marketplaceEntry('USE2-MP:USE2_output_tokens_long_ctx_standard-Units', 'OpenAI GPT-6 Astra', 'Output tokens', '82.5000000000', 'OpenAI'),
   ];
 }
 
@@ -297,10 +299,10 @@ describe('Bedrock pricing', () => {
     });
   });
 
-  it('normalizes marketplace display-name entries, strips provider prefixes, and skips 1h cache writes', () => {
+  it('normalizes marketplace display-name entries, strips provider and inference-profile prefixes, and skips 1h cache writes', () => {
     const claudeUs = discovered('us.anthropic.claude-sonnet-4-6', 'anthropic.claude-sonnet-4-6', 'Anthropic', 'Claude Sonnet 4.6');
     const claudeGlobal = discovered('global.anthropic.claude-sonnet-4-6', 'anthropic.claude-sonnet-4-6', 'Anthropic', 'Claude Sonnet 4.6');
-    const gptAstra = discovered('us.openai.gpt-6-astra', 'openai.gpt-6-astra', 'OpenAI', 'GPT-6 Astra');
+    const gptAstra = discovered('us.openai.gpt-6-astra', 'openai.gpt-6-astra', 'OpenAI', 'US OpenAI GPT-6 Astra');
     const catalog = normalizeBedrockPricing({
       refreshedAt: REFRESHED_AT,
       discoveredModels: [claudeUs, claudeGlobal, gptAstra],
@@ -321,8 +323,8 @@ describe('Bedrock pricing', () => {
       cacheWritePerMillionUsd: null,
     });
     expect(catalog.models[gptAstra.modelId]).toMatchObject({
-      inputPerMillionUsd: '2.500000000',
-      outputPerMillionUsd: '10.000000000',
+      inputPerMillionUsd: '11.000000000',
+      outputPerMillionUsd: '55.000000000',
     });
   });
 
@@ -341,6 +343,90 @@ describe('Bedrock pricing', () => {
     expect(catalog.unpricedModelIds).toEqual([kimiA.modelId, kimiB.modelId].sort());
     expect(catalog.models[kimiA.modelId]).toBeUndefined();
     expect(catalog.models[kimiB.modelId]).toBeUndefined();
+  });
+
+  it('prices Nova Pro standard rates when latency-optimized SKUs share the same usage key', () => {
+    const novaPro = discovered('us.amazon.nova-pro-v1:0', 'amazon.nova-pro-v1:0', 'Amazon', 'Nova Pro');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [novaPro],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-NovaPro-input-tokens', 'Nova Pro', 'Input tokens', '0.0008000000', 'Amazon'),
+        bedrockTokenEntry('USE2-NovaPro-output-tokens', 'Nova Pro', 'Output tokens', '0.0032000000', 'Amazon'),
+        bedrockTokenEntry('USE2-NovaPro-input-tokens-latency-optimized', 'Nova Pro Latency Optimized', 'Input tokens', '0.0016000000', 'Amazon'),
+        bedrockTokenEntry('USE2-NovaPro-output-tokens-latency-optimized', 'Nova Pro Latency Optimized', 'Output tokens', '0.0064000000', 'Amazon'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([]);
+    expect(catalog.models[novaPro.modelId]).toMatchObject({
+      inputPerMillionUsd: '0.800000000',
+      outputPerMillionUsd: '3.200000000',
+    });
+  });
+
+  it('resolves duplicate mantle and non-mantle SKUs that publish identical rates', () => {
+    const deepseek = discovered('us.deepseek.v3.2', 'deepseek.v3.2', 'DeepSeek', 'DeepSeek V3.2');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [deepseek],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-deepseek.v3.2-input-tokens', 'DeepSeek V3.2', 'Input tokens', '0.0006200000', 'DeepSeek'),
+        bedrockTokenEntry('USE2-deepseek.v3.2-mantle-input-tokens-standard', 'DeepSeek V3.2', 'Input tokens', '0.0006200000', 'DeepSeek'),
+        bedrockTokenEntry('USE2-deepseek.v3.2-output-tokens', 'DeepSeek V3.2', 'Output tokens', '0.0018500000', 'DeepSeek'),
+        bedrockTokenEntry('USE2-deepseek.v3.2-mantle-output-tokens-standard', 'DeepSeek V3.2', 'Output tokens', '0.0018500000', 'DeepSeek'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([]);
+    expect(catalog.models[deepseek.modelId]).toMatchObject({
+      inputPerMillionUsd: '0.620000000',
+      outputPerMillionUsd: '1.850000000',
+    });
+  });
+
+  it('prices CamelCase usagetypes through instruct, alias, and mantle key normalization', () => {
+    const llama = discovered('us.meta.llama3-1-8b-instruct-v1:0', 'meta.llama3-1-8b-instruct-v1:0', 'Meta', 'Llama 3.1 8B Instruct');
+    const qwen = discovered('us.qwen.qwen3-coder-30b-a3b-v1:0', 'qwen.qwen3-coder-30b-a3b-v1:0', 'Qwen', 'Qwen3 Coder 30B A3B');
+    const deepseek = discovered('us.deepseek.v3-v1:0', 'deepseek.v3-v1:0', 'DeepSeek', 'DeepSeek V3.1');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [llama, qwen, deepseek],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-Llama3-1-8B-input-tokens', 'Llama 3.1 8B Instruct', 'Input tokens', '0.0002200000', 'Meta'),
+        bedrockTokenEntry('USE2-Llama3-1-8B-output-tokens', 'Llama 3.1 8B Instruct', 'Output tokens', '0.0008800000', 'Meta'),
+        bedrockTokenEntry('USE2-qwen.qwen3-coder-30b-a3b-instruct-mantle-input-tokens-standard', 'Qwen3 Coder 30B A3B', 'Input tokens', '0.0001500000', 'Qwen'),
+        bedrockTokenEntry('USE2-qwen.qwen3-coder-30b-a3b-instruct-mantle-output-tokens-standard', 'Qwen3 Coder 30B A3B', 'Output tokens', '0.0006000000', 'Qwen'),
+        bedrockTokenEntry('USE2-deepseek.v3.1-mantle-input-tokens-standard', 'DeepSeek V3.1', 'Input tokens', '0.0006200000', 'DeepSeek'),
+        bedrockTokenEntry('USE2-deepseek.v3.1-mantle-output-tokens-standard', 'DeepSeek V3.1', 'Output tokens', '0.0018500000', 'DeepSeek'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([]);
+    expect(catalog.models[llama.modelId]).toMatchObject({
+      inputPerMillionUsd: '0.220000000',
+      outputPerMillionUsd: '0.880000000',
+    });
+    expect(catalog.models[qwen.modelId]).toMatchObject({
+      inputPerMillionUsd: '0.150000000',
+      outputPerMillionUsd: '0.600000000',
+    });
+    expect(catalog.models[deepseek.modelId]).toMatchObject({
+      inputPerMillionUsd: '0.620000000',
+      outputPerMillionUsd: '1.850000000',
+    });
+  });
+
+  it('leaves a model with no matching price-list entries unpriced', () => {
+    const luna = discovered('us.openai.gpt-6-luna', 'openai.gpt-6-luna', 'OpenAI', 'GPT-6 Luna');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [luna],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: kimiEntries() }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([luna.modelId]);
+    expect(catalog.models[luna.modelId]).toBeUndefined();
   });
 
   it('ignores reserved-throughput and guardrail SKUs', () => {
@@ -378,20 +464,6 @@ describe('Bedrock pricing', () => {
 
     expect(catalog.unpricedModelIds).toEqual([reservedModel.modelId]);
     expect(catalog.models[reservedModel.modelId]).toBeUndefined();
-  });
-
-  it('keeps CamelCase-only Meta Llama usagetypes unpriced', () => {
-    const llama = discovered('us.meta.llama3-1-8b-instruct-v1:0', 'meta.llama3-1-8b-instruct-v1:0', 'Meta', 'Llama 3.1 8B Instruct');
-    const catalog = normalizeBedrockPricing({
-      refreshedAt: REFRESHED_AT,
-      discoveredModels: [llama],
-      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
-        bedrockTokenEntry('USE2-Llama3-1-8B-input-tokens', 'Llama 3.1 8B Instruct', 'Input tokens', '0.0002200000', 'Meta'),
-      ] }],
-    });
-
-    expect(catalog.unpricedModelIds).toEqual([llama.modelId]);
-    expect(catalog.models[llama.modelId]).toBeUndefined();
   });
 
   it('keeps a model unpriced when input matches but output is missing', () => {
@@ -449,6 +521,7 @@ describe('Bedrock pricing', () => {
     const noCacheRate: BedrockModelTokenRate = { ...kimiRegionalRate, cacheReadPerMillionUsd: null, cacheWritePerMillionUsd: null };
     expect(calculateBedrockCallCostNanos({ inputTokens: 1000, outputTokens: 0, cacheReadInputTokens: 999, cacheWriteInputTokens: 999 }, noCacheRate)).toBe(3_300_000);
     expect(() => calculateBedrockCallCostNanos({ inputTokens: -1, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, kimiRegionalRate)).toThrow(SpendConfigError);
+    expect(() => calculateBedrockCallCostNanos({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: -1, cacheWriteInputTokens: 0 }, noCacheRate)).toThrow(SpendConfigError);
   });
 
   it('validates catalogs and rejects malformed fields', () => {

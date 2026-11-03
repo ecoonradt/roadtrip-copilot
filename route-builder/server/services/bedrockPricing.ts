@@ -31,6 +31,14 @@ export const AMAZON_NATIVE_PRICING_KEY_ALIASES: Readonly<Record<string, string>>
   'amazon.nova-2-lite-v1:0': 'Nova2.0Lite', 'amazon.nova-pro-v1:0': 'NovaPro', 'amazon.nova-lite-v1:0': 'NovaLite',
   'amazon.nova-micro-v1:0': 'NovaMicro', 'amazon.nova-premier-v1:0': 'NovaPremier',
 };
+export const BEDROCK_PRICING_KEY_ALIASES: Readonly<Record<string, string>> = {
+  ...AMAZON_NATIVE_PRICING_KEY_ALIASES,
+  'deepseek.v3-v1:0': 'deepseek.v3.1',
+  'deepseek.r1-v1:0': 'DeepSeek-R1',
+  'mistral.pixtral-large-2502-v1:0': 'PixtralLarge2502',
+  'moonshot.kimi-k2-thinking': 'moonshotai.kimi-k2-thinking',
+  'zai.glm-5': 'zai.glm5',
+};
 
 interface RawPriceListEntry {
   product: { productFamily: string; attributes: Record<string, string | undefined>; sku: string };
@@ -58,12 +66,14 @@ function parseEntry(text: string): RawPriceListEntry | null {
 
 function classify(entry: RawPriceListEntry): Candidate | null {
   const a = entry.product.attributes;
+  const serviceTier = (a.service_tier ?? '').trim().toLowerCase();
+  if (serviceTier !== '' && serviceTier !== 'standard' && serviceTier !== 'global-standard') return null;
   const usagetype = a.usagetype ?? '';
   const inference = a.inferenceType ?? '';
   const feature = a.feature ?? '';
-  const all = `${inference} ${usagetype} ${feature}`.toLowerCase();
+  const all = `${inference} ${usagetype} ${feature} ${a.model ?? ''}`.toLowerCase();
   if (/audio|image|video/.test(all) || /provisioned throughput|reserved|custom model|fine.?tun/.test(all)) return null;
-  if (/priority|flex|batch/.test(all) || /batch inference/i.test(feature)) return null;
+  if (/priority|flex|batch|latency[-_ ]?optimized|long[-_ ]?(?:ctx|context)/.test(all) || /batch inference/i.test(feature)) return null;
   let dimension: Dimension | null = null;
   if (/cache/.test(all) && /read/.test(all)) dimension = 'cacheRead';
   else if (/cache/.test(all) && /write/.test(all)) dimension = 'cacheWrite';
@@ -80,26 +90,32 @@ function classify(entry: RawPriceListEntry): Candidate | null {
 }
 
 function pathAKeyCandidates(model: DiscoveredBedrockModel): string[] {
-  // Strict precedence: verbatim foundation ID, version-suffix-stripped ID, committed
-  // Amazon-native alias, then the vendor-prefix-stripped bare key.
+  // Strict precedence: verbatim foundation ID, version-suffix-stripped ID, the same ID
+  // without an instruct marker, a committed cross-vendor alias, then the
+  // vendor-prefix-stripped bare keys.
   const keys: string[] = [];
   const addKey = (key: string): void => { if (!keys.includes(key)) keys.push(key); };
   addKey(model.foundationModelId);
   const stripped = model.foundationModelId.replace(/-(?:v)?\d+:\d+$/, '');
   addKey(stripped);
-  const alias = AMAZON_NATIVE_PRICING_KEY_ALIASES[model.foundationModelId];
+  const noInstruct = stripped.replace(/-instruct$/i, '');
+  addKey(noInstruct);
+  const alias = BEDROCK_PRICING_KEY_ALIASES[model.foundationModelId];
   if (alias !== undefined) addKey(alias);
   const dot = stripped.indexOf('.');
-  if (dot >= 0) addKey(stripped.slice(dot + 1));
+  if (dot >= 0) {
+    addKey(stripped.slice(dot + 1));
+    addKey(noInstruct.slice(noInstruct.indexOf('.') + 1));
+  }
   return keys;
 }
 
 function pathAMatches(candidate: Candidate, key: string): boolean {
   const usage = candidate.entry.product.attributes.usagetype ?? '';
-  const prefix = usage.replace(/^USE2-/, '');
-  if (!prefix.startsWith(`${key}-`)) return false;
+  const prefix = usage.replace(/^USE2-/i, '');
+  if (!prefix.toLowerCase().startsWith(`${key.toLowerCase()}-`)) return false;
   const remainder = prefix.slice(key.length + 1).toLowerCase();
-  return /^(mantle|input|output|text-input|text-output|cache)(?:-|$)/.test(remainder);
+  return /^(?:instruct-)?(?:mantle|input|output|text-input|text-output|cache)(?:-|$)/.test(remainder);
 }
 
 function rateString(candidate: Candidate): string {
@@ -111,19 +127,15 @@ function targetScope(model: DiscoveredBedrockModel): 'global' | 'regional' {
   return model.modelId.startsWith('global.') ? 'global' : 'regional';
 }
 
-// Path A resolves a model's dimensions from a single service code. A key wins only when
-// it carries exactly one input and exactly one output at the model's target scope, both
-// from the same service code; lower-precedence keys are consulted only while no key wins.
+// Path A resolves a model's dimensions from a single service code. A key wins as soon as
+// any service code publishes a complete input+output pair for it, and only that code's
+// candidates are returned; lower-precedence keys are consulted only while no key wins.
 function resolvePathAKey(model: DiscoveredBedrockModel, candidates: Candidate[]): Candidate[] {
   const scope = targetScope(model);
   for (const key of pathAKeyCandidates(model)) {
     const keyMatches = candidates.filter(candidate => candidate.entry.serviceCode !== 'AmazonBedrockFoundationModels' && candidate.scope === scope && pathAMatches(candidate, key));
-    const inputs = keyMatches.filter(candidate => candidate.dimension === 'input');
-    const outputs = keyMatches.filter(candidate => candidate.dimension === 'output');
-    if (inputs.length !== 1 || outputs.length !== 1) continue;
-    const serviceCode = inputs[0].entry.serviceCode;
-    if (outputs[0].entry.serviceCode !== serviceCode) continue;
-    return keyMatches.filter(candidate => candidate.entry.serviceCode === serviceCode);
+    const serviceCode = singleCompleteServiceCode(keyMatches);
+    if (serviceCode !== null) return keyMatches.filter(candidate => candidate.entry.serviceCode === serviceCode);
   }
   return [];
 }
@@ -131,25 +143,36 @@ function resolvePathAKey(model: DiscoveredBedrockModel, candidates: Candidate[])
 // Path B is display-name based. A display name is unambiguous when every discovered
 // model sharing it is an inference profile of the same foundation model; distinct
 // foundations sharing a name remain ambiguous and are never guessed.
+function normalizeDisplayName(rawName: string, providerName: string): string {
+  const trimmed = rawName.trim();
+  const withoutScope = trimmed.replace(/^(?:us|global|eu|apac)\s+/i, '');
+  const provider = providerName.trim();
+  const withoutProvider = provider !== '' && withoutScope.toLowerCase().startsWith(`${provider.toLowerCase()} `)
+    ? withoutScope.slice(provider.length + 1)
+    : withoutScope;
+  return withoutProvider.trim().toLowerCase();
+}
+
 function resolvePathB(model: DiscoveredBedrockModel, discoveredModels: DiscoveredBedrockModel[], candidates: Candidate[]): Candidate[] {
   const scope = targetScope(model);
   const matches: Candidate[] = [];
+  const modelDisplay = normalizeDisplayName(model.modelName, model.providerName);
   for (const candidate of candidates) {
     if (candidate.entry.serviceCode !== 'AmazonBedrockFoundationModels' || candidate.scope !== scope) continue;
     const attrs = candidate.entry.product.attributes;
-    const display = (attrs.model ?? '').trim();
-    const providerPrefix = `${(attrs.provider ?? '').trim()} `;
-    const normalizedDisplay = providerPrefix.trim() !== '' && display.startsWith(providerPrefix) ? display.slice(providerPrefix.length).trim() : display;
-    const matchingModels = discoveredModels.filter(other => other.modelName.trim() === normalizedDisplay);
+    const display = normalizeDisplayName(attrs.model ?? '', attrs.provider ?? '');
+    const matchingModels = discoveredModels.filter(other => normalizeDisplayName(other.modelName, other.providerName) === display);
     const matchingFoundations = new Set(matchingModels.map(other => other.foundationModelId));
-    if (matchingFoundations.size === 1 && model.modelName.trim() === normalizedDisplay) matches.push(candidate);
+    if (matchingFoundations.size === 1 && modelDisplay === display) matches.push(candidate);
   }
   return matches;
 }
 
 function singleDimension(candidates: Candidate[], dimension: Dimension): Candidate | null {
   const matches = candidates.filter(candidate => candidate.dimension === dimension);
-  return matches.length === 1 ? matches[0] : null;
+  if (matches.length === 0) return null;
+  const distinctRates = new Set(matches.map(rateString));
+  return distinctRates.size === 1 ? matches[0] : null;
 }
 
 // A rate record is assembled from exactly one service code: a complete input+output
@@ -169,7 +192,13 @@ function singleCompleteServiceCode(candidates: Candidate[]): string | null {
 
 export function calculateBedrockCallCostNanos(usage: BedrockTokenUsage, rate: BedrockModelTokenRate): number {
   const values: Array<[number, string | null]> = [[usage.inputTokens, rate.inputPerMillionUsd], [usage.outputTokens, rate.outputPerMillionUsd], [usage.cacheReadInputTokens, rate.cacheReadPerMillionUsd], [usage.cacheWriteInputTokens, rate.cacheWritePerMillionUsd]];
-  return values.reduce((sum, [count, price]) => sum + (price === null ? 0 : calculatePerMillionRateCostNanos(count, price)), 0);
+  const sum = values.reduce((total, [count, price]) => {
+    // Validate every count even when the model publishes no cache rate, so negative or
+    // fractional cache usage can never slip through unpriced dimensions.
+    const cost = price === null ? calculatePerMillionRateCostNanos(count, '0') : calculatePerMillionRateCostNanos(count, price);
+    return total + BigInt(cost);
+  }, 0n);
+  return toSafeNumberNanos(sum);
 }
 
 export function normalizeBedrockPricing(input: { priceLists: ReadonlyArray<{ serviceCode: string; entries: string[] }>; discoveredModels: DiscoveredBedrockModel[]; refreshedAt: string }): BedrockPricingCatalog {
