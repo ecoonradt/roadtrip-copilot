@@ -5,6 +5,7 @@ import {
   MAX_PRICING_PAGES,
   PRICED_REGION,
   PRICING_API_REGION,
+  PRICING_FETCH_TIMEOUT_MS,
   PricingUnavailableError,
   calculateBedrockCallCostNanos,
   fetchBedrockPricingCatalog,
@@ -13,7 +14,7 @@ import {
   type BedrockModelTokenRate,
   type DiscoveredBedrockModel,
 } from '../../server/services/bedrockPricing.js';
-import { SpendConfigError } from '../../server/services/spendMath.js';
+import { SpendValueError } from '../../server/services/spendMath.js';
 
 const REFRESHED_AT = '2026-11-02T00:00:00.000Z';
 
@@ -520,8 +521,8 @@ describe('Bedrock pricing', () => {
 
     const noCacheRate: BedrockModelTokenRate = { ...kimiRegionalRate, cacheReadPerMillionUsd: null, cacheWritePerMillionUsd: null };
     expect(calculateBedrockCallCostNanos({ inputTokens: 1000, outputTokens: 0, cacheReadInputTokens: 999, cacheWriteInputTokens: 999 }, noCacheRate)).toBe(3_300_000);
-    expect(() => calculateBedrockCallCostNanos({ inputTokens: -1, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, kimiRegionalRate)).toThrow(SpendConfigError);
-    expect(() => calculateBedrockCallCostNanos({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: -1, cacheWriteInputTokens: 0 }, noCacheRate)).toThrow(SpendConfigError);
+    expect(() => calculateBedrockCallCostNanos({ inputTokens: -1, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, kimiRegionalRate)).toThrow(SpendValueError);
+    expect(() => calculateBedrockCallCostNanos({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: -1, cacheWriteInputTokens: 0 }, noCacheRate)).toThrow(SpendValueError);
   });
 
   it('validates catalogs and rejects malformed fields', () => {
@@ -551,7 +552,9 @@ describe('Bedrock pricing', () => {
         { PriceList: [bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-output-tokens-standard', 'Kimi K3', 'Output tokens', '0.0165000000', 'Moonshot AI')], NextToken: 'kimi-page-3' },
         { PriceList: [bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-cache-read-tokens-standard', 'Kimi K3', 'Cache read tokens', '0.0003300000', 'Moonshot AI')] },
       ],
-      AmazonBedrockFoundationModels: [{ PriceList: [] }],
+      AmazonBedrockFoundationModels: [{ PriceList: [
+        marketplaceEntry('USE2-MP:USE2_InputTokenCount-Units', 'Claude Sonnet 4.6', 'Input tokens', '3.3000000000'),
+      ] }],
       AmazonBedrockService: [{ PriceList: [] }],
     });
 
@@ -578,7 +581,7 @@ describe('Bedrock pricing', () => {
       AmazonBedrock: Array.from({ length: MAX_PRICING_PAGES + 5 }, () => ({ PriceList: [], NextToken: 'endless' })),
     });
 
-    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [], pricingClient: client, now: () => 0 }).then(
+    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [kimiRegional], pricingClient: client, now: () => 0 }).then(
       () => null,
       (err: unknown) => err,
     );
@@ -599,7 +602,7 @@ describe('Bedrock pricing', () => {
       AmazonBedrock: Array.from({ length: 10 }, () => ({ PriceList: [], NextToken: 'endless' })),
     });
 
-    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [], pricingClient: client, now }).then(
+    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [kimiRegional], pricingClient: client, now }).then(
       () => null,
       (err: unknown) => err,
     );
@@ -710,7 +713,7 @@ describe('Bedrock pricing', () => {
     const send = vi.fn((): Promise<never> => Promise.reject(new Error('boom')));
     const client = { send } as unknown as PricingClient;
 
-    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [], pricingClient: client, now: () => 0 }).then(
+    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [kimiRegional], pricingClient: client, now: () => 0 }).then(
       () => null,
       (err: unknown) => err,
     );
@@ -727,7 +730,9 @@ describe('Bedrock pricing', () => {
         '{"product":',
         bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-output-tokens-standard', 'Kimi K3', 'Output tokens', '0.0165000000', 'Moonshot AI'),
       ] }],
-      AmazonBedrockFoundationModels: [{ PriceList: [] }],
+      AmazonBedrockFoundationModels: [{ PriceList: [
+        marketplaceEntry('USE2-MP:USE2_InputTokenCount-Units', 'Claude Sonnet 4.6', 'Input tokens', '3.3000000000'),
+      ] }],
       AmazonBedrockService: [{ PriceList: [] }],
     });
 
@@ -739,5 +744,261 @@ describe('Bedrock pricing', () => {
       outputPerMillionUsd: '16.500000000',
       cacheReadPerMillionUsd: null,
     });
+  });
+
+  it('fails loudly when a required service code returns no price-list entries', async () => {
+    const { client } = mockPricingClient({
+      AmazonBedrock: [{ PriceList: [
+        bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-input-tokens-standard', 'Kimi K3', 'Input tokens', '0.0033000000', 'Moonshot AI'),
+      ] }],
+      AmazonBedrockFoundationModels: [{ PriceList: [] }],
+      AmazonBedrockService: [{ PriceList: [] }],
+    });
+
+    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [kimiRegional], pricingClient: client, now: () => 0 }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(outcome).toBeInstanceOf(PricingUnavailableError);
+    expect((outcome as Error).message).toContain('AmazonBedrockFoundationModels');
+  });
+
+  it('fails loudly when no discovered model resolves a price', async () => {
+    const { client } = mockPricingClient({
+      AmazonBedrock: [{ PriceList: [
+        bedrockTokenEntry('USE2-other.vendor-model-input-tokens', 'Other Model', 'Input tokens', '0.0010000000', 'Other Vendor'),
+      ] }],
+      AmazonBedrockFoundationModels: [{ PriceList: [
+        marketplaceEntry('USE2-MP:USE2_InputTokenCount-Units', 'Claude Sonnet 4.6', 'Input tokens', '3.3000000000'),
+      ] }],
+      AmazonBedrockService: [{ PriceList: [] }],
+    });
+
+    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [kimiRegional], pricingClient: client, now: () => 0 }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(outcome).toBeInstanceOf(PricingUnavailableError);
+    expect((outcome as Error).message).toMatch(/no priced models/i);
+  });
+
+  it('fails loudly before any request when no models were discovered', async () => {
+    const { client, send } = mockPricingClient({
+      AmazonBedrock: [{ PriceList: kimiEntries() }],
+      AmazonBedrockFoundationModels: [{ PriceList: claudeMarketplaceEntries() }],
+      AmazonBedrockService: [{ PriceList: [] }],
+    });
+
+    const outcome = await fetchBedrockPricingCatalog({ discoveredModels: [], pricingClient: client, now: () => 0 }).then(
+      () => null,
+      (err: unknown) => err,
+    );
+
+    expect(outcome).toBeInstanceOf(PricingUnavailableError);
+    expect((outcome as Error).message).toMatch(/no discovered models/i);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('aborts a stalled page when the total fetch deadline elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn(
+        (_command: GetProductsCommand, options?: { abortSignal?: AbortSignal }): Promise<PricingPage> =>
+          new Promise((_resolve, reject) => {
+            options?.abortSignal?.addEventListener('abort', () => {
+              const error = new Error('The operation was aborted');
+              error.name = 'AbortError';
+              reject(error);
+            });
+          }),
+      );
+      const client = { send } as unknown as PricingClient;
+
+      const pending = fetchBedrockPricingCatalog({
+        discoveredModels: [kimiRegional],
+        pricingClient: client,
+        now: () => 0,
+      }).then(
+        () => null,
+        (err: unknown) => err,
+      );
+      await vi.advanceTimersByTimeAsync(PRICING_FETCH_TIMEOUT_MS + 10);
+      const outcome = await pending;
+
+      expect(outcome).toBeInstanceOf(PricingUnavailableError);
+      expect((outcome as Error).message).toMatch(/timeout/i);
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats a zero-rate input or output SKU as unpriced', () => {
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [novaRegional],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-Nova2.0Lite-input-tokens', 'Nova 2 Lite', 'Input tokens', '0.0000000000', 'Amazon'),
+        bedrockTokenEntry('USE2-Nova2.0Lite-output-tokens', 'Nova 2 Lite', 'Output tokens', '0.0027500000', 'Amazon'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([novaRegional.modelId]);
+    expect(catalog.models[novaRegional.modelId]).toBeUndefined();
+  });
+
+  it('keeps a legitimate free cache-write rate and rejects a zero input or output rate', () => {
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [novaRegional],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: novaEntries() }],
+    });
+
+    expect(catalog.models[novaRegional.modelId]?.cacheWritePerMillionUsd).toBe('0.000000000');
+    expect(() => validateBedrockPricingCatalog(JSON.parse(JSON.stringify(catalog)))).not.toThrow();
+    expect(() => validateBedrockPricingCatalog({
+      ...catalog,
+      models: {
+        [novaRegional.modelId]: { ...catalog.models[novaRegional.modelId], inputPerMillionUsd: '0.000000000' },
+      },
+    })).toThrow();
+    expect(() => validateBedrockPricingCatalog({
+      ...catalog,
+      models: {
+        [novaRegional.modelId]: { ...catalog.models[novaRegional.modelId], outputPerMillionUsd: '0.000000000' },
+      },
+    })).toThrow();
+  });
+
+  it('keeps a model unpriced when one SKU publishes conflicting token dimensions', () => {
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [kimiRegional],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        priceEntry({
+          serviceCode: 'AmazonBedrock',
+          usagetype: 'USE2-moonshotai.kimi-k3-mantle-input-tokens-standard',
+          model: 'Kimi K3',
+          inferenceType: 'Input tokens',
+          feature: 'On-demand Inference',
+          provider: 'Moonshot AI',
+          dimensions: [
+            { unit: '1K tokens', usd: '0.0010000000' },
+            { unit: '1K tokens', usd: '0.0020000000' },
+          ],
+        }),
+        bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-output-tokens-standard', 'Kimi K3', 'Output tokens', '0.0165000000', 'Moonshot AI'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([kimiRegional.modelId]);
+    expect(catalog.models[kimiRegional.modelId]).toBeUndefined();
+  });
+
+  it('classifies dimensions from SKU identity and never from the model display name', () => {
+    const model = discovered('us.vendor.model-x', 'vendor.model-x', 'Vendor', 'Cache Reader 1h');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [model],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-vendor.model-x-input-tokens', 'Cache Reader 1h', 'Input tokens', '0.0010000000', 'Vendor'),
+        bedrockTokenEntry('USE2-vendor.model-x-output-tokens', 'Cache Reader 1h', 'Output tokens', '0.0020000000', 'Vendor'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([]);
+    expect(catalog.models[model.modelId]).toMatchObject({
+      inputPerMillionUsd: '1.000000000',
+      outputPerMillionUsd: '2.000000000',
+    });
+  });
+
+  it('excludes 1-hour cache-write SKUs named 1hr, 1hour, and underscore-joined forms', () => {
+    const model = discovered('us.vendor.model-x', 'vendor.model-x', 'Vendor', 'Model X');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [model],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-vendor.model-x-mantle-input-tokens-standard', 'Model X', 'Input tokens', '0.0010000000', 'Vendor'),
+        bedrockTokenEntry('USE2-vendor.model-x-mantle-output-tokens-standard', 'Model X', 'Output tokens', '0.0020000000', 'Vendor'),
+        bedrockTokenEntry('USE2-vendor.model-x-mantle-cache-write-tokens-30m-standard', 'Model X', 'Cache write tokens', '0.0012500000', 'Vendor'),
+        bedrockTokenEntry('USE2-vendor.model-x-mantle-cache-write-input-tokens-1hr', 'Model X', 'Cache write tokens', '0.0050000000', 'Vendor'),
+        bedrockTokenEntry('USE2-vendor.model-x-cache-write-input-tokens-1hour', 'Model X', 'Cache write tokens', '0.0060000000', 'Vendor'),
+        bedrockTokenEntry('USE2-vendor.model-x-cache_write_input_tokens_1h', 'Model X', 'Cache write tokens', '0.0070000000', 'Vendor'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([]);
+    expect(catalog.models[model.modelId]).toMatchObject({
+      inputPerMillionUsd: '1.000000000',
+      outputPerMillionUsd: '2.000000000',
+      cacheWritePerMillionUsd: '1.250000000',
+    });
+  });
+
+  it('reads the scope from the model display name when the usagetype carries no scope marker', () => {
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [kimiRegional, kimiGlobal],
+      priceLists: [{ serviceCode: 'AmazonBedrock', entries: [
+        bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-input-tokens', 'Global Kimi K3', 'Input tokens', '0.0030000000', 'Moonshot AI'),
+        bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-output-tokens', 'Global Kimi K3', 'Output tokens', '0.0150000000', 'Moonshot AI'),
+        bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-input-tokens-standard', 'Kimi K3', 'Input tokens', '0.0033000000', 'Moonshot AI'),
+        bedrockTokenEntry('USE2-moonshotai.kimi-k3-mantle-output-tokens-standard', 'Kimi K3', 'Output tokens', '0.0165000000', 'Moonshot AI'),
+      ] }],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([]);
+    expect(catalog.models[kimiRegional.modelId]).toMatchObject({
+      inputPerMillionUsd: '3.300000000',
+      outputPerMillionUsd: '16.500000000',
+    });
+    expect(catalog.models[kimiGlobal.modelId]).toMatchObject({
+      inputPerMillionUsd: '3.000000000',
+      outputPerMillionUsd: '15.000000000',
+    });
+  });
+
+  it('stops key precedence at the first ambiguous key instead of falling through to a bare key', () => {
+    const model = discovered('us.vendor.model-x', 'vendor.model-x', 'Vendor', 'Model X');
+    const catalog = normalizeBedrockPricing({
+      refreshedAt: REFRESHED_AT,
+      discoveredModels: [model],
+      priceLists: [
+        { serviceCode: 'AmazonBedrock', entries: [
+          bedrockTokenEntry('USE2-vendor.model-x-input-tokens', 'Model X', 'Input tokens', '0.0010000000', 'Vendor'),
+          bedrockTokenEntry('USE2-vendor.model-x-output-tokens', 'Model X', 'Output tokens', '0.0020000000', 'Vendor'),
+          bedrockTokenEntry('USE2-model-x-input-tokens', 'Model X', 'Input tokens', '0.0090000000', 'Vendor'),
+          bedrockTokenEntry('USE2-model-x-output-tokens', 'Model X', 'Output tokens', '0.0190000000', 'Vendor'),
+        ] },
+        { serviceCode: 'AmazonBedrockService', entries: [
+          priceEntry({
+            serviceCode: 'AmazonBedrockService',
+            usagetype: 'USE2-vendor.model-x-input-tokens',
+            model: 'Model X',
+            inferenceType: 'Input tokens',
+            feature: 'On-demand Inference',
+            provider: 'Vendor',
+            unit: '1K tokens',
+            usd: '0.0030000000',
+          }),
+          priceEntry({
+            serviceCode: 'AmazonBedrockService',
+            usagetype: 'USE2-vendor.model-x-output-tokens',
+            model: 'Model X',
+            inferenceType: 'Output tokens',
+            feature: 'On-demand Inference',
+            provider: 'Vendor',
+            unit: '1K tokens',
+            usd: '0.0060000000',
+          }),
+        ] },
+      ],
+    });
+
+    expect(catalog.unpricedModelIds).toEqual([model.modelId]);
+    expect(catalog.models[model.modelId]).toBeUndefined();
   });
 });

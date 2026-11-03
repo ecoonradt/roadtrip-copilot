@@ -8,6 +8,7 @@ import {
   parseDecimalUsdStringToNanos,
   roundHalfUpDivide,
   SpendConfigError,
+  SpendValueError,
   toSafeNumberNanos,
 } from '../../server/services/spendMath.js';
 
@@ -64,13 +65,16 @@ describe('spend math', () => {
     expect(() => toSafeNumberNanos(2n ** 63n)).toThrow(SpendConfigError);
   });
 
-  it('rejects invalid counts', () => {
+  it('rejects invalid counts with a value error, not a configuration error', () => {
     for (const call of [
       () => calculatePerUnitCostNanos(-1, '1'),
       () => calculatePerMillionRateCostNanos(1.5, '1'),
       () => calculateGbSecondCostNanos(1, -1, '1'),
       () => calculateEgressCostNanos(-1, '1'),
-    ]) expect(call).toThrow(SpendConfigError);
+    ]) {
+      expect(call).toThrow(SpendValueError);
+      expect(call).not.toThrow(SpendConfigError);
+    }
   });
 
   it('loads default global service list rates from a clean environment', async () => {
