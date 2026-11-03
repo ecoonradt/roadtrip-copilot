@@ -54,8 +54,9 @@ in the harness Subagent Model Registry (OpenCode: `.opencode/rules/harness.md`).
 - Write an incremental findings log to a unique path relative to the target root, e.g.
   `tmp/review-loop-<slug>-<timestamp>.md`. Record the base, model identities, findings and their
   status, tests run, and known limitations. Update it as the loop progresses.
-- If a change implies an architectural surprise, update the active Work Package and record an ADR
-  before continuing.
+- Log tactical findings and contract adjustments in the active Work Package (updating in-flight
+  contracts in place without "amendment" notes); never create a new ADR for module-level details or
+  reference step/gate/milestone numbers in ADRs, permanent docs, or code comments (AGENTS.md Rule 13).
 
 ## Bounded workers
 

@@ -29,9 +29,11 @@ defaults and override tokens live in the harness Subagent Model Registry.
 - Ask direct, pointed questions in small batches; get answers before assuming. Do not validate
   the user — stress-test the proposal.
 - Refuse to produce boilerplate or code while material ambiguity remains. Every resolved ambiguity
-  becomes either a literal contract in the WP or an ADR.
-- If the interrogation exposes a decision that changes architecture, record it in `decisions/` and
-  `DECISIONS.md` before continuing.
+  becomes a literal contract in the WP (updated in place, without meta-history or "amendment"
+  notes).
+- Reserve ADRs (`decisions/` and `DECISIONS.md`) strictly for lasting system-architecture choices,
+  and keep all permanent docs/ADRs free of ephemeral step, gate, or milestone references
+  (AGENTS.md Rule 13).
 
 ## Output
 

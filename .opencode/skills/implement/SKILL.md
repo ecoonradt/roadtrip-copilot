@@ -45,8 +45,10 @@ them from the harness Subagent Model Registry.
    evidence.
 5. Where the WP calls for it, dispatch a fresh unprimed `diff-reviewer` (Gate 2B). Its findings
    feed your personal audit; its APPROVED verdict never replaces it.
-6. Close the task: check off the WP step, update Discoveries & Handoff. Any technical surprise →
-   ADR before the next dispatch.
+6. Close the task: check off the WP step, update Discoveries & Handoff. Log tactical/API quirks in
+   the WP's Discoveries log (and update in-flight contracts in place); never create a new ADR for
+   module-level details, and never reference step/gate/milestone numbers in ADRs, permanent docs,
+   or code comments (AGENTS.md Rule 13).
 
 ## Run-level verification
 

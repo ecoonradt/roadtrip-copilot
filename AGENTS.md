@@ -115,8 +115,12 @@ Subproject directory details are maintained locally in their respective handbook
 8. **Maintain Clean, Human-Friendly UI:** Never introduce internal debug text or verification claims into `route-builder/`. All UI updates must adhere to Human-Centered UI/UX Principles in [`route-builder/AGENTS.md`](route-builder/AGENTS.md) Section 2C.
 9. **Maintain Directory Layout:** Whenever adding, removing, or relocating core classes, services, or architecture files, update the Directory Layout in [`docs/reference/directory-layout.md`](docs/reference/directory-layout.md) so that developers and agents can quickly navigate the codebase without scanning the entire tree.
 10. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused. Never leak harness-specific tool bans, terminal commands, or background task mechanics into the domain prompt. Implement all harness capabilities, tool allowlists, and response cleaning via the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
-11. **Adhere to the Project & Task Working Models (Section 6):** Frontier models act as orchestrators (authoring plans, conducting research, verifying code) and delegate implementation to cheaper worker subagents per the active harness adapter to optimize developer quota. For major initiatives in `docs/projects/`, never modify code without an active Work Package, and record all technical surprises in ADRs (`decisions/`) and `DECISIONS.md` before continuing.
+11. **Adhere to the Project & Task Working Models (Section 6):** Frontier models act as orchestrators (authoring plans, conducting research, verifying code) and delegate implementation to cheaper worker subagents per the active harness adapter to optimize developer quota. For major initiatives in `docs/projects/`, never modify code without an active Work Package, record tactical discoveries in the active Work Package, and reserve ADRs (`decisions/`) strictly for lasting architectural pivots.
 12. **No Silent Fallbacks or Mock Degradation:** Silent fallbacks (such as catching a failure in an external service or cloud API like Amazon Bedrock, OSRM, or Google OIDC and silently falling back to mock templates, client-side mocks, or local CLI tools) are strictly forbidden. Silent fallbacks mask critical operational failures, break in cloud environments, and circumvent proper error handling. Any failure in external APIs or internal dependencies must fail loudly, transparently, and deterministically with accurate HTTP status codes and clear error messages surfaced to the caller and UI. **Silent fallbacks are almost always wrong. Always check with the user and obtain explicit approval before designing or implementing any fallback mechanism.**
+13. **Strict ADR Discipline, In-Place Updates & Timeless Documentation:**
+    * **No Unnecessary ADRs:** Reserve ADRs (`decisions/`) strictly for high-level, lasting system-architecture decisions. Module-level algorithms, API payload quirks, and step-level implementation details belong in the active Work Package (`WP-XX`) and code comments—never in a new ADR unless system architecture changes (and only with user alignment).
+    * **Update In-Place (No Meta-History):** While a milestone or decision is in flight, update docs, plans, and ADRs in place. Never append chronological `"Amendment (date)..."` blocks, `"Supersedes earlier draft"` notes, or stories of prior attempts and review rounds.
+    * **No Ephemeral Process References in Durable Files:** Permanent docs (`AGENTS.md`, `README.md`, Tier-1 blueprints, `DECISIONS.md`, `decisions/*.md`) and source code comments must describe timeless system state—**never reference milestone IDs (`M4.5`), work-package step numbers (`Step 1`, `Step 2`), or review gates (`Gate 1`, `Gate 2A/2B`) outside `ROADMAP.md` and `plan/active/WP-*.md`**.
 
 ---
 
@@ -128,9 +132,9 @@ For full architectural details and mechanics, see [`docs/README.md`](docs/README
 2. Tier 2 Phase Roadmap (`plan/ROADMAP.md`): milestones and strict Definition of Done.
    Never break milestone N+1 into micro-tasks before N is merged and verified.
 3. Tier 3 Active Work Package (`plan/active/WP-XX-*.md`): exactly ONE at a time, 1-2 session scope.
-   New or materially revised WPs pass adversarial independent plan review (Gate 1B, `WORKING_MODEL.md`)
+   New or materially revised WPs pass adversarial plan review (Gate 1B, `WORKING_MODEL.md`)
    before any implementation dispatch.
-4. ADRs (`DECISIONS.md` + `decisions/`): scan the index first; record surprises before coding on.
+4. ADRs (`DECISIONS.md` + `decisions/`): scan the index first; reserve new ADRs strictly for lasting architectural pivots (log tactical discoveries in the active WP, per Rule 13).
 
 ### B. Smaller Tactical Tasks & Spikes (`docs/tasks/`) — Single-File Plan
 Self-contained experiments or 1-2 session features. One markdown file holds spec, steps,
@@ -151,8 +155,7 @@ Non-negotiable properties:
 2. **Single level only.** Workers cannot spawn further workers in any harness. The orchestrator owns
    all fan-out and parallelism.
 3. **Bounded tasks only.** Never dispatch open-ended or ambiguous requests to a worker.
-4. **Surprises escalate.** If an unexpected constraint appears, stop and record an ADR (Section 3)
-   before writing any speculative workaround.
+4. **Surprises escalate.** Log tactical/API quirks in the active WP's Discoveries log; if an unexpected constraint forces a genuine architectural change, stop and consult the user before recording an ADR or writing any workaround (Rule 13).
 5. **Adversarial verification & independent review governance (Gate 2A vs. Gate 2B).**
    * **Gate 2A (Mandatory Orchestrator Audit):** Never delegated. The orchestrator personally audits the full `git diff` against the 8-point Adversarial Review Checklist in `WORKING_MODEL.md` (region/IAM accuracy, async race/abort safety, timer/stream leak cleanup, input allowlist validation, output/reasoning tag hygiene, zero silent fallbacks, unhappy-path test coverage, and UI layout geometry) and runs both `./scripts/ci_check.sh` and `cd route-builder && npm run test:browser`. A worker's own report of success is not evidence.
    * **Gate 2B (Optional Independent Review):** Supplements, never replaces, Gate 2A. Unlike Contract-First implementation prompts (item 1), an independent reviewer must be invoked as a fresh-context, read-only agent with a short neutral prompt containing only: the diff/base to inspect, pointers to the objective/spec (`WP-XX`) and architectural rules (`AGENTS.md`, `DECISIONS.md`), a unique `tmp/` findings output path for incremental reporting, and standard read-only/no-nesting boundaries. Never prime an independent reviewer with a prior fix list, earlier findings, or a targeted checklist, and never claim review independence if the reviewer was primed.
@@ -168,7 +171,7 @@ harness adapter before delegating:
 ### D. Session Lifecycle
 1. **Kickoff:** read `DECISIONS.md` and the active Work Package. If `plan/active/` is empty, author
    `ROADMAP.md` and the next WP (with Gate 1 Contract-First specifications) before touching code. Verify live cloud/SDK assumptions with read-only checks. State scope to the user, then begin.
-2. **In-flight:** delegate bounded implementation using Contract-First prompts; log ADRs on surprises.
+2. **In-flight:** delegate bounded implementation using Contract-First prompts; log tactical discoveries in the active WP (Rule 13).
 3. **Wrap-up:** perform the Gate 2 Adversarial Diff Audit, run `./scripts/ci_check.sh` and `npm run test:browser`, sync living docs, update the WP handoff log, archive the WP once its Definition of Done is verified.
 
 ### E. Project Sequencing & Dependencies

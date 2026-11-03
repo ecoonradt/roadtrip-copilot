@@ -56,19 +56,20 @@ flowchart TD
 
 ---
 
-## 3. Architecture Decision Records (ADRs) & Index
+## 3. Architecture Decision Records (ADRs) & Documentation Hygiene
 
-When technical realities force a divergence from the original design (e.g. SDK constraints, API quotas, library quirks), we do not hide decisions in commit messages or leave conflicting code.
+ADRs (`decisions/`) are strictly reserved for **high-level, lasting system-architecture choices** (e.g., selecting a cloud service, authentication topology, storage backend, or cross-cutting boundary).
 
 1. **Table of Contents Index ([`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md)):**
-   * A single, compact markdown file containing a scannable table of all decisions: ID, Date, Title, Status, 1-line Summary, and link to details.
-   * Incoming agents read this small file first to rapidly build mental context on architectural choices.
+   * A single, compact markdown file containing a scannable table of all architectural decisions: ID, Date, Title, Status, 1-line Summary, and link to details.
 2. **Individual ADR Files ([`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/)):**
-   * Standalone files created from [`0000-template.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/0000-template.md) (e.g. `0001-amazon-bedrock-single-bill-ai.md`).
-   * Documents Context, Decision Drivers, Considered Options, Outcome, Consequences, and Code Touchpoints.
-3. **Continuous Living Documentation (Zero Stale Non-Project Docs):**
-   * Top-level and subproject documentation—specifically [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), [`README.md`](file:///home/eric/code/roadtrip-copilot/README.md), [`route-builder/AGENTS.md`](file:///home/eric/code/roadtrip-copilot/route-builder/AGENTS.md), [`route-builder/README.md`](file:///home/eric/code/roadtrip-copilot/route-builder/README.md), and [`docs/README.md`](file:///home/eric/code/roadtrip-copilot/docs/README.md)—**must never be left stale until the end of the project**.
-   * Every Work Package must update these living documents **in the same milestone** whenever directory layouts, CLI scripts, environment variables, architectural pillars, or test suites change.
+   * Standalone files created from [`0000-template.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/0000-template.md) only when a genuine architectural pivot occurs (with user alignment).
+   * **Tactical Discoveries Belong in the Active WP, Not ADRs:** Module-level parsing rules, API payload quirks, and step-level implementation details belong in the active Work Package's *Discoveries & Deviations Log* and code comments—never in a new ADR.
+3. **Update In-Place & Timeless Durable Artifacts (AGENTS.md Rule 13):**
+   * **Update in-place:** While a milestone or decision is in flight, update plans, specs, and ADRs in place. Never append chronological `"Amendment (date)..."` blocks, `"Supersedes earlier draft"` notes, or stories of prior attempts/review rounds.
+   * **No ephemeral process references:** Permanent documentation (`AGENTS.md`, `README.md`, Tier-1 blueprints, `DECISIONS.md`, `decisions/*.md`) and source code comments must describe timeless system state. **Never reference milestone IDs (`M4.5`), work-package step numbers (`Step 1`, `Step 2`), or review gates (`Gate 1`, `Gate 2A/2B`) outside `ROADMAP.md` and `plan/active/WP-*.md`.**
+4. **Continuous Living Documentation (Zero Stale Non-Project Docs):**
+   * Top-level and subproject documentation—specifically [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), [`README.md`](file:///home/eric/code/roadtrip-copilot/README.md), [`route-builder/AGENTS.md`](file:///home/eric/code/roadtrip-copilot/route-builder/AGENTS.md), [`route-builder/README.md`](file:///home/eric/code/roadtrip-copilot/route-builder/README.md), and [`docs/README.md`](file:///home/eric/code/roadtrip-copilot/docs/README.md)—must be updated **at milestone completion** when directory layouts, CLI scripts, environment variables, architectural pillars, or test suites change (never polluted mid-planning with "not yet implemented" disclaimers).
 
 ---
 
@@ -175,10 +176,9 @@ Every agent working on the Route Scout Cloud project must adhere to this three-p
 
 ### Phase B: Execution & In-Flight Discoveries
 1. Orchestrator defines exact interfaces, edge-case invariants, tests, and boundaries in the Work Package; delegates bounded implementation tasks to subagent workers per the active harness adapter using Gate 1 prompts.
-2. **If an unexpected technical constraint is discovered:**
-   * Stop immediately before writing speculative workarounds.
-   * Record the decision in a new ADR file in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and link it in [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md).
-   * Update the "Discoveries & Deviations" section in the active Work Package.
+2. **If an unexpected technical constraint or API quirk is discovered:**
+   * For tactical/module-level details (payload shapes, parsing rules, SDK quirks), update the contract in place in the active Work Package and record the finding in its "Discoveries & Deviations" section—**do not create a new ADR**.
+   * Only if a constraint forces a genuine, lasting change to system architecture, stop and align with the user before recording a new ADR in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (see Rule 13 in `AGENTS.md`).
 3. Preserve all non-negotiable architectural rules from [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (e.g., zero cloud dependencies in `app/` drive loop, isolated local disk storage in `npm run dev` alongside Bedrock AI per ADR-0004, single assigned AWS project Region compliance, literal semicolons in OSRM paths, strict TypeScript with zero `any` types).
 
 ### Phase C: Session Wrap-Up, Adversarial Audit, Living Docs Sync & Verification

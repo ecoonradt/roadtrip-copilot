@@ -67,11 +67,12 @@ passed.
 - Cross-check every finding against the sources of truth before acting. Classify each as
   confirmed, rejected (with reason), or user-decision-needed. Unresolved confirmed findings block
   progress.
-- Fix the WP yourself — the same session both finds and fixes, so state that explicitly.
-- A finding that changes architecture requires an ADR before the plan edit is committed to the
-  file.
-- Record the round (findings, verdict, resolutions) in the `tmp/` report and summarize the round
-  in the plan's "Discoveries & Deviations" section.
+- Fix the WP in place (without appending "amendment" narratives) — the same session both finds and
+  fixes, so state that explicitly.
+- Reserve ADRs strictly for lasting system-architecture changes (with user alignment), never for
+  specification tightenings or module-level details, and keep ADRs/permanent docs free of
+  step/gate/milestone references (AGENTS.md Rule 13).
+- Record the round (findings, verdict, resolutions) in the `tmp/` report.
 
 ## Exit
 

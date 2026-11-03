@@ -3,10 +3,10 @@
 This document is the high-level Table of Contents and index for all Architecture Decision Records (ADRs) made during the **Route Scout Cloud Architecture** project.
 
 > [!TIP]
-> **Instructions for AI Agents & Developers:**  
-> Before modifying cloud backend or mobile client code, read this table to understand the core technical decisions that govern this system. If you discover a technical constraint or need to diverge from the original plan, **do not make silent changes**. Instead, draft a new ADR using [`0000-template.md`](decisions/0000-template.md), link it here, and record the discovery in the active Work Package.
->
-> At the conclusion of this major cloud project, decisions with lasting cross-project relevance will be compressed and hoisted up to `docs/reference/` and `AGENTS.md`.
+> **Instructions for AI Agents & Developers (AGENTS.md Rule 13):**  
+> Read this table to understand the core architectural decisions that govern this system.  
+> * **No Unnecessary ADRs:** Reserve ADRs strictly for lasting, system-level architectural decisions. Tactical implementation details, API payload quirks, and module-level parsing rules belong in the active Work Package (`plan/active/WP-*.md`) and code comments—never in a new ADR unless the system architecture changes (and only with user alignment).  
+> * **Update In-Place & Keep ADRs Timeless:** Update in-flight ADRs in place (never append `"Amendment..."` blocks or stories of review rounds). Never reference ephemeral process constructs (`M4.5`, `Step 1`, `Gate 1`, `Gate 2B`) inside ADR files.
 
 ---
 
