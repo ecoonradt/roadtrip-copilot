@@ -1,6 +1,7 @@
 ---
 description: Writes and repairs Vitest suites under route-builder/tests against fixed interfaces
 mode: subagent
+model: opencode-go/kimi-k2.7-code
 steps: 30
 permissions:
   - action: subagent

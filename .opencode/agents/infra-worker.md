@@ -1,6 +1,7 @@
 ---
 description: Implements bounded AWS CDK changes in infra/ under the project Region constraints
 mode: subagent
+model: opencode-go/gpt-5.6-luna
 steps: 40
 permissions:
   - action: subagent

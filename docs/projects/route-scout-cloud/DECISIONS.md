@@ -3,10 +3,10 @@
 This document is the high-level Table of Contents and index for all Architecture Decision Records (ADRs) made during the **Route Scout Cloud Architecture** project.
 
 > [!TIP]
-> **Instructions for AI Agents & Developers:**  
-> Before modifying cloud backend or mobile client code, read this table to understand the core technical decisions that govern this system. If you discover a technical constraint or need to diverge from the original plan, **do not make silent changes**. Instead, draft a new ADR using [`0000-template.md`](decisions/0000-template.md), link it here, and record the discovery in the active Work Package.
->
-> At the conclusion of this major cloud project, decisions with lasting cross-project relevance will be compressed and hoisted up to `docs/reference/` and `AGENTS.md`.
+> **Instructions for AI Agents & Developers (AGENTS.md Rule 13):**  
+> Read this table to understand the core architectural decisions that govern this system.  
+> * **No Unnecessary ADRs:** Reserve ADRs strictly for lasting, system-level architectural decisions. Tactical implementation details, API payload quirks, and module-level parsing rules belong in the active Work Package (`plan/active/WP-*.md`) and code comments—never in a new ADR unless the system architecture changes (and only with user alignment).  
+> * **Update In-Place & Keep ADRs Timeless:** Update in-flight ADRs in place (never append `"Amendment..."` blocks or stories of review rounds). Never reference ephemeral process constructs (`M4.5`, `Step 1`, `Gate 1`, `Gate 2B`) inside ADR files.
 
 ---
 
@@ -26,6 +26,7 @@ This document is the high-level Table of Contents and index for all Architecture
 | **ADR-0010** | 2026-10-22 | Bedrock Inference Profiles, Model Availability & Reasoning Hygiene | Accepted | Uses catalog-listed `us-east-2` defaults (`us.moonshotai.kimi-k3` & `us.amazon.nova-2-lite-v1:0`), normalizes `us.*` inference profile aliases, filters availability via `GetFoundationModelAvailability` + `ListInferenceProfiles`, grants IAM on both `foundation-model/*` and `inference-profile/*`, and strips `reasoningContent` / `<thinking>` tags. Live invocation pending account-level Error 002. | [0010-bedrock-inference-profiles-and-model-catalog.md](decisions/0010-bedrock-inference-profiles-and-model-catalog.md) |
 | **ADR-0011** | 2026-10-23 | AWS-Driven Bedrock Model Discovery with Explicit Exclusions | Accepted | Supersedes ADR-0010's curated catalog/admission policy with AWS-driven discovery, compatibility/account-access checks, explicit exclusions, and validation against discovered eligibility. M3 defect corrections remain in WP-03, not this ADR. | [0011-bedrock-discovery-with-exclusions-and-lifecycle-integrity.md](decisions/0011-bedrock-discovery-with-exclusions-and-lifecycle-integrity.md) |
 | **ADR-0012** | 2026-10-25 | Verified Place Evidence, Not Search-Query Echoes | Accepted | Ground branch qualifiers in returned entity names/addresses, never the model's echoed search input; preserve exact-ID precedence and conservative no-match behavior. | [0012-grounding-evidence-provenance.md](decisions/0012-grounding-evidence-provenance.md) |
+| **ADR-0013** | 2026-11-01 | Per-User Spend Tracking & Provider-Neutral AI Spend Seam | Accepted | Exposes normalized per-call usage/cost via `GenerateOptions.onUsage` on `AiHarnessAdapter`, encapsulates Bedrock pricing in a weekly S3 cache inside `AwsBedrockHarnessAdapter`, prices tools/infra at list rates, and persists atomic per-user `users/{email}/spend.json` ledgers. | [0013-per-user-spend-tracking.md](decisions/0013-per-user-spend-tracking.md) |
 
 ---
 

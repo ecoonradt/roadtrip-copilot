@@ -56,19 +56,20 @@ flowchart TD
 
 ---
 
-## 3. Architecture Decision Records (ADRs) & Index
+## 3. Architecture Decision Records (ADRs) & Documentation Hygiene
 
-When technical realities force a divergence from the original design (e.g. SDK constraints, API quotas, library quirks), we do not hide decisions in commit messages or leave conflicting code.
+ADRs (`decisions/`) are strictly reserved for **high-level, lasting system-architecture choices** (e.g., selecting a cloud service, authentication topology, storage backend, or cross-cutting boundary).
 
 1. **Table of Contents Index ([`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md)):**
-   * A single, compact markdown file containing a scannable table of all decisions: ID, Date, Title, Status, 1-line Summary, and link to details.
-   * Incoming agents read this small file first to rapidly build mental context on architectural choices.
+   * A single, compact markdown file containing a scannable table of all architectural decisions: ID, Date, Title, Status, 1-line Summary, and link to details.
 2. **Individual ADR Files ([`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/)):**
-   * Standalone files created from [`0000-template.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/0000-template.md) (e.g. `0001-amazon-bedrock-single-bill-ai.md`).
-   * Documents Context, Decision Drivers, Considered Options, Outcome, Consequences, and Code Touchpoints.
-3. **Continuous Living Documentation (Zero Stale Non-Project Docs):**
-   * Top-level and subproject documentation—specifically [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), [`README.md`](file:///home/eric/code/roadtrip-copilot/README.md), [`route-builder/AGENTS.md`](file:///home/eric/code/roadtrip-copilot/route-builder/AGENTS.md), [`route-builder/README.md`](file:///home/eric/code/roadtrip-copilot/route-builder/README.md), and [`docs/README.md`](file:///home/eric/code/roadtrip-copilot/docs/README.md)—**must never be left stale until the end of the project**.
-   * Every Work Package must update these living documents **in the same milestone** whenever directory layouts, CLI scripts, environment variables, architectural pillars, or test suites change.
+   * Standalone files created from [`0000-template.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/0000-template.md) only when a genuine architectural pivot occurs (with user alignment).
+   * **Tactical Discoveries Belong in the Active WP, Not ADRs:** Module-level parsing rules, API payload quirks, and step-level implementation details belong in the active Work Package's *Discoveries & Deviations Log* and code comments—never in a new ADR.
+3. **Update In-Place & Timeless Durable Artifacts (AGENTS.md Rule 13):**
+   * **Update in-place:** While a milestone or decision is in flight, update plans, specs, and ADRs in place. Never append chronological `"Amendment (date)..."` blocks, `"Supersedes earlier draft"` notes, or stories of prior attempts/review rounds.
+   * **No ephemeral process references:** Permanent documentation (`AGENTS.md`, `README.md`, Tier-1 blueprints, `DECISIONS.md`, `decisions/*.md`) and source code comments must describe timeless system state. **Never reference milestone IDs (`M4.5`), work-package step numbers (`Step 1`, `Step 2`), or review gates (`Gate 1`, `Gate 2A/2B`) outside `ROADMAP.md` and `plan/active/WP-*.md`.**
+4. **Continuous Living Documentation (Zero Stale Non-Project Docs):**
+   * Top-level and subproject documentation—specifically [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md), [`README.md`](file:///home/eric/code/roadtrip-copilot/README.md), [`route-builder/AGENTS.md`](file:///home/eric/code/roadtrip-copilot/route-builder/AGENTS.md), [`route-builder/README.md`](file:///home/eric/code/roadtrip-copilot/route-builder/README.md), and [`docs/README.md`](file:///home/eric/code/roadtrip-copilot/docs/README.md)—must be updated **at milestone completion** when directory layouts, CLI scripts, environment variables, architectural pillars, or test suites change (never polluted mid-planning with "not yet implemented" disclaimers).
 
 ---
 
@@ -105,7 +106,7 @@ sequenceDiagram
   * Running final verification test suites and writing handoff notes.
 
 ### Subagent Workers (Delegated Implementers)
-* **Model & Harness Delegation:** Delegated per the active harness adapter (Antigravity: [`.agents/rules/antigravity-harness.md`](file:///home/eric/code/roadtrip-copilot/.agents/rules/antigravity-harness.md); OpenCode: [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)). Bound to cost-effective worker models / configured worker profiles to optimize developer quota.
+* **Model & Harness Delegation:** Delegated per the active harness adapter (Antigravity: [`.agents/rules/antigravity-harness.md`](file:///home/eric/code/roadtrip-copilot/.agents/rules/antigravity-harness.md); OpenCode: [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)), using the harness adapter's **Subagent Model Registry** — role→default model bindings with per-invocation `model=` / `fallback=` override tokens. Defaults bind subagents only; the main session model is always the developer's manual choice. Auto-substituting a worker model mid-run without a user pre-authorization in the same invocation is a forbidden silent fallback (AGENTS.md Rule 12).
 * **Responsibilities:**
   * Implementing concrete functions, endpoints, or utility classes specified by the orchestrator.
   * Writing unit tests against mock fixtures.
@@ -117,7 +118,7 @@ sequenceDiagram
 Earlier milestones suffered from multi-round PR review cycles when worker subagents were given underspecified prompts or when the orchestrator relied solely on happy-path test runs. The orchestrator is strictly accountable for first-pass PR quality through two mandatory gates:
 
 #### Gate 1: Contract-First Work Package & Worker Prompts (Pre-Delegation)
-Before dispatching any `flash` worker, the Orchestrator must verify live external dependencies (e.g., read-only AWS CLI checks against the project's assigned Region) and include the following in both the active Work Package (`WP-XX`) and the worker's prompt:
+Before dispatching any worker subagent, the Orchestrator must verify live external dependencies (e.g., read-only AWS CLI checks against the project's assigned Region) and include the following in both the active Work Package (`WP-XX`) and the worker's prompt:
 1. **Exact TypeScript Interfaces & Route Schemas:** Literal type signatures, request/response shapes, and explicit HTTP status codes (`200`, `400`, `401`, `403`, `404`, `412`, `500`, `503`). Never leave error status codes or fallback precedence to worker guesswork.
 2. **Concurrency, Lifecycle & Resource Cleanup Invariants:**
    * **Frontend Async Flows:** Specify `AbortController` and/or monotonic request revision counters whenever React state is updated after an `await` (switching scopes, switching models, retrying, or closing modals must never allow a late-resolving response to overwrite newer state).
@@ -131,6 +132,16 @@ Before dispatching any `flash` worker, the Orchestrator must verify live externa
    * Check how new UI controls and mount-time `fetch` calls interact with existing UI harnesses (`tests/ui/harness.tsx`) and Playwright browser tests (`tests/browser/appHeader.browser.ts`, which enforces single-row `56px` header height across `1024px–1920px` viewports and fails on any unmocked `/api/*` request).
 6. **Zero Silent Fallbacks or Mock Degradation:**
    * Never instruct workers to build silent fallbacks to mock templates, client-side mocks, or local CLIs (`agy`). External API failures must fail loudly and transparently with explicit HTTP status codes (`502`, `503`, `400`). Building any fallback mechanism requires prior user consultation and explicit written approval.
+
+#### Gate 1B: Adversarial Independent Plan Review (Pre-Implementation)
+Every new or materially revised Work Package is interrogated by a **fresh, unprimed plan-reviewer subagent** before any implementation dispatch — the plan analogue of code review:
+
+* **Neutral dispatch:** the reviewer receives only the WP path, pointers to the Tier-1 spec, this Gate 1 checklist, `AGENTS.md`, and `DECISIONS.md`, plus a unique `tmp/` findings path. Never prime it with suspected gaps or an expected-findings list.
+* **Attack surface:** contract gaps (non-literal interfaces or status codes), concurrency & cleanup holes, unhandled failure modes, region/offline/rule violations, and ambiguous or unbounded worker tasks.
+* **Convergence:** the orchestrator personally confirms or rejects every finding against the sources of truth, revises the WP, and re-dispatches a *new* reviewer until `VERDICT: APPROVED` coincides with zero open confirmed findings. A reviewer verdict alone is never clearance.
+* **Loop-exit rule:** the dispatch → implement → audit → fix loop closes a task only when both the (optional) Gate 2B reviewer emits APPROVED **and** the orchestrator's personal Gate 2A audit plus the required verification suites pass. Any subagent's self-report is insufficient evidence.
+
+OpenCode entry points: `/plan` → `/plan-review` → `/implement` (see [`.opencode/rules/harness.md`](file:///home/eric/code/roadtrip-copilot/.opencode/rules/harness.md)).
 
 #### Gate 2: Orchestrator Adversarial Diff Audit (Gate 2A) & Independent Review (Gate 2B)
 
@@ -165,10 +176,9 @@ Every agent working on the Route Scout Cloud project must adhere to this three-p
 
 ### Phase B: Execution & In-Flight Discoveries
 1. Orchestrator defines exact interfaces, edge-case invariants, tests, and boundaries in the Work Package; delegates bounded implementation tasks to subagent workers per the active harness adapter using Gate 1 prompts.
-2. **If an unexpected technical constraint is discovered:**
-   * Stop immediately before writing speculative workarounds.
-   * Record the decision in a new ADR file in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and link it in [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md).
-   * Update the "Discoveries & Deviations" section in the active Work Package.
+2. **If an unexpected technical constraint or API quirk is discovered:**
+   * For tactical/module-level details (payload shapes, parsing rules, SDK quirks), update the contract in place in the active Work Package and record the finding in its "Discoveries & Deviations" section—**do not create a new ADR**.
+   * Only if a constraint forces a genuine, lasting change to system architecture, stop and align with the user before recording a new ADR in [`decisions/`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/decisions/) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (see Rule 13 in `AGENTS.md`).
 3. Preserve all non-negotiable architectural rules from [`AGENTS.md`](file:///home/eric/code/roadtrip-copilot/AGENTS.md) and [`DECISIONS.md`](file:///home/eric/code/roadtrip-copilot/docs/projects/route-scout-cloud/DECISIONS.md) (e.g., zero cloud dependencies in `app/` drive loop, isolated local disk storage in `npm run dev` alongside Bedrock AI per ADR-0004, single assigned AWS project Region compliance, literal semicolons in OSRM paths, strict TypeScript with zero `any` types).
 
 ### Phase C: Session Wrap-Up, Adversarial Audit, Living Docs Sync & Verification

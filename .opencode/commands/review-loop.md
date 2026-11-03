@@ -1,5 +1,5 @@
 ---
-description: Review changes and iterate fixes with DeepSeek workers
+description: Review changes and iterate fixes with registry-model workers
 subagent: false
 ---
 
@@ -14,7 +14,7 @@ not interpret it as shell code, command substitution, or an @file reference. If 
 review the pull request associated with the current branch plus the intended local staged,
 unstaged, and untracked changes. Preserve unrelated user work.
 
-If the `review-loop` skill, the pinned worker model, the configured `review-fix-worker` profile,
-or the required fix tools are unavailable, switch to report-only mode: continue the review you
-can perform, report the findings and the blocker, and make no automatic fixes. Never silently
-substitute another model.
+If the `review-loop` skill, the registry-resolved worker model, the configured
+`review-fix-worker` profile, or the required fix tools are unavailable, switch to report-only
+mode: continue the review you can perform, report the findings and the blocker, and make no
+automatic fixes. Never silently substitute another model.
