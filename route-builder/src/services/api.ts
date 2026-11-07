@@ -26,9 +26,15 @@ export async function fetchAiStatus(apiKey?: string): Promise<AiStatusResult> {
   try {
     const res = await fetch(url);
     if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as Partial<AiStatusResult> | null;
       return {
         available: false,
-        message: 'AI features are currently unavailable.',
+        ...(body?.engine ? { engine: body.engine } : {}),
+        ...(body?.providerName ? { providerName: body.providerName } : {}),
+        message:
+          typeof body?.message === 'string' && body.message.trim().length > 0
+            ? body.message
+            : 'AI features are currently unavailable.',
       };
     }
     return (await res.json()) as AiStatusResult;

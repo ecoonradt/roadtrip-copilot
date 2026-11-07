@@ -16,6 +16,7 @@
     "test:engine": "vitest run tests/engine",
     "test:ai": "vitest run tests/ai",
     "test:schema": "vitest run tests/engine/export.test.ts tests/backend/device.test.ts",
+    "refresh:pricing": "tsx server/handlers/refreshBedrockPricing.ts",
     "preview": "vite preview"
   },
   "dependencies": {
