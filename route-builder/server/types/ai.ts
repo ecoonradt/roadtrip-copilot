@@ -1,3 +1,5 @@
+import type { AiUsageEvent } from './spend.js';
+
 export interface WaypointContext {
   id: string;
   name: string;
@@ -39,6 +41,7 @@ export interface GenerateOptions {
   apiKey?: string;
   modelId?: string;
   abortSignal?: AbortSignal;
+  onUsage?: (event: AiUsageEvent) => void | Promise<void>;
 }
 
 export interface GenerateStreamWithToolsResult {
@@ -55,6 +58,7 @@ export interface AiStatusResult {
   defaultScoutModelId?: string;
   defaultCopywriterModelId?: string;
   message?: string;
+  statusCode?: number;
 }
 
 export interface GenerateAlertResult {

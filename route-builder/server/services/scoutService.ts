@@ -857,7 +857,7 @@ export class ScoutService {
         this.tools,
         turnDispatcher,
         () => {},
-        { modelId: activeModelId, abortSignal: options.abortSignal }
+        { modelId: activeModelId, abortSignal: options.abortSignal, onUsage: options.onUsage }
       );
       const { reply, suggestions, thought } = parseScoutResponse(
         adapter.sanitizeResponse(streamRes.text),
@@ -883,6 +883,7 @@ export class ScoutService {
     const rawOutput = await adapter.generate(domainPrompt, {
       modelId: activeModelId,
       abortSignal: options.abortSignal,
+      onUsage: options.onUsage,
     });
     const { reply, suggestions, thought } = parseScoutResponse(
       adapter.sanitizeResponse(rawOutput),
@@ -964,7 +965,7 @@ export class ScoutService {
           onEvent(streamEvt);
         }
       },
-      { modelId: activeModelId, abortSignal: options.abortSignal }
+      { modelId: activeModelId, abortSignal: options.abortSignal, onUsage: options.onUsage }
     );
 
     if (options.abortSignal?.aborted) {

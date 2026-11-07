@@ -24,12 +24,16 @@ import {
   type ConverseStreamOutput,
 } from '@aws-sdk/client-bedrock-runtime';
 import {
+  TEST_KIMI_RATE,
   TEST_MOCK_MODELS,
+  TEST_NOVA_RATE,
+  makeTestPricingCatalog,
   sampleWaypoint,
   sampleTripContext,
   sampleTools,
   createAsyncStream,
 } from '../test-helpers/bedrockFixtures.js';
+import type { BedrockModelTokenRate } from './bedrockPricing.js';
 
 describe('Bedrock catalog, allowlist, and region', () => {
     describe('Catalog & Defaults (ADR-0010)', () => {
@@ -350,6 +354,228 @@ describe('Bedrock catalog, allowlist, and region', () => {
       it('returns false when available option is explicitly false without custom client', async () => {
         const adapter = new AwsBedrockHarnessAdapter({ available: false });
         expect(await adapter.isAvailable()).toBe(false);
+      });
+    });
+
+    describe('Pricing catalog intersection & unpriced model filtering', () => {
+      const seededModels = [
+        {
+          id: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          name: 'Kimi K3',
+          provider: 'Moonshot AI',
+          description: 'Moonshot AI Kimi K3',
+          role: 'both' as const,
+        },
+        {
+          id: DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+          name: 'Nova 2 Lite',
+          provider: 'Amazon',
+          description: 'Amazon Nova 2 Lite',
+          role: 'both' as const,
+        },
+        {
+          id: 'us.anthropic.claude-sonnet-4-6',
+          name: 'Claude Sonnet 4.6',
+          provider: 'Anthropic',
+          description: 'Anthropic Claude Sonnet 4.6',
+          role: 'both' as const,
+        },
+      ];
+
+      it('keeps both configured default models selectable when priced and excludes unpriced models from getAvailableModels()', async () => {
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
+          availableModels: seededModels,
+          pricingCatalog: makeTestPricingCatalog({
+            unpricedModelIds: ['us.anthropic.claude-sonnet-4-6'],
+          }),
+        });
+
+        const available = await adapter.getAvailableModels();
+        expect(available.map((m) => m.id)).toEqual([
+          DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+        ]);
+
+        await expect(adapter.validateModelId(DEFAULT_BEDROCK_SCOUT_MODEL_ID, 'scout')).resolves.toBe(
+          DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+        );
+        await expect(
+          adapter.validateModelId(DEFAULT_BEDROCK_COPYWRITER_MODEL_ID, 'copywriter'),
+        ).resolves.toBe(DEFAULT_BEDROCK_COPYWRITER_MODEL_ID);
+
+        // Valid in Bedrock discovery but missing from pricing catalog -> 503 PricingUnavailableError
+        await expect(
+          adapter.validateModelId('us.anthropic.claude-sonnet-4-6', 'scout'),
+        ).rejects.toMatchObject({
+          name: 'PricingUnavailableError',
+          statusCode: 503,
+        });
+        await expect(
+          adapter.validateModelId('anthropic.claude-sonnet-4-6', 'scout'),
+        ).rejects.toMatchObject({
+          name: 'PricingUnavailableError',
+          statusCode: 503,
+        });
+
+        // Completely unknown model -> 400 InvalidModelError
+        await expect(adapter.validateModelId('unknown.model-v1', 'scout')).rejects.toBeInstanceOf(
+          InvalidModelError,
+        );
+      });
+
+      it('intersects controlClient discovery with pricingCatalog, prefers priced profile aliases, and supports us.amazon.nova-lite-v1:0', async () => {
+        const mockControlClient = {
+          send: vi.fn(async (cmd: { constructor: { name: string } }) => {
+            if (cmd.constructor.name === 'ListInferenceProfilesCommand') {
+              return {
+                inferenceProfileSummaries: [
+                  {
+                    inferenceProfileId: 'us.moonshotai.kimi-k3',
+                    inferenceProfileName: 'US Kimi K3',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [
+                      { modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/moonshotai.kimi-k3' },
+                    ],
+                  },
+                  {
+                    inferenceProfileId: 'global.moonshotai.kimi-k3',
+                    inferenceProfileName: 'Global Kimi K3',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [
+                      { modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/moonshotai.kimi-k3' },
+                    ],
+                  },
+                  {
+                    inferenceProfileId: 'us.amazon.nova-lite-v1:0',
+                    inferenceProfileName: 'US Nova Lite',
+                    status: 'ACTIVE',
+                    type: 'SYSTEM_DEFINED',
+                    models: [
+                      { modelArn: 'arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-lite-v1:0' },
+                    ],
+                  },
+                ],
+              };
+            }
+            if (cmd.constructor.name === 'ListFoundationModelsCommand') {
+              return {
+                modelSummaries: [
+                  {
+                    modelId: 'moonshotai.kimi-k3',
+                    modelName: 'Kimi K3',
+                    providerName: 'Moonshot AI',
+                    inputModalities: ['TEXT'],
+                    outputModalities: ['TEXT'],
+                    responseStreamingSupported: true,
+                    modelLifecycle: { status: 'ACTIVE' },
+                  },
+                  {
+                    modelId: 'amazon.nova-lite-v1:0',
+                    modelName: 'Nova Lite',
+                    providerName: 'Amazon',
+                    inputModalities: ['TEXT'],
+                    outputModalities: ['TEXT'],
+                    responseStreamingSupported: true,
+                    modelLifecycle: { status: 'ACTIVE' },
+                  },
+                ],
+              };
+            }
+            return {
+              authorizationStatus: 'AUTHORIZED',
+              entitlementAvailability: 'AVAILABLE',
+              regionAvailability: 'AVAILABLE',
+              agreementAvailability: { status: 'AVAILABLE' },
+            };
+          }),
+        } as unknown as BedrockClient;
+
+        const globalKimiRate: BedrockModelTokenRate = {
+          ...TEST_KIMI_RATE,
+          modelId: 'global.moonshotai.kimi-k3',
+        };
+        const usNovaLiteRate: BedrockModelTokenRate = {
+          ...TEST_NOVA_RATE,
+          modelId: 'us.amazon.nova-lite-v1:0',
+          foundationModelId: 'amazon.nova-lite-v1:0',
+        };
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          controlClient: mockControlClient,
+          pricingCatalog: makeTestPricingCatalog({
+            models: {
+              'global.moonshotai.kimi-k3': globalKimiRate,
+              'us.amazon.nova-lite-v1:0': usNovaLiteRate,
+            },
+            unpricedModelIds: ['us.moonshotai.kimi-k3'],
+          }),
+        });
+
+        const available = await adapter.getAvailableModels();
+        expect(available.map((m) => m.id)).toEqual([
+          'global.moonshotai.kimi-k3',
+          'us.amazon.nova-lite-v1:0',
+        ]);
+
+        // Bare foundation ID resolves to the priced global.* profile instead of the unpriced us.* profile
+        await expect(adapter.validateModelId('moonshotai.kimi-k3', 'scout')).resolves.toBe(
+          'global.moonshotai.kimi-k3',
+        );
+        // Direct selection of us.amazon.nova-lite-v1:0 stays canonical and does not get rewritten to bare ID
+        await expect(adapter.validateModelId('us.amazon.nova-lite-v1:0', 'copywriter')).resolves.toBe(
+          'us.amazon.nova-lite-v1:0',
+        );
+      });
+
+      it('evicts a newly-unpriced model from cached availableModels when pricingCache reloads within MODEL_AVAILABILITY_TTL_MS', async () => {
+        const claudeRate: BedrockModelTokenRate = {
+          ...TEST_KIMI_RATE,
+          modelId: 'us.anthropic.claude-sonnet-4-6',
+          foundationModelId: 'anthropic.claude-sonnet-4-6',
+          providerName: 'Anthropic',
+        };
+
+        let activeCatalog = makeTestPricingCatalog({
+          models: {
+            [DEFAULT_BEDROCK_SCOUT_MODEL_ID]: TEST_KIMI_RATE,
+            [DEFAULT_BEDROCK_COPYWRITER_MODEL_ID]: TEST_NOVA_RATE,
+            'us.anthropic.claude-sonnet-4-6': claudeRate,
+          },
+        });
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
+          availableModels: seededModels,
+          pricingCache: {
+            getCatalog: async () => ({ catalog: activeCatalog, isStale: false }),
+          },
+        });
+
+        // Initial discovery populates all 3 models into availableModels (cached for 15 minutes)
+        const initialModels = await adapter.getAvailableModels();
+        expect(initialModels.map((m) => m.id)).toContain('us.anthropic.claude-sonnet-4-6');
+
+        // Within MODEL_AVAILABILITY_TTL_MS, the 5-minute pricing cache reloads without Claude Sonnet 4.6
+        activeCatalog = makeTestPricingCatalog({
+          unpricedModelIds: ['us.anthropic.claude-sonnet-4-6'],
+        });
+
+        await expect(
+          adapter.validateModelId('us.anthropic.claude-sonnet-4-6', 'scout'),
+        ).rejects.toMatchObject({
+          name: 'PricingUnavailableError',
+          statusCode: 503,
+        });
+
+        // Subsequent getAvailableModels() within MODEL_AVAILABILITY_TTL_MS no longer lists the evicted model
+        const afterEviction = await adapter.getAvailableModels();
+        expect(afterEviction.map((m) => m.id)).toEqual([
+          DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+        ]);
       });
     });
 });

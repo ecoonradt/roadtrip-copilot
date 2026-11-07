@@ -595,6 +595,13 @@ export interface S3ItineraryStorageOptions {
   region?: string;
 }
 
+export function sanitizeEmailForObjectKey(userEmail?: string): string {
+  const rawEmail = (userEmail || '').trim().toLowerCase() || 'local-dev@localhost';
+  return rawEmail.replace(/[^a-z0-9.@+_-]/g, (c) => {
+    return `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
+  });
+}
+
 export class S3ItineraryStorageService implements IItineraryStorageService {
   private bucketName: string;
   private client: S3Client;
@@ -615,10 +622,7 @@ export class S3ItineraryStorageService implements IItineraryStorageService {
   }
 
   getUserPrefix(userEmail?: string): string {
-    const rawEmail = (userEmail || 'local-dev@localhost').trim().toLowerCase();
-    const safeEmail = rawEmail.replace(/[^a-z0-9.@+_-]/g, (c) => {
-      return `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
-    });
+    const safeEmail = sanitizeEmailForObjectKey(userEmail);
     return `users/${safeEmail}/itineraries/`;
   }
 

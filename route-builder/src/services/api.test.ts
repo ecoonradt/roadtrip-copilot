@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { chatWithScoutStream } from './api';
+import { chatWithScoutStream, fetchAiStatus } from './api';
 import type {
   ScoutStreamEvent,
   ScoutChatRequest,
@@ -113,6 +113,48 @@ describe('Client SSE Parser (chatWithScoutStream)', () => {
     expect(emittedEvents[2]).toEqual({
       event: 'done',
       data: response,
+    });
+  });
+
+  it('fetchAiStatus preserves server JSON error details on HTTP 503 and falls back to status text when non-JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            available: false,
+            engine: 'bedrock',
+            providerName: 'Amazon Bedrock',
+            message: 'Bedrock pricing catalog not found in S3 (s3://bucket/pricing/bedrock-us-east-2.json).',
+          }),
+          {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      ),
+    );
+
+    const status = await fetchAiStatus();
+    expect(status.available).toBe(false);
+    expect(status.engine).toBe('bedrock');
+    expect(status.providerName).toBe('Amazon Bedrock');
+    expect(status.message).toContain('Bedrock pricing catalog not found in S3');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('Service Unavailable', {
+          status: 503,
+          headers: { 'Content-Type': 'text/plain' },
+        }),
+      ),
+    );
+
+    const nonJsonStatus = await fetchAiStatus();
+    expect(nonJsonStatus).toEqual({
+      available: false,
+      message: 'AI features are currently unavailable.',
     });
   });
 });

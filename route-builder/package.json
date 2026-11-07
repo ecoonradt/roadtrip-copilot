@@ -17,6 +17,7 @@
     "test:frontend": "vitest run src",
     "test:backend": "vitest run server",
     "test:browser": "playwright test",
+    "refresh:pricing": "tsx server/handlers/refreshBedrockPricing.ts",
     "preview": "vite preview"
   },
   "dependencies": {

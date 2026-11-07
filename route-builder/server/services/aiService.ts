@@ -11,6 +11,7 @@ import type {
   AiStatusResult,
 } from '../types/ai.js';
 import type { ScoutStreamEvent } from '../types/scout.js';
+import type { AiUsageEvent } from '../types/spend.js';
 import {
   buildSingleWaypointPrompt,
   buildBatchWaypointPrompt,
@@ -97,6 +98,7 @@ export interface GenerationOptions {
   modelId?: string;
   abortSignal?: AbortSignal;
   preferredEngine?: string;
+  onUsage?: (event: AiUsageEvent) => void | Promise<void>;
 }
 
 export class AiService {
@@ -219,6 +221,19 @@ export class AiService {
       }
 
       const catalog = adapter.getModelCatalog();
+      for (const [defaultId, role] of [
+        [catalog.defaultScoutModelId, 'scout'],
+        [catalog.defaultCopywriterModelId, 'copywriter'],
+      ] as const) {
+        if (!defaultId) continue;
+        try {
+          await adapter.validateModelId(defaultId, role);
+        } catch (err: unknown) {
+          if ((err as { statusCode?: number })?.statusCode === 503) {
+            throw err;
+          }
+        }
+      }
       return {
         available: true,
         engine: adapter.id,
@@ -229,11 +244,13 @@ export class AiService {
       };
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
+      const statusCode = (err as { statusCode?: number })?.statusCode === 503 ? 503 : undefined;
       return {
         available: false,
         engine: adapter.id,
         providerName: adapter.name,
         message: `${adapter.name} model availability check failed: ${detail}`,
+        ...(statusCode !== undefined ? { statusCode } : {}),
       };
     }
   }
@@ -261,6 +278,7 @@ export class AiService {
     const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
       abortSignal: options.abortSignal,
+      onUsage: options.onUsage,
     });
     const parsed = parseModelOutput(rawOutput);
     const alert = parseCopilotAlert(parsed);
@@ -297,6 +315,7 @@ export class AiService {
     const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
       abortSignal: options.abortSignal,
+      onUsage: options.onUsage,
     });
     const parsed = parseModelOutput(rawOutput);
     const raw = parsed && typeof parsed === 'object' ? (parsed as { title?: unknown }).title : parsed;
@@ -334,6 +353,7 @@ export class AiService {
     const rawOutput = await adapter.generate(prompt, {
       modelId: validatedModelId,
       abortSignal: options.abortSignal,
+      onUsage: options.onUsage,
     });
     const parsed = parseModelOutput(rawOutput);
     const alerts = parseBatchCopilotAlerts(parsed, waypoints);

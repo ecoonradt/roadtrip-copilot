@@ -88,6 +88,8 @@ route-builder/
 │   ├── loadEnv.ts              # Node 20.12+ .env loader side-effect module
 │   ├── hooks/
 │   │   └── authGuard.ts        # Dual-mode OIDC cookie/Bearer JWT & allowlist preHandler hook
+│   ├── handlers/
+│   │   └── refreshBedrockPricing.ts # Weekly scheduled Lambda & CLI handler for Bedrock us-east-2 pricing catalog
 │   ├── test-helpers/           # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
 │   ├── routes/
 │   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
@@ -104,6 +106,9 @@ route-builder/
 │   │   ├── promptBuilder.ts    # Prompt contract generator
 │   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
 │   │   ├── bedrockService.ts   # Amazon Bedrock Converse / ConverseStream adapter & dynamic model discovery
+│   │   ├── bedrockPricing.ts   # AWS Price List API normalizer & token cost calculator for Bedrock us-east-2
+│   │   ├── bedrockPricingCache.ts # S3 & local pricing catalog cache with 5-min memory TTL & staleness checks
+│   │   ├── spendMath.ts        # Exact BigInt nanodollar arithmetic & validated global service list-rate constants
 │   │   ├── aiService.ts        # Provider-agnostic adapter registry, fail-loud generation paths & availability status
 │   │   ├── aiRegistry.ts       # Composition root registering the primary AI provider adapter
 │   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
@@ -112,7 +117,7 @@ route-builder/
 │   │   ├── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
 │   │   ├── scoutTools.ts       # 7-tool discovery & deterministic domain grounding facade & SSM secret lifecycle
 │   │   └── scoutTools/         # Modular grounding tool implementations (types, urlSafety, geo, scheduleSimulator, corridorTools)
-│   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
+│   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout, spend)
 ├── src/
 │   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator
 │   ├── test-helpers/           # Shared UI test fixtures and mock harnesses (testHarness.tsx)

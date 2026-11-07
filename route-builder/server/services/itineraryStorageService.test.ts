@@ -7,6 +7,7 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import {
   S3ItineraryStorageService,
   PreconditionFailedError,
+  sanitizeEmailForObjectKey,
 } from './itineraryStorageService.js';
 import { createApp } from '../app.js';
 import { AuthService } from './authService.js';
@@ -679,6 +680,41 @@ describe('S3ItineraryStorageService & Cloud Persistence', () => {
         },
       });
       expect(getDeleted.statusCode).toBe(404);
+    });
+  });
+
+  describe('sanitizeEmailForObjectKey & S3 prefix agreement', () => {
+    it('normalizes mixed-case, preserves safe ASCII characters, and percent-encodes unsafe/non-ASCII bytes', () => {
+      expect(sanitizeEmailForObjectKey('Driver.One+Tag_2-a@Example.COM')).toBe(
+        'driver.one+tag_2-a@example.com',
+      );
+      expect(sanitizeEmailForObjectKey('  ')).toBe('local-dev@localhost');
+      expect(sanitizeEmailForObjectKey(undefined)).toBe('local-dev@localhost');
+      expect(sanitizeEmailForObjectKey('user/with spaces@example.com')).toBe(
+        'user%2Fwith%20spaces@example.com',
+      );
+      expect(sanitizeEmailForObjectKey('é@example.com')).toBe('%E9@example.com');
+    });
+
+    it('matches S3ItineraryStorageService object key prefixes across mixed-case, +, and non-ASCII emails', async () => {
+      const localMockS3 = new MockS3Client();
+      const s3Storage = new S3ItineraryStorageService({
+        bucketName: 'test-bucket',
+        s3Client: localMockS3 as unknown as S3Client,
+      });
+
+      const testEmails = [
+        'Eric.Coonradt+Roadtrip@Gmail.com',
+        'driver_é+test@sub.example.org',
+        'bad/../path@example.com',
+      ];
+
+      for (const email of testEmails) {
+        localMockS3.calls = [];
+        await s3Storage.listItineraries(email);
+        const safeEmail = sanitizeEmailForObjectKey(email);
+        expect(localMockS3.calls[0]?.input.Prefix).toBe(`users/${safeEmail}/itineraries/`);
+      }
     });
   });
 });

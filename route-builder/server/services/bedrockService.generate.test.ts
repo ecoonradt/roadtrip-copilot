@@ -26,12 +26,17 @@ import {
   type ConverseStreamOutput,
 } from '@aws-sdk/client-bedrock-runtime';
 import {
+  TEST_KIMI_RATE,
   TEST_MOCK_MODELS,
+  TEST_NOVA_RATE,
+  makeTestPricingCatalog,
   sampleWaypoint,
   sampleTripContext,
   sampleTools,
   createAsyncStream,
 } from '../test-helpers/bedrockFixtures.js';
+import { calculateBedrockCallCostNanos } from './bedrockPricing.js';
+import type { AiUsageEvent } from '../types/spend.js';
 
 describe('Bedrock generate and stream', () => {
     describe('sanitizeBedrockResponse & Tool Formatting Helpers', () => {
@@ -781,4 +786,294 @@ describe('Bedrock generate and stream', () => {
       expect(toolResultsJson).not.toContain('/roadtrip-copilot/brave-search-api-key');
     });
 
+    describe('AiUsageEvent instrumentation (onUsage)', () => {
+      const seededModels = [
+        {
+          id: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          name: 'Kimi K3',
+          provider: 'Moonshot AI',
+          description: 'Moonshot AI Kimi K3',
+          role: 'both' as const,
+        },
+        {
+          id: DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+          name: 'Nova 2 Lite',
+          provider: 'Amazon',
+          description: 'Amazon Nova 2 Lite',
+          role: 'both' as const,
+        },
+      ];
+
+      it('emits accurate AiUsageEvent records in generate() before stopReason checks and emits usageComplete: false on dispatch failure', async () => {
+        const events: AiUsageEvent[] = [];
+        let mockBehavior: 'success' | 'max_tokens' | 'network_error' = 'success';
+
+        const mockRuntimeClient = {
+          send: vi.fn(async () => {
+            if (mockBehavior === 'network_error') {
+              throw new Error('Bedrock runtime socket reset');
+            }
+            if (mockBehavior === 'max_tokens') {
+              return {
+                stopReason: 'max_tokens',
+                usage: { inputTokens: 1_000, outputTokens: 500, cacheReadInputTokens: 200, cacheWriteInputTokens: 100 },
+                output: { message: { content: [{ text: '{"title":"Truncated"' }] } },
+              };
+            }
+            return {
+              stopReason: 'end_turn',
+              usage: { inputTokens: 2_000, outputTokens: 400, cacheReadInputTokens: 1_000, cacheWriteInputTokens: 0 },
+              output: {
+                message: {
+                  content: [
+                    {
+                      text: JSON.stringify({
+                        title: 'Scenic Overlook',
+                        message: 'Pull off ahead in 1 mile.',
+                        speech: 'Approaching Scenic Overlook ahead in about one mile.',
+                        recommended_trigger_radius_miles: 1.5,
+                      }),
+                    },
+                  ],
+                },
+              },
+            };
+          }),
+        } as unknown as BedrockRuntimeClient;
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: mockRuntimeClient,
+          availableModels: seededModels,
+          pricingCache: {
+            getCatalog: async () => ({ catalog: makeTestPricingCatalog(), isStale: true }),
+          },
+        });
+
+        const out = await adapter.generate('Write alert', { onUsage: (evt) => { events.push(evt); } });
+        expect(out).toContain('Scenic Overlook');
+        expect(events).toHaveLength(1);
+        const expectedCost1 = calculateBedrockCallCostNanos(
+          { inputTokens: 2_000, outputTokens: 400, cacheReadInputTokens: 1_000, cacheWriteInputTokens: 0 },
+          TEST_NOVA_RATE,
+        );
+        expect(events[0]).toEqual({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+          inputTokens: 2_000,
+          outputTokens: 400,
+          cacheReadInputTokens: 1_000,
+          cacheWriteInputTokens: 0,
+          costNanos: expectedCost1,
+          pricingStale: true,
+          usageComplete: true,
+        });
+
+        // Even when stopReason === 'max_tokens' throws MalformedAiResponseError, usage is still emitted first
+        mockBehavior = 'max_tokens';
+        await expect(
+          adapter.generate('Write alert', { onUsage: (evt) => { events.push(evt); } }),
+        ).rejects.toBeInstanceOf(MalformedAiResponseError);
+        expect(events).toHaveLength(2);
+        expect(events[1]?.usageComplete).toBe(true);
+        expect(events[1]?.inputTokens).toBe(1_000);
+        expect(events[1]?.outputTokens).toBe(500);
+
+        // When client.send rejects after dispatch, emits usageComplete: false with 0 tokens/cost
+        mockBehavior = 'network_error';
+        await expect(
+          adapter.generate('Write alert', { onUsage: (evt) => { events.push(evt); } }),
+        ).rejects.toThrow('Bedrock runtime socket reset');
+        expect(events).toHaveLength(3);
+        expect(events[2]).toEqual({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          costNanos: 0,
+          pricingStale: true,
+          usageComplete: false,
+        });
+      });
+
+      it('emits one AiUsageEvent per tool-loop iteration in generateStreamWithTools() and records usageComplete: false on mid-stream abort', async () => {
+        const events: AiUsageEvent[] = [];
+        let callCount = 0;
+
+        const mockStreamClient = {
+          send: vi.fn(async () => {
+            callCount += 1;
+            if (callCount === 1) {
+              return {
+                stream: createAsyncStream([
+                  { contentBlockStart: { contentBlockIndex: 0, start: { toolUse: { toolUseId: 'tool_1', name: 'search_web' } } } },
+                  { contentBlockDelta: { contentBlockIndex: 0, delta: { toolUse: { input: '{"query":"Sedona"}' } } } },
+                  { messageStop: { stopReason: 'tool_use' } },
+                  { metadata: { usage: { inputTokens: 1_500, outputTokens: 250, cacheReadInputTokens: 500, cacheWriteInputTokens: 100 } } },
+                ]),
+              };
+            }
+            if (callCount === 2) {
+              return {
+                stream: createAsyncStream([
+                  { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Here are the vetted stops in Sedona.' } } },
+                  { messageStop: { stopReason: 'end_turn' } },
+                  { metadata: { usage: { inputTokens: 2_200, outputTokens: 350, cacheReadInputTokens: 1_500, cacheWriteInputTokens: 0 } } },
+                ]),
+              };
+            }
+            return {
+              stream: (async function* () {
+                yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Partial stream before disconnect...' } } };
+                throw new Error('Request aborted');
+              })(),
+            };
+          }),
+        } as unknown as BedrockRuntimeClient;
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: mockStreamClient,
+          availableModels: seededModels,
+          pricingCatalog: makeTestPricingCatalog(),
+        });
+
+        const streamRes = await adapter.generateStreamWithTools(
+          'Audit Sedona stops',
+          [{ name: 'search_web', description: 'Search web', inputSchema: { type: 'object' } }],
+          async () => ({ results: ['Red Rock Park'] }),
+          () => {},
+          { onUsage: (evt) => { events.push(evt); } },
+        );
+
+        expect(streamRes.text).toContain('Here are the vetted stops in Sedona.');
+        expect(streamRes.inputTokens).toBe(3_700);
+        expect(streamRes.outputTokens).toBe(600);
+        expect(events).toHaveLength(2);
+        expect(events[0]).toEqual({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          inputTokens: 1_500,
+          outputTokens: 250,
+          cacheReadInputTokens: 500,
+          cacheWriteInputTokens: 100,
+          costNanos: calculateBedrockCallCostNanos(
+            { inputTokens: 1_500, outputTokens: 250, cacheReadInputTokens: 500, cacheWriteInputTokens: 100 },
+            TEST_KIMI_RATE,
+          ),
+          usageComplete: true,
+        });
+        expect(events[1]).toEqual({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          inputTokens: 2_200,
+          outputTokens: 350,
+          cacheReadInputTokens: 1_500,
+          cacheWriteInputTokens: 0,
+          costNanos: calculateBedrockCallCostNanos(
+            { inputTokens: 2_200, outputTokens: 350, cacheReadInputTokens: 1_500, cacheWriteInputTokens: 0 },
+            TEST_KIMI_RATE,
+          ),
+          usageComplete: true,
+        });
+
+        // Trigger Call 3 (mid-stream abort before metadata.usage arrives)
+        await expect(
+          adapter.generateStreamWithTools('Audit Sedona stops', [], async () => ({}), () => {}, {
+            onUsage: (evt) => { events.push(evt); },
+          }),
+        ).rejects.toThrow('Request aborted');
+
+        expect(events).toHaveLength(3);
+        expect(events[2]).toEqual({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          costNanos: 0,
+          usageComplete: false,
+        });
+      });
+
+      it('emits onUsage with costNanos: 0 when pricingCache is null and isolates onUsage callback errors on failure paths', async () => {
+        const events: AiUsageEvent[] = [];
+        let shouldFail = false;
+
+        const mockClient = {
+          send: vi.fn(async (cmd: unknown) => {
+            if (shouldFail) {
+              throw new Error('Upstream Bedrock 500 error');
+            }
+            if (cmd instanceof ConverseStreamCommand) {
+              return {
+                stream: createAsyncStream([
+                  { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Stream ok' } } },
+                  { messageStop: { stopReason: 'end_turn' } },
+                  { metadata: { usage: { inputTokens: 120, outputTokens: 30 } } },
+                ]),
+              };
+            }
+            return {
+              stopReason: 'end_turn',
+              usage: { inputTokens: 100, outputTokens: 25 },
+              output: { message: { content: [{ text: 'Alert ok' }] } },
+            };
+          }),
+        } as unknown as BedrockRuntimeClient;
+
+        const adapterWithoutPricing = new AwsBedrockHarnessAdapter({
+          client: mockClient,
+          availableModels: seededModels,
+          pricingCache: null,
+        });
+
+        await adapterWithoutPricing.generate('Write alert', { onUsage: (evt) => { events.push(evt); } });
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+          inputTokens: 100,
+          outputTokens: 25,
+          costNanos: 0,
+          usageComplete: true,
+        });
+
+        await adapterWithoutPricing.generateStreamWithTools(
+          'Scout prompt',
+          [],
+          async () => ({}),
+          () => {},
+          { onUsage: (evt) => { events.push(evt); } },
+        );
+        expect(events).toHaveLength(2);
+        expect(events[1]).toMatchObject({
+          providerId: 'bedrock',
+          modelId: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          inputTokens: 120,
+          outputTokens: 30,
+          costNanos: 0,
+          usageComplete: true,
+        });
+
+        // When Bedrock fails AND onUsage throws -> original Bedrock error is still preserved
+        shouldFail = true;
+        await expect(
+          adapterWithoutPricing.generate('Write alert', {
+            onUsage: () => {
+              throw new Error('onUsage callback bug');
+            },
+          }),
+        ).rejects.toThrow('Upstream Bedrock 500 error');
+
+        await expect(
+          adapterWithoutPricing.generateStreamWithTools('Scout prompt', [], async () => ({}), () => {}, {
+            onUsage: () => {
+              throw new Error('onUsage callback bug');
+            },
+          }),
+        ).rejects.toThrow('Upstream Bedrock 500 error');
+      });
+    });
 });
