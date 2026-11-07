@@ -1,0 +1,1223 @@
+import React from 'react';
+import * as renderer from 'react-test-renderer';
+import type { ReactTestRenderer, ReactTestInstance } from 'react-test-renderer';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { RouteScoutDrawer } from './RouteScoutDrawer.js';
+import { EditWaypointModal } from './EditWaypointModal.js';
+import { createItinerarySessionId } from '../utils/itinerarySession.js';
+import { chatWithScoutStream } from '../services/api.js';
+import type { Waypoint } from '../types/routing.js';
+import type { ParsedTrip } from '../engine/itineraryParser.js';
+import type {
+  ScoutChatRequest,
+  ScoutTripContext,
+  ScoutStreamEvent,
+  ScoutChatResponse,
+} from '../types/scout.js';
+import type { AiModelOption, WaypointContext } from '../types/ai.js';
+
+// Mock react-dom createPortal so modal renders inline under react-test-renderer
+vi.mock('react-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-dom')>('react-dom');
+  return {
+    ...actual,
+    createPortal: (children: React.ReactNode) => children,
+  };
+});
+
+const act = renderer.act;
+const create = renderer.create;
+
+const sampleWaypoint: WaypointContext = {
+  id: 'wp_sedona_bell_rock',
+  name: 'Sedona Red Rock Vistas (Bell Rock)',
+  type: 'scenic_pull_off',
+  targetTime: '16:30:00',
+  formattedTime: '4:30 PM',
+  approachHighway: 'AZ-179 North',
+  notes: 'Bell Rock scenic pull-off for photo views',
+};
+
+const sampleWaypointWithDetails: Waypoint = {
+  id: 'wp_sedona_bell_rock',
+  name: 'Sedona Red Rock Vistas (Bell Rock)',
+  type: 'scenic_pull_off',
+  lat: 34.8005,
+  lng: -111.7667,
+  target_time: '16:30:00',
+  dwell_minutes: 20,
+  trigger_radius_miles: 2.0,
+  approachHighway: 'AZ-179 North',
+  notes: 'Bell Rock scenic pull-off for red rock views',
+  notification: {
+    title: 'Bell Rock Vista Ahead',
+    message: 'Arriving at Bell Rock. 20-min scenic stop.',
+    speech: 'Approaching Bell Rock Scenic Vista on Highway 179.',
+  },
+};
+
+const sampleTripContext: ScoutTripContext = {
+  tripName: 'Phoenix to Sedona Scenic Run',
+  date: '2026-10-10',
+  origin: 'Phoenix, AZ',
+  destination: 'Sedona, AZ',
+  departureTime: '08:00:00',
+  corridor: 'I-17 N to AZ-179 N Red Rock Scenic Byway',
+  waypoints: [
+    {
+      id: 'wp_origin',
+      name: 'Phoenix Origin',
+      type: 'origin',
+      lat: 33.4484,
+      lng: -112.074,
+      target_time: '08:00:00',
+      dwell_minutes: 0,
+    },
+    {
+      id: 'wp_sedona_bell_rock',
+      name: 'Bell Rock Scenic Vista',
+      type: 'scenic_pull_off',
+      lat: 34.8005,
+      lng: -111.7667,
+      target_time: '10:00:00',
+      dwell_minutes: 20,
+    },
+    {
+      id: 'wp_dest',
+      name: 'Sedona Lodging',
+      type: 'lodging',
+      lat: 34.8697,
+      lng: -111.761,
+      target_time: '12:00:00',
+      dwell_minutes: 0,
+    },
+  ],
+};
+
+const sampleTrip: ParsedTrip = {
+  tripName: 'Phoenix to Sedona Scenic Run',
+  days: [
+    {
+      dayNumber: 1,
+      title: 'Day 1: Red Rock Scenic Byway',
+      date: '2026-10-10',
+      origin: 'Phoenix, AZ',
+      destination: 'Sedona, AZ',
+      departureTime: '08:00:00',
+      waypoints: [sampleWaypointWithDetails],
+    },
+  ],
+};
+
+const TEST_MOCK_MODELS: AiModelOption[] = [
+  {
+    id: 'us.moonshotai.kimi-k3',
+    name: 'Moonshot Kimi K3',
+    provider: 'Moonshot AI',
+    description: 'Flagship 2.8T MoE corridor & agentic reasoning engine (1M context)',
+    role: 'both',
+  },
+  {
+    id: 'us.amazon.nova-2-lite-v1:0',
+    name: 'Amazon Nova 2 Lite',
+    provider: 'Amazon',
+    description: 'Fast, low-latency reasoning & alert copywriter',
+    role: 'both',
+  },
+  {
+    id: 'us.amazon.nova-pro-v1:0',
+    name: 'Amazon Nova Pro',
+    provider: 'Amazon',
+    description: 'Balanced multimodal & agentic route co-pilot',
+    role: 'both',
+  },
+  {
+    id: 'openai.gpt-oss-120b-1:0',
+    name: 'OpenAI GPT-OSS 120B',
+    provider: 'OpenAI',
+    description: 'Frontier open-weights deep reasoning & tool-use model',
+    role: 'both',
+  },
+  {
+    id: 'openai.gpt-oss-20b-1:0',
+    name: 'OpenAI GPT-OSS 20B',
+    provider: 'OpenAI',
+    description: 'High-speed, low-cost alert copywriting & chat',
+    role: 'both',
+  },
+  {
+    id: 'deepseek.v3.2',
+    name: 'DeepSeek V3.2',
+    provider: 'DeepSeek',
+    description: 'High-efficiency corridor analysis & structured JSON generation',
+    role: 'both',
+  },
+  {
+    id: 'mistral.mistral-large-3-675b-instruct',
+    name: 'Mistral Large 3 (675B)',
+    provider: 'Mistral AI',
+    description: 'Heavyweight 675B instruct model for multi-stop auditing',
+    role: 'both',
+  },
+  {
+    id: 'moonshotai.kimi-k2.5',
+    name: 'Moonshot Kimi K2.5',
+    provider: 'Moonshot AI',
+    description: 'Fast on-demand conversational & tool-use model',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6-luna',
+    name: 'OpenAI GPT-6 Luna',
+    provider: 'OpenAI',
+    description: 'Ultra-fast frontier model for copywriting & daily turns (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-sonnet-5-5',
+    name: 'Anthropic Claude Sonnet 5.5',
+    provider: 'Anthropic',
+    description: 'Frontier agentic tool use & stylist (requires Anthropic account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6-sol',
+    name: 'OpenAI GPT-6 Sol',
+    provider: 'OpenAI',
+    description: 'Standard frontier co-pilot & corridor logistics (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6-astra',
+    name: 'OpenAI GPT-6 Astra',
+    provider: 'OpenAI',
+    description: 'Heavyweight multi-day corridor audit engine (requires AWS account opt-in)',
+    role: 'scout',
+  },
+  {
+    id: 'us.anthropic.claude-opus-5-5',
+    name: 'Anthropic Claude Opus 5.5',
+    provider: 'Anthropic',
+    description: 'Flagship multi-day architect (requires Anthropic account opt-in)',
+    role: 'scout',
+  },
+  {
+    id: 'us.xai.grok-4.7',
+    name: 'xAI Grok 4.7',
+    provider: 'xAI',
+    description: 'Long-horizon agentic workflow engine (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'amazon.nova-lite-v1:0',
+    name: 'Amazon Nova Lite',
+    provider: 'Amazon',
+    description: 'Cost-effective multimodal model for high-volume turns',
+    role: 'both',
+  },
+  {
+    id: 'us.openai.gpt-6.1-sol',
+    name: 'OpenAI GPT-6.1 Sol',
+    provider: 'OpenAI',
+    description: 'Advanced frontier co-pilot & corridor logistics (requires AWS account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-sonnet-4-6',
+    name: 'Anthropic Claude Sonnet 4.6',
+    provider: 'Anthropic',
+    description: 'High-precision corridor analysis & reasoning (requires Anthropic account opt-in)',
+    role: 'both',
+  },
+  {
+    id: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    name: 'Anthropic Claude Haiku 4.5',
+    provider: 'Anthropic',
+    description: 'High-speed, lightweight alert copywriting (requires Anthropic account opt-in)',
+    role: 'copywriter',
+  },
+];
+
+describe('Route Scout Drawer & UI Controls', () => {
+  describe('3. Client SSE Parser & UI Model Selector Tests', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    });
+
+    it('chatWithScoutStream cleanly ignores : ping and : keep-alive frames and emits thought, delta, and done', async () => {
+      const encoder = new TextEncoder();
+      const mockStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(': ping\n\n'));
+          controller.enqueue(encoder.encode(': keep-alive\n\n'));
+          controller.enqueue(
+            encoder.encode('event: thought\ndata: {"text":"Reasoning about fuel stops..."}\n\n')
+          );
+          controller.enqueue(
+            encoder.encode('event: delta\ndata: {"text":"Found Maverik at exit 285."}\n\n')
+          );
+          controller.enqueue(
+            encoder.encode(
+              'event: done\ndata: {"reply":"Found Maverik at exit 285.","suggestions":[],"sessionId":"s_test_123","engine":"bedrock","modelId":"us.moonshotai.kimi-k3"}\n\n'
+            )
+          );
+          controller.close();
+        },
+      });
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'text/event-stream' }),
+          body: mockStream,
+        })
+      );
+
+      const emittedEvents: ScoutStreamEvent[] = [];
+      const onEvent = vi.fn((evt: ScoutStreamEvent) => emittedEvents.push(evt));
+
+      const request: ScoutChatRequest = {
+        scope: { type: 'day', dayNumber: 1 },
+        messages: [{ role: 'user', content: 'Find fuel' }],
+        tripContext: sampleTripContext,
+      };
+
+      const response: ScoutChatResponse = await chatWithScoutStream(request, onEvent);
+
+      expect(response).toEqual({
+        reply: 'Found Maverik at exit 285.',
+        suggestions: [],
+        sessionId: 's_test_123',
+        engine: 'bedrock',
+        modelId: 'us.moonshotai.kimi-k3',
+      });
+
+      expect(onEvent).toHaveBeenCalledTimes(3);
+      expect(emittedEvents[0]).toEqual({
+        event: 'thought',
+        data: { text: 'Reasoning about fuel stops...' },
+      });
+      expect(emittedEvents[1]).toEqual({
+        event: 'delta',
+        data: { text: 'Found Maverik at exit 285.' },
+      });
+      expect(emittedEvents[2]).toEqual({
+        event: 'done',
+        data: response,
+      });
+    });
+
+    describe('UI Model Selectors', () => {
+      const storageEntries = new Map<string, string>();
+      const mounted: ReactTestRenderer[] = [];
+
+      beforeEach(() => {
+        storageEntries.clear();
+        vi.stubGlobal('localStorage', {
+          getItem: (key: string) => storageEntries.get(key) ?? null,
+          setItem: (key: string, value: string) => storageEntries.set(key, value),
+          removeItem: (key: string) => storageEntries.delete(key),
+        });
+
+        const documentStub = new EventTarget();
+        Object.assign(documentStub, {
+          body: { style: {} },
+        });
+        vi.stubGlobal('document', documentStub);
+
+        const windowStub = new EventTarget();
+        Object.assign(windowStub, {
+          location: { href: 'http://localhost:5173' },
+          speechSynthesis: {
+            cancel: vi.fn(),
+            speak: vi.fn(),
+          },
+        });
+        vi.stubGlobal('window', windowStub);
+      });
+
+      afterEach(() => {
+        for (const inst of mounted) {
+          act(() => {
+            inst.unmount();
+          });
+        }
+        mounted.length = 0;
+      });
+
+      it('renders <RouteScoutDrawer> with Route Scout AI Model selector containing only scout / both models and triggers onChange', () => {
+        const onSelectScoutModel = vi.fn();
+        let app!: ReactTestRenderer;
+
+        act(() => {
+          app = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+              onSelectModel={onSelectScoutModel}
+            />
+          );
+        });
+        mounted.push(app);
+
+        // Find the select element by aria-label
+        const select = app.root.findByProps({ 'aria-label': 'Route Scout AI Model' });
+        expect(select).toBeDefined();
+        expect(select.props.value).toBe('us.moonshotai.kimi-k3');
+
+        // Verify options contain only scout or both models
+        const options = select.findAllByType('option');
+        expect(options.length).toBeGreaterThan(0);
+
+        for (const opt of options) {
+          const optModelId = opt.props.value;
+          const matchingCatalogModel = TEST_MOCK_MODELS.find((m) => m.id === optModelId);
+          expect(matchingCatalogModel).toBeDefined();
+          expect(['scout', 'both']).toContain(matchingCatalogModel?.role);
+        }
+
+        // Trigger change to another model
+        act(() => {
+          select.props.onChange({ target: { value: 'us.amazon.nova-pro-v1:0' } });
+        });
+
+        expect(onSelectScoutModel).toHaveBeenCalledTimes(1);
+        expect(onSelectScoutModel).toHaveBeenCalledWith('us.amazon.nova-pro-v1:0');
+      });
+
+      it('renders <EditWaypointModal> with Copywriter AI Model selector excluding scout-only models and triggers onChange', () => {
+        const onSelectCopywriterModel = vi.fn();
+        let app!: ReactTestRenderer;
+
+        act(() => {
+          app = create(
+            <EditWaypointModal
+              isOpen={true}
+              initialTab="alert"
+              waypoint={sampleWaypointWithDetails}
+              onClose={vi.fn()}
+              onSave={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.amazon.nova-2-lite-v1:0"
+              onSelectModel={onSelectCopywriterModel}
+            />
+          );
+        });
+        mounted.push(app);
+
+        // Find the select element by aria-label
+        const select = app.root.findByProps({ 'aria-label': 'Copywriter AI Model' });
+        expect(select).toBeDefined();
+        expect(select.props.value).toBe('us.amazon.nova-2-lite-v1:0');
+
+        // Verify options contain only copywriter or both models (excluding scout-only)
+        const options = select.findAllByType('option');
+        expect(options.length).toBeGreaterThan(0);
+
+        const renderedModelIds = options.map((opt) => opt.props.value);
+
+        // Scout-only models must NOT be present in copywriter select
+        expect(renderedModelIds).not.toContain('us.openai.gpt-6-astra');
+        expect(renderedModelIds).not.toContain('us.anthropic.claude-opus-5-5');
+
+        for (const opt of options) {
+          const optModelId = opt.props.value;
+          const matchingCatalogModel = TEST_MOCK_MODELS.find((m) => m.id === optModelId);
+          expect(matchingCatalogModel).toBeDefined();
+          expect(['copywriter', 'both']).toContain(matchingCatalogModel?.role);
+        }
+
+        // Trigger change
+        act(() => {
+          select.props.onChange({ target: { value: 'us.amazon.nova-pro-v1:0' } });
+        });
+
+        expect(onSelectCopywriterModel).toHaveBeenCalledTimes(1);
+        expect(onSelectCopywriterModel).toHaveBeenCalledWith('us.amazon.nova-pro-v1:0');
+      });
+
+      it('renders disabled "Select model..." option and does not silently fall back to first model when selectedModelId is empty', () => {
+        let app!: ReactTestRenderer;
+
+        act(() => {
+          app = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId=""
+            />
+          );
+        });
+        mounted.push(app);
+
+        const select = app.root.findByProps({ 'aria-label': 'Route Scout AI Model' });
+        expect(select.props.value).toBe('');
+        const options = select.findAllByType('option');
+        const placeholderOption = options.find((opt) => opt.props.value === '');
+        expect(placeholderOption).toBeDefined();
+        expect(placeholderOption?.props.disabled).toBe(true);
+      });
+
+      it('isolates conversations across itineraries: aborts in-flight stream and prevents Trip A results leaking into Trip B', async () => {
+        let capturedSignal: AbortSignal | undefined;
+        let resolveStreamPromise!: () => void;
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => ['Prompt 1', 'Prompt 2'],
+              });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              capturedSignal = init?.signal;
+              return new Promise((resolve) => {
+                resolveStreamPromise = () => {
+                  const encoder = new TextEncoder();
+                  const stream = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      controller.enqueue(
+                        encoder.encode('event: delta\ndata: {"text":"Advice intended solely for Trip A"}\n\n')
+                      );
+                      controller.enqueue(
+                        encoder.encode(
+                          'event: done\ndata: {"reply":"Advice intended solely for Trip A","suggestions":[],"sessionId":"s1"}\n\n'
+                        )
+                      );
+                      controller.close();
+                    },
+                  });
+                  resolve({
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'text/event-stream' }),
+                    body: stream,
+                  });
+                };
+              });
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        const tripA = { ...sampleTrip, fileName: 'trip-a.json', tripName: 'Trip A' };
+        const tripB = { ...sampleTrip, fileName: 'trip-b.json', tripName: 'Trip B' };
+
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={tripA}
+              itineraryId="trip-a"
+              activeDayIndex={0}
+              activeDay={tripA.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        // Start a turn for Trip A
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Recommend fuel stops along I-40 for Trip A' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        // Trip A stream is now deferred and in flight. Switch component props to Trip B:
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={tripB}
+              itineraryId="trip-b"
+              activeDayIndex={0}
+              activeDay={tripB.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        // 1. Verify Trip A's stream abort signal was triggered upon itinerary switch
+        expect(capturedSignal?.aborted).toBe(true);
+
+        // 2. Now let Trip A's deferred stream complete
+        await act(async () => {
+          resolveStreamPromise();
+        });
+
+        // 3. Verify Trip B does NOT render Trip A's deferred response
+        const jsonTree = JSON.stringify(drawer.toJSON());
+        expect(jsonTree).not.toContain('Advice intended solely for Trip A');
+      });
+
+      it('aborts active stream when drawer is closed (isOpen becomes false)', () => {
+        let capturedSignal: AbortSignal | undefined;
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({ ok: true, json: async () => [] });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              capturedSignal = init?.signal;
+              return new Promise(() => {}); // never resolves
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'In flight request' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        // Close the drawer
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={false}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        expect(capturedSignal?.aborted).toBe(true);
+
+        // Reopen the drawer: verify no stuck analyzing placeholder message is retained (R7)
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        const reopenedJson = JSON.stringify(drawer.toJSON());
+        expect(reopenedJson).not.toContain('Route Scout is analyzing route geometry & corridor');
+      });
+
+      it('aborts active stream when scope is switched', () => {
+        let capturedSignal: AbortSignal | undefined;
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({ ok: true, json: async () => [] });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              capturedSignal = init?.signal;
+              return new Promise(() => {}); // never resolves
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'In flight request' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        expect(capturedSignal).toBeDefined();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        // Switch scope to Day 2
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={1}
+              activeDay={sampleTrip.days[1] || sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 2 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        expect(capturedSignal?.aborted).toBe(true);
+
+        // Switch scope back to Day 1: verify no stuck analyzing placeholder is retained (R7)
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        const day1Json = JSON.stringify(drawer.toJSON());
+        expect(day1Json).not.toContain('Route Scout is analyzing route geometry & corridor');
+      });
+
+      it('preserves completed suggestions-only message across drawer close/reopen and scope switch (P2 Finding 4)', async () => {
+        let resolveStreamPromise: () => void = () => {};
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => [],
+              });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              return new Promise((resolve) => {
+                resolveStreamPromise = () => {
+                  const encoder = new TextEncoder();
+                  const stream = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                      const suggestionsBlock = JSON.stringify({
+                        reply: '',
+                        suggestions: [
+                          {
+                            id: 'sug-scenic-1',
+                            action: 'add_waypoint',
+                            name: 'Completed Scenic Vista',
+                            type: 'scenic',
+                            lat: 34.8697,
+                            lng: -111.761,
+                            notes: 'Must-see red rocks vista',
+                            reason: 'Iconic panoramic viewpoint along corridor',
+                          },
+                        ],
+                        sessionId: 's_test_123',
+                        engine: 'bedrock',
+                      });
+                      controller.enqueue(
+                        encoder.encode(`event: done\ndata: ${suggestionsBlock}\n\n`)
+                      );
+                      controller.close();
+                    },
+                  });
+                  resolve({
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'text/event-stream' }),
+                    body: stream,
+                  });
+                };
+              });
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Suggest scenic spots' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        // Resolve the streaming response
+        await act(async () => {
+          resolveStreamPromise();
+        });
+
+        // The completed suggestion card is rendered
+        let jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+
+        // Close the drawer and reopen: verify completed suggestion card is preserved
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={false}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+
+        // Switch scope to Day 2 and return to Day 1: verify completed suggestion card is preserved
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={1}
+              activeDay={sampleTrip.days[1] || sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 2 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+      });
+
+      it('preserves completed cards-only answer without duplicate loading indicator during follow-up turn (P3 Finding 2)', async () => {
+        let streamCount = 0;
+        let resolveFirstStream: () => void = () => {};
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({
+                ok: true,
+                json: async () => [],
+              });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              streamCount++;
+              if (streamCount === 1) {
+                return new Promise((resolve) => {
+                  resolveFirstStream = () => {
+                    const encoder = new TextEncoder();
+                    const stream = new ReadableStream<Uint8Array>({
+                      start(controller) {
+                        const suggestionsBlock = JSON.stringify({
+                          reply: '',
+                          suggestions: [
+                            {
+                              id: 'sug-scenic-1',
+                              action: 'add_waypoint',
+                              name: 'Completed Scenic Vista',
+                              type: 'scenic',
+                              lat: 34.8697,
+                              lng: -111.761,
+                              notes: 'Must-see red rocks vista',
+                              reason: 'Iconic panoramic viewpoint along corridor',
+                            },
+                          ],
+                          sessionId: 's_test_123',
+                          engine: 'bedrock',
+                        });
+                        controller.enqueue(
+                          encoder.encode(`event: done\ndata: ${suggestionsBlock}\n\n`)
+                        );
+                        controller.close();
+                      },
+                    });
+                    resolve({
+                      ok: true,
+                      status: 200,
+                      headers: new Headers({ 'content-type': 'text/event-stream' }),
+                      body: stream,
+                    });
+                  };
+                });
+              }
+              // Second stream (follow-up turn) stays deferred / in flight
+              return new Promise(() => {});
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        // Turn 1
+        const form = drawer.root.findByType('form');
+        const textarea = drawer.root.findByType('textarea');
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Suggest scenic spots' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        // Resolve Turn 1 stream
+        await act(async () => {
+          resolveFirstStream();
+        });
+
+        // Completed card is rendered, no loading indicators
+        let jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+        expect(jsonStr).not.toContain('Route Scout is analyzing route geometry & corridor');
+
+        // Start Turn 2 (deferred follow-up turn)
+        act(() => {
+          textarea.props.onChange({ target: { value: 'Any coffee spots nearby?' } });
+        });
+        act(() => {
+          form.props.onSubmit({ preventDefault: () => {} });
+        });
+
+        // Assert: Turn 2 in-flight turn renders EXACTLY ONE loading indicator, and Turn 1's completed card remains
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+        const matches = jsonStr.match(/Route Scout is analyzing route geometry & corridor/g);
+        expect(matches).toHaveLength(1);
+
+        // Close the drawer to cancel the active turn
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={false}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        // Reopen drawer: Turn 2's placeholder was removed, Turn 1's completed card is preserved, and 0 loading indicators
+        act(() => {
+          drawer.update(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+
+        jsonStr = JSON.stringify(drawer.toJSON());
+        expect(jsonStr).toContain('Completed Scenic Vista');
+        expect(jsonStr).not.toContain('Route Scout is analyzing route geometry & corridor');
+      });
+
+      it('gates Route Scout input, send button, and quick prompts when selectedModelId is empty (R5)', () => {
+        let drawer!: ReactTestRenderer;
+        act(() => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={sampleTrip}
+              itineraryId="trip-sample"
+              activeDayIndex={0}
+              activeDay={sampleTrip.days[0]}
+              waypoints={[]}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onPreviewCoordinate={vi.fn()}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId=""
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const textarea = drawer.root.findByType('textarea');
+        expect(textarea.props.disabled).toBe(true);
+        expect(textarea.props.placeholder).toContain('Select an AI model');
+
+        const sendButton = drawer.root.findByProps({ type: 'submit' });
+        expect(sendButton.props.disabled).toBe(true);
+
+        const select = drawer.root.findByType('select');
+        expect(select.props.value).toBe('');
+      });
+
+      it('gates Waypoint edit modal generate alert button when selectedModelId is empty (R5)', () => {
+        let modal!: ReactTestRenderer;
+        act(() => {
+          modal = create(
+            <EditWaypointModal
+              isOpen={true}
+              initialTab="alert"
+              onClose={vi.fn()}
+              onSave={vi.fn()}
+              waypoint={sampleWaypointWithDetails}
+              aiModels={TEST_MOCK_MODELS}
+              selectedModelId=""
+            />
+          );
+        });
+        mounted.push(modal);
+
+        const generateBtn = modal.root.findByProps({ title: 'Select an AI model to generate alert' });
+        expect(generateBtn.props.disabled).toBe(true);
+      });
+
+      it('maintains stable itinerary session identity across save and rename, but resets on new route (R6)', () => {
+        const id1 = createItinerarySessionId();
+        const id2 = createItinerarySessionId();
+        expect(id1).toMatch(/^itin_session_\d+_\d+$/);
+        expect(id2).toMatch(/^itin_session_\d+_\d+$/);
+        expect(id1).not.toBe(id2);
+      });
+    });
+  });
+});
+
