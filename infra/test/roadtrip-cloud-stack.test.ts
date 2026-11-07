@@ -522,7 +522,125 @@ describe('RoadtripCopilotCloudStack', () => {
     expect(outputKeys).toContain('StaticSiteBucketName');
     expect(outputKeys).toContain('AppDataBucketName');
     expect(outputKeys).toContain('LambdaFunctionUrl');
+    expect(outputKeys).toContain('RefreshBedrockPricingFunctionName');
+    expect(outputKeys).toContain('PricingRefreshAlertTopicArn');
     expect(outputKeys).not.toContain('GitHubActionsRoleArn');
     expect(outputKeys).not.toContain('GitHubActionsUserName');
+  });
+
+  it('provisions RefreshBedrockPricingFunction as a standard Node.js 20 Lambda (512 MB, 60s timeout) with least-privilege IAM', () => {
+    const stack = createStack();
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Runtime: 'nodejs20.x',
+      Handler: 'index.handler',
+      MemorySize: 512,
+      Timeout: 60,
+      Architectures: ['x86_64'],
+      Environment: {
+        Variables: Match.objectLike({
+          NODE_ENV: 'production',
+          S3_STORAGE_BUCKET: Match.anyValue(),
+          BEDROCK_SCOUT_MODEL_ID: 'us.moonshotai.kimi-k3',
+          BEDROCK_COPYWRITER_MODEL_ID: 'us.amazon.nova-2-lite-v1:0',
+        }),
+      },
+    });
+
+    // Verify RefreshBedrockPricingFunction IAM policy statements
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['s3:GetObject', 's3:PutObject'],
+            Effect: 'Allow',
+            Resource: {
+              'Fn::Join': [
+                '',
+                [
+                  { 'Fn::GetAtt': [Match.stringLikeRegexp('^AppDataBucket'), 'Arn'] },
+                  '/pricing/*',
+                ],
+              ],
+            },
+          }),
+          Match.objectLike({
+            Action: ['bedrock:ListFoundationModels', 'bedrock:ListInferenceProfiles'],
+            Effect: 'Allow',
+            Resource: '*',
+          }),
+          Match.objectLike({
+            Action: ['pricing:GetProducts', 'pricing:DescribeServices'],
+            Effect: 'Allow',
+            Resource: '*',
+          }),
+        ]),
+      },
+    });
+
+    // Verify only RefreshBedrockPricingFunction's policy contains pricing:GetProducts (FastifyApiFunction must not)
+    const policies = template.findResources('AWS::IAM::Policy');
+    const pricingPolicies = Object.values(policies).filter((policy) =>
+      JSON.stringify(policy.Properties?.PolicyDocument).includes('pricing:GetProducts'),
+    );
+    expect(pricingPolicies).toHaveLength(1);
+    const attachedRoles = pricingPolicies[0].Properties?.Roles as Array<{ Ref: string }>;
+    expect(attachedRoles).toHaveLength(1);
+    expect(attachedRoles[0].Ref).toMatch(/^RefreshBedrockPricingFunctionServiceRole/);
+  });
+
+  it('schedules RefreshBedrockPricingFunction weekly via EventBridge Scheduler with LambdaInvoke grant and alerts on failure via CloudWatch + SNS', () => {
+    const stack = createStack({ alertEmail: 'alerts@example.com' });
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties('AWS::Scheduler::Schedule', {
+      ScheduleExpression: 'cron(0 6 ? * MON *)',
+      FlexibleTimeWindow: {
+        Mode: 'OFF',
+      },
+      Target: Match.objectLike({
+        RetryPolicy: Match.objectLike({
+          MaximumRetryAttempts: 2,
+        }),
+      }),
+    });
+
+    // Scheduler execution role receives lambda:InvokeFunction permission
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: 'lambda:InvokeFunction',
+            Effect: 'Allow',
+          }),
+        ]),
+      },
+    });
+
+    // SNS Alert Topic and optional email subscription
+    template.hasResourceProperties('AWS::SNS::Topic', {
+      DisplayName: 'Roadtrip Co-Pilot Bedrock Pricing Refresh Alerts',
+    });
+    template.hasResourceProperties('AWS::SNS::Subscription', {
+      Protocol: 'email',
+      Endpoint: 'alerts@example.com',
+    });
+
+    // CloudWatch Alarm on RefreshBedrockPricingFunction Errors wired to SNS Topic
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      MetricName: 'Errors',
+      Namespace: 'AWS/Lambda',
+      Statistic: 'Sum',
+      Period: 300,
+      EvaluationPeriods: 1,
+      Threshold: 1,
+      TreatMissingData: 'notBreaching',
+      AlarmActions: Match.arrayWith([
+        {
+          Ref: Match.stringLikeRegexp('^PricingRefreshAlertTopic'),
+        },
+      ]),
+    });
   });
 });

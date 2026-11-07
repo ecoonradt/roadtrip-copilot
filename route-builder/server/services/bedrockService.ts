@@ -28,9 +28,19 @@ import type {
 import type { ScoutStreamEvent } from '../types/scout.js';
 import type { AiHarnessAdapter } from './aiService.js';
 import { InvalidModelError } from './aiService.js';
+import {
+  calculateBedrockCallCostNanos,
+  PricingUnavailableError,
+  type BedrockModelTokenRate,
+  type BedrockPricingCatalog,
+} from './bedrockPricing.js';
+import {
+  BedrockPricingCache,
+  type BedrockPricingProvider,
+} from './bedrockPricingCache.js';
 import { MalformedAiResponseError } from './schemaParser.js';
 
-export { InvalidModelError };
+export { InvalidModelError, PricingUnavailableError };
 
 export const DEFAULT_BEDROCK_SCOUT_MODEL_ID = 'us.moonshotai.kimi-k3';
 export const DEFAULT_BEDROCK_COPYWRITER_MODEL_ID = 'us.amazon.nova-2-lite-v1:0';
@@ -117,6 +127,8 @@ export interface BedrockAdapterOptions {
   available?: boolean;
   availableModels?: AiModelOption[];
   excludedModelIds?: string[] | Set<string>;
+  pricingCache?: BedrockPricingProvider | null;
+  pricingCatalog?: BedrockPricingCatalog;
 }
 
 export function inferProviderFromModelId(modelId: string): string {
@@ -252,10 +264,13 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   private hasCustomClient: boolean;
   private options: BedrockAdapterOptions;
   private availableModels: AiModelOption[] | null = null;
+  private seedAvailableModels: AiModelOption[] | null = null;
   private availabilityPromise: Promise<AiModelOption[]> | null = null;
   private availabilityCheckedAt = 0;
   private excludedModelIds: Set<string>;
   private discoveredAliases = new Map<string, string>();
+  private pricingCache: BedrockPricingProvider | null;
+  private unpricedModelIds = new Set<string>();
 
   constructor(options: BedrockAdapterOptions = {}) {
     this.options = options;
@@ -274,10 +289,27 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       : [];
     this.excludedModelIds = new Set([...envExclusions, ...optExclusions]);
 
-    this.availableModels = options.availableModels ?? null;
-    if (options.availableModels) {
-      this.availabilityCheckedAt = Date.now();
+    if (options.pricingCache !== undefined) {
+      this.pricingCache = options.pricingCache;
+    } else if (options.pricingCatalog !== undefined) {
+      const staticCatalog = options.pricingCatalog;
+      this.pricingCache = {
+        getCatalog: async () => ({ catalog: staticCatalog, isStale: false }),
+      };
+    } else if (!options.client && !options.controlClient && !options.availableModels) {
+      this.pricingCache = new BedrockPricingCache({ region });
+    } else {
+      this.pricingCache = null;
     }
+
+    this.seedAvailableModels = options.availableModels ? [...options.availableModels] : null;
+    if (options.availableModels && !this.pricingCache) {
+      this.availableModels = options.availableModels;
+      this.availabilityCheckedAt = Date.now();
+    } else {
+      this.availableModels = null;
+    }
+
     if (options.controlClient) {
       this.controlClient = options.controlClient;
     } else if (this.hasCustomClient) {
@@ -317,6 +349,54 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     return false;
   }
 
+  private lookupModelRate(
+    catalog: BedrockPricingCatalog,
+    modelId: string
+  ): BedrockModelTokenRate | undefined {
+    if (Object.prototype.hasOwnProperty.call(catalog.models, modelId)) {
+      return catalog.models[modelId];
+    }
+    return undefined;
+  }
+
+  private applyPricingFilter(
+    verified: AiModelOption[],
+    catalog: BedrockPricingCatalog
+  ): AiModelOption[] {
+    const nextUnpriced = new Set<string>();
+    const priced: AiModelOption[] = [];
+
+    for (const model of verified) {
+      if (this.lookupModelRate(catalog, model.id)) {
+        priced.push(model);
+      } else {
+        nextUnpriced.add(model.id);
+        const fId = toFoundationModelId(model.id);
+        if (fId) {
+          nextUnpriced.add(fId);
+        }
+      }
+    }
+
+    // If a foundation model has a priced profile, do not treat the bare foundation ID as unpriced
+    for (const model of priced) {
+      const fId = toFoundationModelId(model.id);
+      if (fId) {
+        nextUnpriced.delete(fId);
+      }
+    }
+
+    this.unpricedModelIds = nextUnpriced;
+
+    if (verified.length > 0 && priced.length === 0) {
+      throw new PricingUnavailableError(
+        'No discovered Amazon Bedrock models have resolved pricing in the pricing catalog'
+      );
+    }
+
+    return priced;
+  }
+
   /**
    * Rebuilds the verified model list from Amazon Bedrock control-plane APIs using AWS-driven discovery.
    *
@@ -326,12 +406,32 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
    * 4. Normalizes canonical profile aliases from AWS profile metadata.
    * 5. Applies policy-driven exclusions (excludedModelIds / BEDROCK_EXCLUDED_MODEL_IDS).
    * 6. Verifies account availability via GetFoundationModelAvailability.
+   * 7. Intersects verified models with the Bedrock pricing catalog when pricingCache is configured.
    */
   async refreshModelAvailability(): Promise<AiModelOption[]> {
     if (this.availabilityPromise) {
       return this.availabilityPromise;
     }
     if (!this.controlClient) {
+      if (this.seedAvailableModels !== null) {
+        if (!this.pricingCache) {
+          this.availableModels = [...this.seedAvailableModels];
+          this.availabilityCheckedAt = Date.now();
+          return this.availableModels;
+        }
+        this.availabilityPromise = (async () => {
+          try {
+            const { catalog } = await this.pricingCache!.getCatalog();
+            const priced = this.applyPricingFilter(this.seedAvailableModels!, catalog);
+            this.availableModels = priced;
+            this.availabilityCheckedAt = Date.now();
+            return this.availableModels;
+          } finally {
+            this.availabilityPromise = null;
+          }
+        })();
+        return this.availabilityPromise;
+      }
       if (this.availableModels !== null) {
         return this.availableModels;
       }
@@ -342,9 +442,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
 
     this.availabilityPromise = (async () => {
       try {
-        const [activeProfiles, foundationModels] = await Promise.all([
+        const [activeProfiles, foundationModels, pricingResult] = await Promise.all([
           this.fetchActiveInferenceProfiles(),
           this.fetchFoundationModels(),
+          this.pricingCache ? this.pricingCache.getCatalog() : Promise.resolve(null),
         ]);
 
         const candidateMap = new Map<string, AiModelOption>();
@@ -408,11 +509,19 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
           });
         }
 
-        // Compute dynamic aliases deterministically from eligible, non-excluded profiles
+        // Compute dynamic aliases deterministically from eligible, non-excluded profiles,
+        // preferring priced profiles when a pricing catalog is active.
         const dynamicAliases = new Map<string, string>();
         for (const [foundationId, profileList] of profilesByFoundation) {
           if (profileList.length === 0) continue;
           profileList.sort((a, b) => {
+            if (pricingResult) {
+              const pricedA = this.lookupModelRate(pricingResult.catalog, a.profileId) ? 1 : 0;
+              const pricedB = this.lookupModelRate(pricingResult.catalog, b.profileId) ? 1 : 0;
+              if (pricedA !== pricedB) {
+                return pricedB - pricedA;
+              }
+            }
             const scoreA = getProfilePreferenceScore(a.profileId);
             const scoreB = getProfilePreferenceScore(b.profileId);
             if (scoreA !== scoreB) {
@@ -469,7 +578,9 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         }
 
         const verified = checks.filter((m): m is AiModelOption => m !== null);
-        this.availableModels = verified;
+        this.availableModels = pricingResult
+          ? this.applyPricingFilter(verified, pricingResult.catalog)
+          : verified;
         this.availabilityCheckedAt = Date.now();
         return this.availableModels;
       } finally {
@@ -568,6 +679,9 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     if (typeof modelId !== 'string') return '';
     const trimmed = modelId.trim();
     if (!trimmed) return '';
+    if (this.availableModels?.some((m) => m.id === trimmed)) {
+      return trimmed;
+    }
     return this.discoveredAliases.get(trimmed) || getStaticInferenceProfileAlias(trimmed) || trimmed;
   }
 
@@ -600,7 +714,25 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
 
     const candidate = available.find((m) => m.id === normalized);
     if (!candidate) {
+      if (this.unpricedModelIds.has(normalized) || this.unpricedModelIds.has(trimmed)) {
+        throw new PricingUnavailableError(
+          `Bedrock model "${normalized}" is currently unavailable because its token pricing is missing from the pricing catalog`
+        );
+      }
       throw new InvalidModelError(`Unsupported or unavailable Bedrock model ID: "${modelId}"`);
+    }
+
+    if (this.pricingCache) {
+      const { catalog } = await this.pricingCache.getCatalog();
+      if (!this.lookupModelRate(catalog, normalized)) {
+        this.unpricedModelIds.add(normalized);
+        if (this.availableModels) {
+          this.availableModels = this.availableModels.filter((m) => m.id !== normalized);
+        }
+        throw new PricingUnavailableError(
+          `Bedrock model "${normalized}" is currently unavailable because its token pricing is missing from the pricing catalog`
+        );
+      }
     }
 
     if (role === 'scout' && candidate.role !== 'scout' && candidate.role !== 'both') {
@@ -677,13 +809,94 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     const rawModelId = options?.modelId || this.rawConfiguredCopywriterModelId || this.defaultCopywriterModelId;
     const modelId = await this.validateModelId(rawModelId, 'copywriter');
 
+    let rate: BedrockModelTokenRate | undefined;
+    let isStale = false;
+    if (this.pricingCache) {
+      const pricingSnapshot = await this.pricingCache.getCatalog();
+      isStale = pricingSnapshot.isStale;
+      rate = this.lookupModelRate(pricingSnapshot.catalog, modelId);
+      if (!rate) {
+        throw new PricingUnavailableError(
+          `Bedrock model "${modelId}" is currently unavailable because its token pricing is missing from the pricing catalog`
+        );
+      }
+    }
+
     const command = new ConverseCommand({
       modelId,
       messages: [{ role: 'user', content: [{ text: prompt }] }],
       inferenceConfig: { maxTokens: 4096, temperature: 0.4 },
     });
 
-    const response = await this.client.send(command, abortSignal ? { abortSignal } : undefined);
+    let response;
+    try {
+      response = await this.client.send(command, abortSignal ? { abortSignal } : undefined);
+    } catch (err: unknown) {
+      if (options?.onUsage) {
+        try {
+          await options.onUsage({
+            providerId: this.id,
+            modelId,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            costNanos: 0,
+            ...(isStale ? { pricingStale: true } : {}),
+            usageComplete: false,
+          });
+        } catch {
+          // Do not allow an onUsage accounting callback error to mask the primary Bedrock error
+        }
+      }
+      throw err;
+    }
+
+    if (options?.onUsage) {
+      if (response.usage) {
+        const inputTokens = typeof response.usage.inputTokens === 'number' ? response.usage.inputTokens : 0;
+        const outputTokens = typeof response.usage.outputTokens === 'number' ? response.usage.outputTokens : 0;
+        const cacheReadInputTokens =
+          typeof response.usage.cacheReadInputTokens === 'number' ? response.usage.cacheReadInputTokens : 0;
+        const cacheWriteInputTokens =
+          typeof response.usage.cacheWriteInputTokens === 'number' ? response.usage.cacheWriteInputTokens : 0;
+        const costNanos = rate
+          ? calculateBedrockCallCostNanos(
+              {
+                inputTokens,
+                outputTokens,
+                cacheReadInputTokens,
+                cacheWriteInputTokens,
+              },
+              rate
+            )
+          : 0;
+        await options.onUsage({
+          providerId: this.id,
+          modelId,
+          inputTokens,
+          outputTokens,
+          cacheReadInputTokens,
+          cacheWriteInputTokens,
+          costNanos,
+          ...(isStale ? { pricingStale: true } : {}),
+          usageComplete: true,
+        });
+      } else {
+        await options.onUsage({
+          providerId: this.id,
+          modelId,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          costNanos: 0,
+          ...(isStale ? { pricingStale: true } : {}),
+          usageComplete: false,
+        });
+      }
+    }
+
     if (response.stopReason === 'max_tokens') {
       throw new MalformedAiResponseError('Model response was truncated: maximum token allowance reached (max_tokens)');
     }
@@ -725,6 +938,19 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
     const rawModelId = options?.modelId || this.rawConfiguredScoutModelId || this.defaultScoutModelId;
     const activeModelId = await this.validateModelId(rawModelId, 'scout');
 
+    let rate: BedrockModelTokenRate | undefined;
+    let isStale = false;
+    if (this.pricingCache) {
+      const pricingSnapshot = await this.pricingCache.getCatalog();
+      isStale = pricingSnapshot.isStale;
+      rate = this.lookupModelRate(pricingSnapshot.catalog, activeModelId);
+      if (!rate) {
+        throw new PricingUnavailableError(
+          `Bedrock model "${activeModelId}" is currently unavailable because its token pricing is missing from the pricing catalog`
+        );
+      }
+    }
+
     const messages: Message[] = [{ role: 'user', content: [{ text: prompt }] }];
     const toolConfig: ToolConfiguration | undefined =
       tools.length > 0
@@ -757,76 +983,152 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
         inferenceConfig: { maxTokens: 4096, temperature: 0.4 },
       });
 
-      const response = await this.client.send(
-        command,
-        options?.abortSignal ? { abortSignal: options.abortSignal } : undefined
-      );
-
       let turnRawText = '';
       let emittedVisibleLen = 0;
       let emittedReasoningThought = false;
       let stopReason: string | undefined = undefined;
+      let usageEmittedForIteration = false;
       const toolUseMap = new Map<number, { toolUseId: string; name: string; inputJson: string }>();
 
-      if (!response.stream) {
-        throw new Error('No stream returned from Bedrock ConverseStream');
+      try {
+        const response = await this.client.send(
+          command,
+          options?.abortSignal ? { abortSignal: options.abortSignal } : undefined
+        );
+
+        if (!response.stream) {
+          throw new Error('No stream returned from Bedrock ConverseStream');
+        }
+
+        for await (const chunk of response.stream) {
+          if (options?.abortSignal?.aborted) {
+            throw new Error('Request aborted');
+          }
+
+          if (chunk.contentBlockStart?.start?.toolUse) {
+            const idx = chunk.contentBlockStart.contentBlockIndex ?? 0;
+            const tu = chunk.contentBlockStart.start.toolUse;
+            toolUseMap.set(idx, {
+              toolUseId: tu.toolUseId ?? `tool_${Date.now()}_${idx}`,
+              name: tu.name ?? '',
+              inputJson: '',
+            });
+          }
+
+          if (chunk.contentBlockDelta?.delta?.reasoningContent?.text) {
+            if (!emittedReasoningThought) {
+              emittedReasoningThought = true;
+              onChunk({ event: 'thought', data: { text: 'Reasoning through route options...' } });
+            }
+          }
+
+          if (chunk.contentBlockDelta?.delta?.text) {
+            turnRawText += chunk.contentBlockDelta.delta.text;
+            const visibleSoFar = turnRawText
+              .replace(/<(?:thinking|think)>[\s\S]*?<\/(?:thinking|think)>/gi, '')
+              .replace(/<(?:thinking|think)>[\s\S]*$/i, '')
+              .replace(/<\/?(?:t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?)?$/i, '');
+            if (visibleSoFar.length > emittedVisibleLen) {
+              const newDelta = visibleSoFar.slice(emittedVisibleLen);
+              emittedVisibleLen = visibleSoFar.length;
+              onChunk({ event: 'delta', data: { text: newDelta } });
+            }
+          }
+
+          if (chunk.contentBlockDelta?.delta?.toolUse?.input) {
+            const idx = chunk.contentBlockDelta.contentBlockIndex ?? 0;
+            const existing = toolUseMap.get(idx);
+            if (existing) {
+              existing.inputJson += chunk.contentBlockDelta.delta.toolUse.input;
+            }
+          }
+
+          if (chunk.messageStop?.stopReason) {
+            stopReason = chunk.messageStop.stopReason;
+          }
+
+          if (chunk.metadata?.usage) {
+            const iterInput =
+              typeof chunk.metadata.usage.inputTokens === 'number'
+                ? chunk.metadata.usage.inputTokens
+                : 0;
+            const iterOutput =
+              typeof chunk.metadata.usage.outputTokens === 'number'
+                ? chunk.metadata.usage.outputTokens
+                : 0;
+            const iterCacheRead =
+              typeof chunk.metadata.usage.cacheReadInputTokens === 'number'
+                ? chunk.metadata.usage.cacheReadInputTokens
+                : 0;
+            const iterCacheWrite =
+              typeof chunk.metadata.usage.cacheWriteInputTokens === 'number'
+                ? chunk.metadata.usage.cacheWriteInputTokens
+                : 0;
+            totalInputTokens += iterInput;
+            totalOutputTokens += iterOutput;
+
+            if (options?.onUsage && !usageEmittedForIteration) {
+              usageEmittedForIteration = true;
+              const costNanos = rate
+                ? calculateBedrockCallCostNanos(
+                    {
+                      inputTokens: iterInput,
+                      outputTokens: iterOutput,
+                      cacheReadInputTokens: iterCacheRead,
+                      cacheWriteInputTokens: iterCacheWrite,
+                    },
+                    rate
+                  )
+                : 0;
+              await options.onUsage({
+                providerId: this.id,
+                modelId: activeModelId,
+                inputTokens: iterInput,
+                outputTokens: iterOutput,
+                cacheReadInputTokens: iterCacheRead,
+                cacheWriteInputTokens: iterCacheWrite,
+                costNanos,
+                ...(isStale ? { pricingStale: true } : {}),
+                usageComplete: true,
+              });
+            }
+          }
+        }
+      } catch (streamErr: unknown) {
+        if (options?.onUsage && !usageEmittedForIteration) {
+          usageEmittedForIteration = true;
+          try {
+            await options.onUsage({
+              providerId: this.id,
+              modelId: activeModelId,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadInputTokens: 0,
+              cacheWriteInputTokens: 0,
+              costNanos: 0,
+              ...(isStale ? { pricingStale: true } : {}),
+              usageComplete: false,
+            });
+          } catch {
+            // Do not allow an onUsage accounting callback error to mask the primary stream error
+          }
+        }
+        throw streamErr;
       }
 
-      for await (const chunk of response.stream) {
-        if (options?.abortSignal?.aborted) {
-          throw new Error('Request aborted');
-        }
-
-        if (chunk.contentBlockStart?.start?.toolUse) {
-          const idx = chunk.contentBlockStart.contentBlockIndex ?? 0;
-          const tu = chunk.contentBlockStart.start.toolUse;
-          toolUseMap.set(idx, {
-            toolUseId: tu.toolUseId ?? `tool_${Date.now()}_${idx}`,
-            name: tu.name ?? '',
-            inputJson: '',
-          });
-        }
-
-        if (chunk.contentBlockDelta?.delta?.reasoningContent?.text) {
-          if (!emittedReasoningThought) {
-            emittedReasoningThought = true;
-            onChunk({ event: 'thought', data: { text: 'Reasoning through route options...' } });
-          }
-        }
-
-        if (chunk.contentBlockDelta?.delta?.text) {
-          turnRawText += chunk.contentBlockDelta.delta.text;
-          const visibleSoFar = turnRawText
-            .replace(/<(?:thinking|think)>[\s\S]*?<\/(?:thinking|think)>/gi, '')
-            .replace(/<(?:thinking|think)>[\s\S]*$/i, '')
-            .replace(/<\/?(?:t(?:h(?:i(?:n(?:k(?:i(?:n(?:g)?)?)?)?)?)?)?)?$/i, '');
-          if (visibleSoFar.length > emittedVisibleLen) {
-            const newDelta = visibleSoFar.slice(emittedVisibleLen);
-            emittedVisibleLen = visibleSoFar.length;
-            onChunk({ event: 'delta', data: { text: newDelta } });
-          }
-        }
-
-        if (chunk.contentBlockDelta?.delta?.toolUse?.input) {
-          const idx = chunk.contentBlockDelta.contentBlockIndex ?? 0;
-          const existing = toolUseMap.get(idx);
-          if (existing) {
-            existing.inputJson += chunk.contentBlockDelta.delta.toolUse.input;
-          }
-        }
-
-        if (chunk.messageStop?.stopReason) {
-          stopReason = chunk.messageStop.stopReason;
-        }
-
-        if (chunk.metadata?.usage) {
-          if (typeof chunk.metadata.usage.inputTokens === 'number') {
-            totalInputTokens += chunk.metadata.usage.inputTokens;
-          }
-          if (typeof chunk.metadata.usage.outputTokens === 'number') {
-            totalOutputTokens += chunk.metadata.usage.outputTokens;
-          }
-        }
+      if (options?.onUsage && !usageEmittedForIteration) {
+        usageEmittedForIteration = true;
+        await options.onUsage({
+          providerId: this.id,
+          modelId: activeModelId,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          costNanos: 0,
+          ...(isStale ? { pricingStale: true } : {}),
+          usageComplete: false,
+        });
       }
 
       const fullVisibleTurnText = turnRawText

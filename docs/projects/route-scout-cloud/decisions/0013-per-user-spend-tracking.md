@@ -43,7 +43,7 @@ Chosen Option: **Option C**.
 
 2. **Bedrock-Specific Pricing Inside `AwsBedrockHarnessAdapter`:**
    * `AwsBedrockHarnessAdapter` resolves token prices from a cached Bedrock pricing JSON catalog (`s3://<AppDataBucket>/pricing/bedrock-us-east-2.json` in cloud mode; `itineraries/.spend/pricing/bedrock-us-east-2.json` in local dev).
-   * In AWS (`infra/`), an EventBridge Scheduler rule triggers a lightweight on-demand Lambda function weekly in `us-east-2` to fetch current Bedrock pricing for discovered models and update `pricing/bedrock-us-east-2.json` in S3 (with on-use fallback refresh if the cache does not yet exist).
+   * In AWS (`infra/`), an EventBridge Scheduler rule triggers a lightweight on-demand Lambda function weekly in `us-east-2` to fetch current Bedrock pricing for discovered models and update `pricing/bedrock-us-east-2.json` in S3, monitored by a CloudWatch Alarm + SNS notification topic on function errors. In local development, `npm run refresh:pricing` runs the same handler to populate `itineraries/.spend/pricing/bedrock-us-east-2.json`. The web application never queries the AWS Price List API on demand during user requests.
    * `AwsBedrockHarnessAdapter.getAvailableModels()` and `validateModelId()` filter out any discovered model that lacks resolved pricing in the catalog so unpriced models cannot be selected or invoked.
    * If a scheduled refresh fails when a previous valid catalog exists, `AwsBedrockHarnessAdapter` continues using the last valid cached rates and sets `pricingStale: true` on emitted `AiUsageEvent` records (and logs a warning).
 
