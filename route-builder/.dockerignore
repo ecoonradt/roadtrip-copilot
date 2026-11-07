@@ -2,8 +2,11 @@ node_modules
 dist
 dist-server
 tests
+e2e
 src
 .vite
+**/*.test.ts
+**/*.test.tsx
 .git
 .gitignore
 .env*

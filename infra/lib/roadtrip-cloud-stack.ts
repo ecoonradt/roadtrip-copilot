@@ -96,7 +96,7 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
     // 3. FastifyApiFunction (DockerImageFunction)
     this.fastifyApiFunction = new lambda.DockerImageFunction(this, 'FastifyApiFunction', {
       code: lambda.DockerImageCode.fromImageAsset(path.resolve(__dirname, '../../route-builder'), {
-        exclude: ['node_modules', 'dist', 'dist-server', 'tests', 'src', '.vite', '.git'],
+        exclude: ['node_modules', 'dist', 'dist-server', 'tests', 'e2e', 'src', '.vite', '.git', '**/*.test.ts', '**/*.test.tsx'],
       }),
       architecture: lambda.Architecture.X86_64,
       memorySize: 512,
