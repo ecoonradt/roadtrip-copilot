@@ -11,11 +11,8 @@
     "build:client": "tsc -p tsconfig.json --noEmit && vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "test": "vitest run",
-    "test:client": "vitest run src",
+    "test:frontend": "vitest run src",
     "test:backend": "vitest run server",
-    "test:engine": "vitest run src/engine",
-    "test:ai": "vitest run server/services server/routes/ai.test.ts server/routes/scoutChatDisconnect.test.ts src/services/api.test.ts src/services/aiQueue.test.ts src/components/RouteScoutDrawer.test.tsx",
-    "test:schema": "vitest run src/engine/export.test.ts server/routes/device.test.ts",
     "test:browser": "playwright test",
     "preview": "vite preview"
   },

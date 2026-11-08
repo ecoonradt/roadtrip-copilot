@@ -11,7 +11,7 @@ import {
 } from '../services/api';
 import type { ParsedTrip } from '../engine/itineraryParser';
 
-vi.mock('../../src/services/api', () => ({
+vi.mock('../services/api', () => ({
   fetchItineraryList: vi.fn(),
   fetchItinerary: vi.fn(),
   deleteItinerary: vi.fn(),

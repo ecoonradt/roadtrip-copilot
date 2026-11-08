@@ -938,7 +938,7 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
     });
 
     it('server/loadEnv.ts loads without throwing', async () => {
-      await expect(import('../../server/loadEnv.js')).resolves.toBeDefined();
+      await expect(import('../loadEnv.js')).resolves.toBeDefined();
     });
   });
 });

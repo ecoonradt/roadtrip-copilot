@@ -142,12 +142,7 @@ route-builder/
 │   ├── constants/
 │   │   └── aiCopy.ts           # Provider-neutral copy for AI-disabled UI states
 │   └── types/                  # Frontend data models (auth, routing, ai, scout)
-└── tests/                      # Vitest regression suites
-    ├── ai/                     # Harness adapters, alert/schema generation, Scout
-    ├── backend/                # Auth, routing, storage, device handoff, geocoding
-    ├── engine/                 # Cascade, schema, timezone and navigation-link math
-    ├── ui/                     # Portable React scheduling, account, and auth recovery tests & harness
-    └── browser/                # Playwright geometry and account interaction regressions (*.browser.ts)
+└── e2e/                        # Playwright geometry and account interaction regressions (*.browser.ts)
 ```
 
 > **Local dev workspace:** user-authored routes are written to the repo-root `itineraries/` directory
@@ -162,17 +157,15 @@ route-builder/
 # Start both Frontend (:5173) and Backend (:3001)
 npm run dev
 
-# Run all Vitest suites
+# Run all Vitest suites (frontend src/ and backend server/)
 npm test
+
+# One tree only
+npm run test:frontend  # src/
+npm run test:backend   # server/
 
 # Browser acceptance tests (one-time setup: npx playwright install chromium)
 npm run test:browser
-
-# Granular test suites
-npm run test:backend  # Fastify routing proxies, Nominatim headers, OSRM cache
-npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
-npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
-npm run test:schema   # Itinerary V2 JSON export and ADB device service
 
 # Production compile (client Vite bundle + backend tsc)
 npm run build
@@ -193,3 +186,4 @@ npm run build
 4. **Preserve Backward Compatibility:** Any changes to exported itinerary JSON must conform to the V2 schema expected by the Android native co-pilot service.
 5. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused without harness-specific tool bans or shell commands. All harness-specific tool permissions, guardrails, and response cleaning must be implemented through the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
 6. **No Silent Fallbacks or Mock Degradation:** Never implement silent fallbacks (such as catching a failure in Bedrock, S3, OSRM, or Google OIDC and falling back to mock templates, client-side mocks, or local CLI tools). Silent fallbacks mask real system failures and fail completely in cloud environments. External API failures must fail loudly, immediately, and transparently with proper HTTP status codes (`502 Bad Gateway`, `503 Service Unavailable`, `400 Bad Request`). Silent fallbacks are almost always wrong; check with the user and obtain explicit approval before building any fallback mechanism.
+7. **Colocate tests; do not recreate `tests/`.** Vitest files live next to the module they test (`src/**/*.test.ts(x)`, `server/**/*.test.ts`). Playwright acceptance tests live in `e2e/`. Shared UI fixtures live in `src/testHarness.tsx`. Prefer one test file per module. Splitting a test file is the exception, not a normal implementation step: do it only when one file has become hard to navigate, roughly past 1,000 lines. That limit is fuzzy — 1,100 lines is fine, and a coherent suite should not be carved up just to hit a count. Thousands of lines in one file is the case to split, by functional area, without changing production code to make the split possible. A narrow run is `npx vitest run <file>`, not a topic script.

@@ -3,8 +3,6 @@ import * as renderer from 'react-test-renderer';
 import type { ReactTestRenderer, ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RouteScoutDrawer } from './RouteScoutDrawer.js';
-import { EditWaypointModal } from './EditWaypointModal.js';
-import { createItinerarySessionId } from '../utils/itinerarySession.js';
 import { chatWithScoutStream } from '../services/api.js';
 import type { Waypoint } from '../types/routing.js';
 import type { ParsedTrip } from '../engine/itineraryParser.js';
@@ -239,76 +237,12 @@ const TEST_MOCK_MODELS: AiModelOption[] = [
 ];
 
 describe('Route Scout Drawer & UI Controls', () => {
-  describe('3. Client SSE Parser & UI Model Selector Tests', () => {
+  describe('Route Scout model selector and stream lifecycle', () => {
     afterEach(() => {
       vi.unstubAllGlobals();
       vi.useRealTimers();
     });
 
-    it('chatWithScoutStream cleanly ignores : ping and : keep-alive frames and emits thought, delta, and done', async () => {
-      const encoder = new TextEncoder();
-      const mockStream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(encoder.encode(': ping\n\n'));
-          controller.enqueue(encoder.encode(': keep-alive\n\n'));
-          controller.enqueue(
-            encoder.encode('event: thought\ndata: {"text":"Reasoning about fuel stops..."}\n\n')
-          );
-          controller.enqueue(
-            encoder.encode('event: delta\ndata: {"text":"Found Maverik at exit 285."}\n\n')
-          );
-          controller.enqueue(
-            encoder.encode(
-              'event: done\ndata: {"reply":"Found Maverik at exit 285.","suggestions":[],"sessionId":"s_test_123","engine":"bedrock","modelId":"us.moonshotai.kimi-k3"}\n\n'
-            )
-          );
-          controller.close();
-        },
-      });
-
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: true,
-          status: 200,
-          headers: new Headers({ 'content-type': 'text/event-stream' }),
-          body: mockStream,
-        })
-      );
-
-      const emittedEvents: ScoutStreamEvent[] = [];
-      const onEvent = vi.fn((evt: ScoutStreamEvent) => emittedEvents.push(evt));
-
-      const request: ScoutChatRequest = {
-        scope: { type: 'day', dayNumber: 1 },
-        messages: [{ role: 'user', content: 'Find fuel' }],
-        tripContext: sampleTripContext,
-      };
-
-      const response: ScoutChatResponse = await chatWithScoutStream(request, onEvent);
-
-      expect(response).toEqual({
-        reply: 'Found Maverik at exit 285.',
-        suggestions: [],
-        sessionId: 's_test_123',
-        engine: 'bedrock',
-        modelId: 'us.moonshotai.kimi-k3',
-      });
-
-      expect(onEvent).toHaveBeenCalledTimes(3);
-      expect(emittedEvents[0]).toEqual({
-        event: 'thought',
-        data: { text: 'Reasoning about fuel stops...' },
-      });
-      expect(emittedEvents[1]).toEqual({
-        event: 'delta',
-        data: { text: 'Found Maverik at exit 285.' },
-      });
-      expect(emittedEvents[2]).toEqual({
-        event: 'done',
-        data: response,
-      });
-    });
 
     describe('UI Model Selectors', () => {
       const storageEntries = new Map<string, string>();
@@ -399,56 +333,6 @@ describe('Route Scout Drawer & UI Controls', () => {
         expect(onSelectScoutModel).toHaveBeenCalledWith('us.amazon.nova-pro-v1:0');
       });
 
-      it('renders <EditWaypointModal> with Copywriter AI Model selector excluding scout-only models and triggers onChange', () => {
-        const onSelectCopywriterModel = vi.fn();
-        let app!: ReactTestRenderer;
-
-        act(() => {
-          app = create(
-            <EditWaypointModal
-              isOpen={true}
-              initialTab="alert"
-              waypoint={sampleWaypointWithDetails}
-              onClose={vi.fn()}
-              onSave={vi.fn()}
-              aiModels={TEST_MOCK_MODELS}
-              selectedModelId="us.amazon.nova-2-lite-v1:0"
-              onSelectModel={onSelectCopywriterModel}
-            />
-          );
-        });
-        mounted.push(app);
-
-        // Find the select element by aria-label
-        const select = app.root.findByProps({ 'aria-label': 'Copywriter AI Model' });
-        expect(select).toBeDefined();
-        expect(select.props.value).toBe('us.amazon.nova-2-lite-v1:0');
-
-        // Verify options contain only copywriter or both models (excluding scout-only)
-        const options = select.findAllByType('option');
-        expect(options.length).toBeGreaterThan(0);
-
-        const renderedModelIds = options.map((opt) => opt.props.value);
-
-        // Scout-only models must NOT be present in copywriter select
-        expect(renderedModelIds).not.toContain('us.openai.gpt-6-astra');
-        expect(renderedModelIds).not.toContain('us.anthropic.claude-opus-5-5');
-
-        for (const opt of options) {
-          const optModelId = opt.props.value;
-          const matchingCatalogModel = TEST_MOCK_MODELS.find((m) => m.id === optModelId);
-          expect(matchingCatalogModel).toBeDefined();
-          expect(['copywriter', 'both']).toContain(matchingCatalogModel?.role);
-        }
-
-        // Trigger change
-        act(() => {
-          select.props.onChange({ target: { value: 'us.amazon.nova-pro-v1:0' } });
-        });
-
-        expect(onSelectCopywriterModel).toHaveBeenCalledTimes(1);
-        expect(onSelectCopywriterModel).toHaveBeenCalledWith('us.amazon.nova-pro-v1:0');
-      });
 
       it('renders disabled "Select model..." option and does not silently fall back to first model when selectedModelId is empty', () => {
         let app!: ReactTestRenderer;
@@ -1189,34 +1073,7 @@ describe('Route Scout Drawer & UI Controls', () => {
         expect(select.props.value).toBe('');
       });
 
-      it('gates Waypoint edit modal generate alert button when selectedModelId is empty (R5)', () => {
-        let modal!: ReactTestRenderer;
-        act(() => {
-          modal = create(
-            <EditWaypointModal
-              isOpen={true}
-              initialTab="alert"
-              onClose={vi.fn()}
-              onSave={vi.fn()}
-              waypoint={sampleWaypointWithDetails}
-              aiModels={TEST_MOCK_MODELS}
-              selectedModelId=""
-            />
-          );
-        });
-        mounted.push(modal);
 
-        const generateBtn = modal.root.findByProps({ title: 'Select an AI model to generate alert' });
-        expect(generateBtn.props.disabled).toBe(true);
-      });
-
-      it('maintains stable itinerary session identity across save and rename, but resets on new route (R6)', () => {
-        const id1 = createItinerarySessionId();
-        const id2 = createItinerarySessionId();
-        expect(id1).toMatch(/^itin_session_\d+_\d+$/);
-        expect(id2).toMatch(/^itin_session_\d+_\d+$/);
-        expect(id1).not.toBe(id2);
-      });
     });
   });
 });

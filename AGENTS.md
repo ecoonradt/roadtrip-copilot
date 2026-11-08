@@ -77,12 +77,10 @@ Subproject directory details are maintained locally in their respective handbook
   cd route-builder && npm run test:browser
   ```
   Requires one-time `npx playwright install chromium`; runs against local API fixtures without cloud credentials. Browser tests are separate from `scripts/ci_check.sh`.
-* **Run Granular Test Suites:**
+* **Run One Route Builder Tree:**
   ```bash
-  cd route-builder && npm run test:backend  # OSRM, Nominatim, LRU cache
-  cd route-builder && npm run test:engine   # Timeline cascade & Google Maps chunking
-  cd route-builder && npm run test:ai       # AI harness adapters, schema validation, scout
-  cd route-builder && npm run test:schema   # V2 export & device sync
+  cd route-builder && npm run test:frontend  # src/
+  cd route-builder && npm run test:backend   # server/
   ```
 
 ### Cloud Infrastructure & CI/CD Commands (`infra/` & `scripts/`)

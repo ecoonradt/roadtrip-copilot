@@ -76,7 +76,7 @@ roadtrip-copilot/
 │   ├── .dockerignore          # Docker build exclusions
 │   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
 │   ├── README.md              # User-facing web studio documentation & setup
-│   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)
+│   ├── package.json           # Node scripts (dev, build, test, test:frontend, test:backend, test:browser)
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
 │   ├── playwright.config.ts   # Fixture-backed Chromium header/account acceptance test configuration
 │   ├── server/                # Fastify TypeScript backend
@@ -95,7 +95,7 @@ roadtrip-copilot/
 │   │   ├── utils/             # itinerarySession.ts (stable trip session identity across save/rename)
 │   │   ├── constants/         # aiCopy.ts (provider-neutral AI-disabled UI copy)
 │   │   └── types/             # Frontend data models (auth, routing, ai, scout)
-│   └── tests/                 # Vitest suites (backend, engine, AI, schema/device, ui/) and Playwright header/account/session checks (browser/)
+│   └── e2e/                   # Playwright header/account/session checks (*.browser.ts). Vitest files live next to the modules they test.
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/

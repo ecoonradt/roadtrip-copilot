@@ -17,6 +17,5 @@ full.
 Follow AGENTS.md Section 5: strict TypeScript, zero `any`, `err: unknown` narrowing, and never
 URL-encode semicolons in OSRM coordinate paths.
 
-When done, run the narrowest relevant suite (npm run test:backend | test:engine | test:ai |
-test:schema) and report: files changed, exact command, raw result. If you hit an unexpected
+When done, run the narrowest relevant suite (`npx vitest run <file>`, or `npm run test:frontend` / `npm run test:backend`) and report: files changed, exact command, raw result. If you hit an unexpected
 constraint, stop and report it rather than working around it.

@@ -198,8 +198,8 @@ describe('Frontend Auth UI & Gating', () => {
   });
 
   it('shows user details and sign out only after opening the header account popover', async () => {
-    const { AppHeader } = await vi.importActual<typeof import('../../src/components/AppHeader')>(
-      '../../src/components/AppHeader'
+    const { AppHeader } = await vi.importActual<typeof import('./AppHeader')>(
+      './AppHeader'
     );
 
     const onLogout = vi.fn();
@@ -595,7 +595,7 @@ describe('Frontend Auth UI & Gating', () => {
   });
 
   it('passes the signal to native fetch and applies the same deadline while the response body is pending', async () => {
-    const actualApi = await vi.importActual<typeof import('../../src/services/api')>('../../src/services/api');
+    const actualApi = await vi.importActual<typeof import('../services/api')>('../services/api');
     const body = deferred<AuthStatusResponse>();
     const response = new Response();
     const readBody = vi.spyOn(response, 'json').mockReturnValue(body.promise);
