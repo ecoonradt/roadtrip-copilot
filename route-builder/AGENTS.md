@@ -88,6 +88,7 @@ route-builder/
 │   ├── loadEnv.ts              # Node 20.12+ .env loader side-effect module
 │   ├── hooks/
 │   │   └── authGuard.ts        # Dual-mode OIDC cookie/Bearer JWT & allowlist preHandler hook
+│   ├── test-helpers/           # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
 │   ├── routes/
 │   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
 │   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
@@ -191,6 +192,6 @@ npm run build
 7. **Colocate tests; do not recreate `tests/`.**
    * **Unit Tests:** Vitest unit tests live file-adjacent to the module they test (`src/**/*.test.ts(x)`, `server/**/*.test.ts`). Prefer one test file per module. Splitting a unit test file is the exception, not a normal implementation step: do it only when one file has become hard to navigate, roughly past 1,000 lines, splitting by functional area without changing production code to make the split possible.
    * **Frontend Integration Tests:** Cross-component React workflow tests (such as full `<App />` state cascades, schedule export orchestration, and auth gating) live in `src/integration-tests/`. Integration tests run alongside unit tests under `npm test` and `npm run test:frontend` without requiring separate scripts.
-   * **Shared Test Helpers & Fixtures:** Reusable UI fixtures, mocks, and test harnesses live in `src/test-helpers/`.
+   * **Shared Test Helpers & Fixtures:** Reusable UI fixtures, mocks, and test harnesses live in `src/test-helpers/` (e.g. `testHarness.tsx`, `aiFixtures.ts`). Backend test fixtures live in `server/test-helpers/` (e.g. `bedrockFixtures.ts`). Each tree maintains its own test helpers to preserve architectural boundary isolation.
    * **E2E Browser Tests:** Playwright end-to-end browser acceptance tests live in `e2e/` (`*.browser.ts`).
    * **Targeted Runs:** A narrow test run is `npx vitest run <file>`, not a topic script.

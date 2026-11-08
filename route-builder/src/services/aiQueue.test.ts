@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { AiQueue } from './aiQueue.js';
+import { AiQueue } from './aiQueue';
 
 describe('Client-Side Concurrency Queue (AiQueue)', () => {
   it('Limits concurrent tasks to configured limit (concurrency = 2) preventing bursts', async () => {

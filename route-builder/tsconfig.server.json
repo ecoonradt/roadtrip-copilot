@@ -16,5 +16,5 @@
     "resolveJsonModule": true
   },
   "include": ["server"],
-  "exclude": ["**/*.test.ts"]
+  "exclude": ["**/*.test.ts", "server/test-helpers/**"]
 }

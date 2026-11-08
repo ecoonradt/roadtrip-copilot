@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createItinerarySessionId } from './itinerarySession.js';
+import { createItinerarySessionId } from './itinerarySession';
 
 describe('Itinerary Session ID (createItinerarySessionId)', () => {
   it('maintains stable itinerary session identity across save and rename, but resets on new route (R6)', () => {

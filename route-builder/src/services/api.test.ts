@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { chatWithScoutStream } from './api.js';
+import { chatWithScoutStream } from './api';
 import type {
   ScoutStreamEvent,
   ScoutChatRequest,
   ScoutChatResponse,
   ScoutTripContext,
-} from '../types/scout.js';
+} from '../types/scout';
 
 const sampleTripContext: ScoutTripContext = {
   tripName: 'Phoenix to Sedona Scenic Run',
