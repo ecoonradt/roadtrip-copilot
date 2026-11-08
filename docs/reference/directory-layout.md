@@ -89,6 +89,8 @@ roadtrip-copilot/
 │   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
+│   │   ├── test-helpers/      # Shared UI test fixtures and mock harnesses (testHarness.tsx)
+│   │   ├── integration-tests/ # Cross-component React workflow tests (mounted App state cascades)
 │   │   ├── components/        # AppHeader, AccountMenu, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import), sampleTrip.ts (in-code sample route factory)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)

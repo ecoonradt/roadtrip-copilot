@@ -114,6 +114,8 @@ route-builder/
 │   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
 ├── src/
 │   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator
+│   ├── test-helpers/           # Shared UI test fixtures and mock harnesses (testHarness.tsx)
+│   ├── integration-tests/      # Cross-component React workflow tests (mounted App state cascades)
 │   ├── components/
 │   │   ├── AppHeader.tsx       # Single-row responsive top bar with route title, metrics, and global actions
 │   │   ├── AccountMenu.tsx     # Avatar/initials trigger and keyboard-accessible account details/sign-out popover
@@ -186,4 +188,9 @@ npm run build
 4. **Preserve Backward Compatibility:** Any changes to exported itinerary JSON must conform to the V2 schema expected by the Android native co-pilot service.
 5. **Preserve Route Scout Prompt Purity:** Keep `buildScoutDomainPrompt` strictly domain-focused without harness-specific tool bans or shell commands. All harness-specific tool permissions, guardrails, and response cleaning must be implemented through the `AiHarnessAdapter` seam (`decorateScoutPrompt` and `sanitizeResponse`).
 6. **No Silent Fallbacks or Mock Degradation:** Never implement silent fallbacks (such as catching a failure in Bedrock, S3, OSRM, or Google OIDC and falling back to mock templates, client-side mocks, or local CLI tools). Silent fallbacks mask real system failures and fail completely in cloud environments. External API failures must fail loudly, immediately, and transparently with proper HTTP status codes (`502 Bad Gateway`, `503 Service Unavailable`, `400 Bad Request`). Silent fallbacks are almost always wrong; check with the user and obtain explicit approval before building any fallback mechanism.
-7. **Colocate tests; do not recreate `tests/`.** Vitest files live next to the module they test (`src/**/*.test.ts(x)`, `server/**/*.test.ts`). Playwright acceptance tests live in `e2e/`. Shared UI test fixtures and helpers live in `src/test-helpers/`. Prefer one test file per module. Splitting a test file is the exception, not a normal implementation step: do it only when one file has become hard to navigate, roughly past 1,000 lines. That limit is fuzzy — 1,100 lines is fine, and a coherent suite should not be carved up just to hit a count. Thousands of lines in one file is the case to split, by functional area, without changing production code to make the split possible. A narrow run is `npx vitest run <file>`, not a topic script.
+7. **Colocate tests; do not recreate `tests/`.**
+   * **Unit Tests:** Vitest unit tests live file-adjacent to the module they test (`src/**/*.test.ts(x)`, `server/**/*.test.ts`). Prefer one test file per module. Splitting a unit test file is the exception, not a normal implementation step: do it only when one file has become hard to navigate, roughly past 1,000 lines, splitting by functional area without changing production code to make the split possible.
+   * **Frontend Integration Tests:** Cross-component React workflow tests (such as full `<App />` state cascades, schedule export orchestration, and auth gating) live in `src/integration-tests/`. Integration tests run alongside unit tests under `npm test` and `npm run test:frontend` without requiring separate scripts.
+   * **Shared Test Helpers & Fixtures:** Reusable UI fixtures, mocks, and test harnesses live in `src/test-helpers/`.
+   * **E2E Browser Tests:** Playwright end-to-end browser acceptance tests live in `e2e/` (`*.browser.ts`).
+   * **Targeted Runs:** A narrow test run is `npx vitest run <file>`, not a topic script.
