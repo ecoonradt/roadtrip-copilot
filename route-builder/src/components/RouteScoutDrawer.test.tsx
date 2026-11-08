@@ -8,7 +8,6 @@ import type { Waypoint } from '../types/routing';
 import type { ParsedTrip } from '../engine/itineraryParser';
 import type {
   ScoutChatRequest,
-  ScoutTripContext,
   ScoutStreamEvent,
   ScoutChatResponse,
 } from '../types/scout';
@@ -53,44 +52,6 @@ const sampleWaypointWithDetails: Waypoint = {
     message: 'Arriving at Bell Rock. 20-min scenic stop.',
     speech: 'Approaching Bell Rock Scenic Vista on Highway 179.',
   },
-};
-
-const sampleTripContext: ScoutTripContext = {
-  tripName: 'Phoenix to Sedona Scenic Run',
-  date: '2026-10-10',
-  origin: 'Phoenix, AZ',
-  destination: 'Sedona, AZ',
-  departureTime: '08:00:00',
-  corridor: 'I-17 N to AZ-179 N Red Rock Scenic Byway',
-  waypoints: [
-    {
-      id: 'wp_origin',
-      name: 'Phoenix Origin',
-      type: 'origin',
-      lat: 33.4484,
-      lng: -112.074,
-      target_time: '08:00:00',
-      dwell_minutes: 0,
-    },
-    {
-      id: 'wp_sedona_bell_rock',
-      name: 'Bell Rock Scenic Vista',
-      type: 'scenic_pull_off',
-      lat: 34.8005,
-      lng: -111.7667,
-      target_time: '10:00:00',
-      dwell_minutes: 20,
-    },
-    {
-      id: 'wp_dest',
-      name: 'Sedona Lodging',
-      type: 'lodging',
-      lat: 34.8697,
-      lng: -111.761,
-      target_time: '12:00:00',
-      dwell_minutes: 0,
-    },
-  ],
 };
 
 const sampleTrip: ParsedTrip = {
