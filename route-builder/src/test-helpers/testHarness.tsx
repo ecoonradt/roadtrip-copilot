@@ -2,11 +2,11 @@ import React from 'react';
 import * as renderer from 'react-test-renderer';
 import type { ReactTestRenderer, ReactTestInstance } from 'react-test-renderer';
 import { beforeEach, afterEach, vi } from 'vitest';
-import { calculateTimelineCascade } from './engine/cascade';
-import { formatMultiDayItinerary, type ItineraryExportModel, type MultiDayItineraryV2 } from './engine/export';
-import type { Waypoint, RouteResponse, GeocodeResult } from './types/routing';
-import type { TimelineCascadeResult } from './engine/types';
-import type { ParsedTrip } from './engine/itineraryParser';
+import { calculateTimelineCascade } from '../engine/cascade';
+import { formatMultiDayItinerary, type ItineraryExportModel, type MultiDayItineraryV2 } from '../engine/export';
+import type { Waypoint, RouteResponse, GeocodeResult } from '../types/routing';
+import type { TimelineCascadeResult } from '../engine/types';
+import type { ParsedTrip } from '../engine/itineraryParser';
 
 class ApiErrorMock extends Error {
   readonly status: number;
@@ -39,16 +39,16 @@ const mockedApi = vi.hoisted(() => ({
 export const api = mockedApi;
 export const act = renderer.act;
 const create = renderer.create;
-vi.mock('./services/api', () => mockedApi);
-vi.mock('./components/MapCanvas', () => ({ MapCanvas: (props: Record<string, unknown>) => React.createElement('test-map', props) }));
-vi.mock('./components/AppHeader', () => ({ AppHeader: (props: Record<string, unknown>) => React.createElement('test-header', props) }));
-vi.mock('./components/TimelineSidebar', () => ({ TimelineSidebar: (props: Record<string, unknown>) => React.createElement('test-sidebar', props) }));
-vi.mock('./components/RouteSelectorModal', () => ({ RouteSelectorModal: (props: Record<string, unknown>) => React.createElement('test-selector', props) }));
-vi.mock('./components/ExportModal', () => ({ ExportModal: (props: Record<string, unknown>) => React.createElement('test-export', props) }));
-vi.mock('./components/RouteScoutDrawer', () => ({ RouteScoutDrawer: (props: Record<string, unknown>) => React.createElement('test-scout', props) }));
+vi.mock('../services/api', () => mockedApi);
+vi.mock('../components/MapCanvas', () => ({ MapCanvas: (props: Record<string, unknown>) => React.createElement('test-map', props) }));
+vi.mock('../components/AppHeader', () => ({ AppHeader: (props: Record<string, unknown>) => React.createElement('test-header', props) }));
+vi.mock('../components/TimelineSidebar', () => ({ TimelineSidebar: (props: Record<string, unknown>) => React.createElement('test-sidebar', props) }));
+vi.mock('../components/RouteSelectorModal', () => ({ RouteSelectorModal: (props: Record<string, unknown>) => React.createElement('test-selector', props) }));
+vi.mock('../components/ExportModal', () => ({ ExportModal: (props: Record<string, unknown>) => React.createElement('test-export', props) }));
+vi.mock('../components/RouteScoutDrawer', () => ({ RouteScoutDrawer: (props: Record<string, unknown>) => React.createElement('test-scout', props) }));
 vi.mock('qrcode', () => ({ default: { toDataURL: async () => 'data:image/png;base64,test' } }));
-import { App } from './App';
-import { DayTabBar } from './components/DayTabBar';
+import { App } from '../App';
+import { DayTabBar } from '../components/DayTabBar';
 
 export interface HeaderProps {
   onSaveTrip?: () => Promise<void> | void;
@@ -70,7 +70,7 @@ export interface HeaderProps {
 }
 interface SidebarProps { onUpdateWaypoint: (id: string, update: Partial<Waypoint>) => void; onSelectLocation: (result: GeocodeResult) => void }
 interface DayProps { onSelectDay: (index: number) => void; onAddDay: () => void; onDeleteDay: (index: number) => void }
-type ModalProps = React.ComponentProps<typeof import('./components/ExportModal')['ExportModal']>;
+type ModalProps = React.ComponentProps<typeof import('../components/ExportModal')['ExportModal']>;
 export function points(day: number): Waypoint[] {
   const base = day === 1 ? 33.1 : 33.6;
   return [
@@ -121,7 +121,7 @@ export async function mountApp(): Promise<ReactTestRenderer> {
 }
 function text(node: ReactTestInstance): string { return node.children.map(child => typeof child === 'string' ? child : text(child)).join('') }
 export async function exported<T extends ItineraryExportModel = MultiDayItineraryV2>(props: ModalProps, scope: 'full' | 'day' = 'full'): Promise<T> {
-  const { ExportModal } = await vi.importActual<typeof import('./components/ExportModal')>('./components/ExportModal');
+  const { ExportModal } = await vi.importActual<typeof import('../components/ExportModal')>('../components/ExportModal');
   let modal!: ReactTestRenderer;
   await act(async () => { modal = create(<ExportModal {...props} isOpen />) });
   mounted.push(modal);

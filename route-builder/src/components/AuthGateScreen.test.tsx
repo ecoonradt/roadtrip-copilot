@@ -2,7 +2,7 @@ import React from 'react';
 import * as renderer from 'react-test-renderer';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { describe, it, expect, vi } from 'vitest';
-import { act, api, mountApp, fixture, points } from '../testHarness';
+import { act, api, mountApp, fixture, points } from '../test-helpers/testHarness';
 import { AuthGateScreen } from './AuthGateScreen';
 import type { AuthStatusResponse } from '../types/auth';
 
@@ -519,7 +519,7 @@ describe('Frontend Auth UI & Gating', () => {
       ],
     };
 
-    const { selectTrip } = await import('../testHarness');
+    const { selectTrip } = await import('../test-helpers/testHarness');
     await act(async () => {
       selectTrip(app, importedTrip);
       await Promise.resolve();

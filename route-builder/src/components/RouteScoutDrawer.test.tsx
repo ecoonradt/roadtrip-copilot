@@ -1073,6 +1073,163 @@ describe('Route Scout Drawer & UI Controls', () => {
         expect(select.props.value).toBe('');
       });
 
+      it('renders delete_waypoint suggestion card and removes waypoint upon click', async () => {
+        const onDeleteWaypoint = vi.fn();
+
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockImplementation((url: string) => {
+            if (url.includes('/api/ai/scout/quick-prompts')) {
+              return Promise.resolve({ ok: true, json: async () => [] });
+            }
+            if (url.includes('/api/ai/scout/chat/stream')) {
+              const encoder = new TextEncoder();
+              const suggestionsBlock = JSON.stringify({
+                reply: 'I recommend removing Sedona Cafe from the itinerary.',
+                suggestions: [
+                  {
+                    id: 'sug_del_1',
+                    action: 'delete_waypoint',
+                    name: 'Sedona Cafe',
+                    type: 'meal',
+                    lat: 34.8697,
+                    lng: -111.761,
+                    targetWaypointId: 'wp_sedona_lunch',
+                    reason: 'Redundant lunch stop.',
+                  },
+                ],
+                sessionId: 'scout_test_session',
+                engine: 'bedrock',
+                modelId: 'us.moonshotai.kimi-k3',
+              });
+              const stream = new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(
+                    encoder.encode(`event: done\ndata: ${suggestionsBlock}\n\n`)
+                  );
+                  controller.close();
+                },
+              });
+              return Promise.resolve({
+                ok: true,
+                status: 200,
+                headers: new Headers({ 'content-type': 'text/event-stream' }),
+                body: stream,
+              });
+            }
+            return Promise.reject(new Error(`Unexpected fetch URL: ${url}`));
+          })
+        );
+
+        const tripWithLunch: ParsedTrip = {
+          tripName: 'Arizona Scenic Run',
+          days: [
+            {
+              dayNumber: 1,
+              title: 'Day 1: Phoenix to Flagstaff',
+              date: '2026-10-10',
+              origin: 'Phoenix, AZ',
+              destination: 'Flagstaff, AZ',
+              departureTime: '08:00:00',
+              waypoints: [
+                {
+                  id: 'wp_origin',
+                  name: 'Phoenix Departure',
+                  type: 'origin',
+                  lat: 33.4484,
+                  lng: -112.074,
+                  target_time: '08:00:00',
+                  dwell_minutes: 0,
+                },
+                {
+                  id: 'wp_sedona_lunch',
+                  name: 'Sedona Cafe',
+                  type: 'meal',
+                  lat: 34.8697,
+                  lng: -111.761,
+                  target_time: '10:30:00',
+                  dwell_minutes: 45,
+                  place_name: 'Sedona Cafe',
+                  address: '100 Main St, Sedona, AZ 86336',
+                  is_route_anchor: false,
+                },
+                {
+                  id: 'wp_dest',
+                  name: 'Flagstaff Lodging',
+                  type: 'lodging',
+                  lat: 35.1983,
+                  lng: -111.6513,
+                  target_time: '12:30:00',
+                  dwell_minutes: 0,
+                  is_route_anchor: false,
+                },
+              ],
+            },
+          ],
+        };
+
+        let drawer!: ReactTestRenderer;
+        await act(async () => {
+          drawer = create(
+            <RouteScoutDrawer
+              isOpen={true}
+              onClose={vi.fn()}
+              trip={tripWithLunch}
+              activeDayIndex={0}
+              activeDay={tripWithLunch.days[0]}
+              waypoints={tripWithLunch.days[0].waypoints}
+              scope={{ type: 'day', dayNumber: 1 }}
+              onChangeScope={vi.fn()}
+              onAddWaypoint={vi.fn()}
+              onUpdateWaypoint={vi.fn()}
+              onDeleteWaypoint={onDeleteWaypoint}
+              onPreviewCoordinate={vi.fn()}
+              aiAvailable={true}
+              aiModels={[{ id: 'us.moonshotai.kimi-k3', name: 'Kimi K3', role: 'both', provider: 'Moonshot AI' }]}
+              selectedModelId="us.moonshotai.kimi-k3"
+            />
+          );
+        });
+        mounted.push(drawer);
+
+        const textarea = drawer.root.findByType('textarea');
+        await act(async () => {
+          textarea.props.onChange({ target: { value: 'Can we remove the lunch stop?' } });
+        });
+
+        const form = drawer.root.findByType('form');
+        await act(async () => {
+          form.props.onSubmit({ preventDefault: vi.fn() });
+        });
+
+        const allSpans = drawer.root.findAllByType('span');
+        const badge = allSpans.find((s) => s.children.includes('Remove Stop'));
+        expect(badge).toBeDefined();
+
+        const allButtons = drawer.root.findAllByType('button');
+        const removeButton = allButtons.find((b) => {
+          const span = b.findAllByType('span');
+          return span.some((s) => s.children.includes('Remove Stop'));
+        });
+        expect(removeButton).toBeDefined();
+        expect(removeButton?.props.disabled).toBe(false);
+
+        await act(async () => {
+          removeButton?.props.onClick();
+        });
+
+        expect(onDeleteWaypoint).toHaveBeenCalledTimes(1);
+        expect(onDeleteWaypoint).toHaveBeenCalledWith('wp_sedona_lunch');
+
+        const updatedButtons = drawer.root.findAllByType('button');
+        const removedButton = updatedButtons.find((b) => {
+          const span = b.findAllByType('span');
+          return span.some((s) => s.children.includes('Removed ✓'));
+        });
+        expect(removedButton).toBeDefined();
+        expect(removedButton?.props.disabled).toBe(true);
+      });
+
 
     });
   });

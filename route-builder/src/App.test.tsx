@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, selectorProps, saved, exportProps, exported, points, stubWindowLocation } from './testHarness';
+import { act, api, fixture, roadResponse, mountApp, header, sidebar, tabs, trip, mapClick, selectTrip, selectorProps, saved, exportProps, exported, points, stubWindowLocation } from './test-helpers/testHarness';
 import { calculateTimelineCascade, detectTimezone, parseLocalToUtcEpoch } from './engine/cascade';
 import { formatMultiDayItinerary, type SingleRouteItineraryV2 } from './engine/export';
 import { parseItineraryJson, type ParsedTrip } from './engine/itineraryParser';
