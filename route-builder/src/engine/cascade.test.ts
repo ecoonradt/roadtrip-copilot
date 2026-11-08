@@ -55,7 +55,7 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
   const SAMPLE_DURATIONS = [6300, 1800, 1500];
   const SAMPLE_DISTANCES = [115, 17, 14];
 
-  describe('Invariant 1: Deterministic Cascade Ripple & Dwell Time Updates', () => {
+  describe('Deterministic Cascade Ripple & Dwell Time Updates', () => {
     it('calculates initial forward cascade schedule correctly', () => {
       const input: TimelineCascadeInput = {
         baseDate: '2026-10-09',
@@ -95,7 +95,7 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
       expect(result.totalTripSeconds).toBe(9600 + 50 * 60); // 12600s = 3h 30m
     });
 
-    it('Scenario 1: Modifying dwell time on stop 2 (Sedona) accurately shifts arrival on stops 3 through N by exact delta', () => {
+    it('accurately shifts arrival on stops 3 through N by exact delta when modifying dwell time on stop 2 (Sedona)', () => {
       const baseInput: TimelineCascadeInput = {
         baseDate: '2026-10-09',
         departureTime: '14:30:00',
@@ -166,7 +166,7 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
     });
   });
 
-  describe('Invariant 2: Timezone Detection & State Border Shifts (AZ -> NM)', () => {
+  describe('Timezone Detection & State Border Shifts (AZ -> NM)', () => {
     it('detects correct timezones across Arizona and New Mexico coordinates', () => {
       // Phoenix, AZ
       expect(detectTimezone(33.4357, -112.0152)).toBe('America/Phoenix');
@@ -185,7 +185,7 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
       expect(detectTimezone(35.0433, -106.6094)).toBe('America/Denver');
     });
 
-    it('Scenario 2: Crossing from AZ (MST, UTC-7) into NM (MDT, UTC-6) applies the +1 hour jump correctly in local time while epoch is linear', () => {
+    it('applies the +1 hour jump correctly in local time while epoch is linear when crossing from AZ (MST, UTC-7) into NM (MDT, UTC-6)', () => {
       // Day 2 scenario: Depart Flagstaff AZ at 07:30:00 MST, drive 2 hours (7200s) to Gallup NM
       const day2Waypoints: TimelineCascadeWaypoint[] = [
         {
@@ -272,8 +272,8 @@ describe('Timeline Cascade Engine (cascade.ts)', () => {
     });
   });
 
-  describe('Invariant 4: Backwards Scheduling Mode ("The Flight Catch-up")', () => {
-    it('Scenario 4: Determines required departure time given destination target arrival deadline', () => {
+  describe('Backwards Scheduling Mode ("The Flight Catch-up")', () => {
+    it('determines required departure time given destination target arrival deadline', () => {
       // Day 4 scenario:
       // Destination: ABQ Sunport Airport, must arrive by 16:30:00
       // Stops:

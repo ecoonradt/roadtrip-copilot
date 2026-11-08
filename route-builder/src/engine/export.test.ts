@@ -7,6 +7,7 @@ import {
   normalizeTriggerRadius,
   exportItineraryToJson,
   downloadItineraryJson,
+  type ItineraryExportModel,
 } from './export';
 import type { Waypoint } from '../types/routing';
 import type { ScheduledStop } from './types';
@@ -483,7 +484,7 @@ describe('Itinerary V2 Exporter Engine (export.ts)', () => {
         },
       };
 
-      downloadItineraryJson({ test: true } as unknown as Waypoint, 'my_custom_trip');
+      downloadItineraryJson({ test: true } as unknown as ItineraryExportModel, 'my_custom_trip');
 
       expect(mockAnchor.download).toBe('my_custom_trip.json');
       expect(mockAnchor.href).toBe(fakeUrl);

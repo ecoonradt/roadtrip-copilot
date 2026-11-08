@@ -153,7 +153,7 @@ describe('Bedrock catalog, allowlist, and region', () => {
         }
       });
 
-      it('rejects inherited object-property names (constructor, __proto__, toString) safely as InvalidModelError (P2 Finding 5)', async () => {
+      it('rejects inherited object-property names (constructor, __proto__, toString) safely as InvalidModelError', async () => {
         const adapter = new AwsBedrockHarnessAdapter({
           available: true,
           availableModels: TEST_MOCK_MODELS,
@@ -168,7 +168,7 @@ describe('Bedrock catalog, allowlist, and region', () => {
         expect(adapter.resolveCanonicalModelId('toString')).toBe('toString');
       });
 
-      it('excludes foundation model and all variants when foundation ID is excluded, but preserves variants when only specific profile is excluded (P2 Finding 2)', async () => {
+      it('excludes foundation model and all variants when foundation ID is excluded, but preserves variants when only specific profile is excluded', async () => {
         const mockControlClient = {
           send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
             if (cmd.input?.byOutputModality === 'TEXT') {
@@ -236,7 +236,7 @@ describe('Bedrock catalog, allowlist, and region', () => {
         await expect(adapterWithProfileExcluded.validateModelId('us.amazon.nova-2-lite-v1:0')).rejects.toThrow(/excluded by policy/);
       });
 
-      it('deterministically selects US inference profile over global profile regardless of AWS listing order (P2 Finding 2)', async () => {
+      it('deterministically selects US inference profile over global profile regardless of AWS listing order', async () => {
         const mockControlClient = {
           send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
             if (cmd.input?.byOutputModality === 'TEXT') {

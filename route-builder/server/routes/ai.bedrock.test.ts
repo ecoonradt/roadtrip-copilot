@@ -571,7 +571,7 @@ describe('Bedrock Fastify routes', () => {
       }
     });
 
-    it('pre-heartbeat disconnect: does not invoke inference if client disconnects during pre-stream model discovery (P2 Finding 3)', async () => {
+    it('pre-heartbeat disconnect: does not invoke inference if client disconnects during pre-stream model discovery', async () => {
       let resolveDiscovery!: () => void;
       const discoveryPromise = new Promise<void>((resolve) => {
         resolveDiscovery = resolve;
@@ -658,7 +658,7 @@ describe('Bedrock Fastify routes', () => {
       }
     });
 
-    it('returns HTTP 400 when modelId is an inherited object property like constructor, __proto__, toString (P2 Finding 5)', async () => {
+    it('returns HTTP 400 when modelId is an inherited object property like constructor, __proto__, toString', async () => {
       const adapter = new AwsBedrockHarnessAdapter({
         available: true,
         availableModels: TEST_MOCK_MODELS,
@@ -681,7 +681,7 @@ describe('Bedrock Fastify routes', () => {
       }
     });
 
-    it('basic invalid payload returns HTTP 400 with zero discovery or runtime calls even when discovery/control plane is failing (P2 Finding 6)', async () => {
+    it('basic invalid payload returns HTTP 400 with zero discovery or runtime calls even when discovery/control plane is failing', async () => {
       const mockControlClient = {
         send: vi.fn().mockRejectedValue(new Error('Discovery unavailable: IAM or control-plane failure')),
       };

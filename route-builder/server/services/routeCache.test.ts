@@ -37,7 +37,7 @@ describe('Caching Deduplication & RouteCache', () => {
     vi.restoreAllMocks();
   });
 
-  it('Scenario 3: Caching prevents duplicate OSRM network requests for identical coordinate pairs', async () => {
+  it('caching prevents duplicate OSRM network requests for identical coordinate pairs', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       return new Response(JSON.stringify(mockOsrmResponse), {
         status: 200,

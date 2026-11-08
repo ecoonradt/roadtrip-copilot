@@ -144,7 +144,7 @@ describe('Bedrock cold-start discovery on HTTP routes', () => {
       expect(mockRuntimeSend).not.toHaveBeenCalled();
     });
 
-    it('cold instance resolves bare ID to newly discovered profile on the first request without prior getAvailableModels call (P2 Finding 1)', async () => {
+    it('cold instance resolves bare ID to newly discovered profile on the first request without prior getAvailableModels call', async () => {
       const mockControlClient = {
         send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
           if (cmd.input?.byOutputModality === 'TEXT') {
@@ -192,7 +192,7 @@ describe('Bedrock cold-start discovery on HTTP routes', () => {
       expect(validated).toBe('us.new-vendor.cold-model-v1:0');
     });
 
-    it('POST /api/copilot/day-title with a bare configured default succeeds on the first request on a cold instance (P2 Finding 1)', async () => {
+    it('POST /api/copilot/day-title with a bare configured default succeeds on the first request on a cold instance', async () => {
       const mockRuntimeSend = vi.fn().mockResolvedValue({
         output: {
           message: {
@@ -259,7 +259,7 @@ describe('Bedrock cold-start discovery on HTTP routes', () => {
       expect(mockRuntimeSend).toHaveBeenCalled();
     });
 
-    it('updates dynamic aliases across TTL cache refresh (P2 Finding 1)', async () => {
+    it('updates dynamic aliases across TTL cache refresh', async () => {
       let profileVersion = 'v1';
       const mockControlClient = {
         send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {
@@ -316,7 +316,7 @@ describe('Bedrock cold-start discovery on HTTP routes', () => {
       expect(second).toBe('us.refresh-vendor.model-v2');
     });
 
-    it('succeeds on first unpinned request after alias-changing TTL refresh and rejects pinned old profile (P2 Finding 1)', async () => {
+    it('succeeds on first unpinned request after alias-changing TTL refresh and rejects pinned old profile', async () => {
       let activeProfile = 'us.refresh-vendor.model-v1:0';
       const mockControlClient = {
         send: vi.fn().mockImplementation(async (cmd: { input?: { modelId?: string; byOutputModality?: string } }) => {

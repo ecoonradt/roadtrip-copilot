@@ -615,7 +615,7 @@ describe('Route Scout corridor, detour, and schedule grounding', () => {
       const res = await toolLib.auditCorridorWaypoints({}, { tripContext: vegasContext });
       expect(res.flagged_count).toBe(0);
     });
-    it('Finding 5: routes changed schedule legs via RouteService instead of 50 mph Haversine estimation, preserves unchanged legs, handles timezones, and fails loudly on routing errors', async () => {
+    it('routes changed schedule legs via RouteService instead of 50 mph Haversine estimation, preserves unchanged legs, handles timezones, and fails loudly on routing errors', async () => {
       // North Rim -> South Rim Grand Canyon example (11.68 mi straight-line vs 210.4 mi road route)
       const canyonTripContext: ScoutTripContext = {
         tripName: 'Grand Canyon Rim-to-Rim Drive',
@@ -758,7 +758,7 @@ describe('Route Scout corridor, detour, and schedule grounding', () => {
         )
       ).rejects.toThrow('OSRM upstream routing service unavailable (502)');
     });
-    it('Finding 7: matches complete highway designators strictly without substring cross-matching (I-40 vs I-405, US-89 vs US-89A, I-89 vs US-89 vs AZ-89)', async () => {
+    it('matches complete highway designators strictly without substring cross-matching (I-40 vs I-405, US-89 vs US-89A, I-89 vs US-89 vs AZ-89)', async () => {
       // Unit assertions on parseHighwayDesignators and matchesHighwayRoadName
       expect(parseHighwayDesignators('I-405 North')).toEqual([{ kind: 'interstate', number: '405' }]);
       expect(parseHighwayDesignators('Interstate 40')).toEqual([{ kind: 'interstate', number: '40' }]);
@@ -803,7 +803,7 @@ describe('Route Scout corridor, detour, and schedule grounding', () => {
       const toolLib = new ScoutToolLibrary({ fetchImpl: mockOsrmFetch });
       const matchedRes = await toolLib.snapToHighwayCorridor(
         { lat: 35.195, lng: -111.755, road_name: 'I-40' },
-        {}
+        {} as ScoutToolExecutionContext
       );
       expect(matchedRes.road_name_matched).toBe(true);
       expect(matchedRes.snapped_road_name).toBe('Interstate 40');
@@ -823,7 +823,7 @@ describe('Route Scout corridor, detour, and schedule grounding', () => {
       const unmatchedLib = new ScoutToolLibrary({ fetchImpl: mockUnmatchedFetch });
       const unmatchedRes = await unmatchedLib.snapToHighwayCorridor(
         { lat: 35.195, lng: -111.755, road_name: 'I-40' },
-        {}
+        {} as ScoutToolExecutionContext
       );
       expect(unmatchedRes.road_name_matched).toBe(false);
       expect(unmatchedRes.snapped_road_name).toBe('I-405');

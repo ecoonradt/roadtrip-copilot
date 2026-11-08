@@ -4,7 +4,7 @@ import { createApp } from '../app.js';
 import { AuthService, SESSION_COOKIE_NAME, OAUTH_STATE_COOKIE_NAME } from '../services/authService.js';
 import type { AuthStatusResponse, MobileGoogleAuthResponse } from '../types/auth.js';
 
-describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating (Milestone 1)', () => {
+describe('Stateless Dual-Mode Google OIDC Auth & Allowlist Gating', () => {
   describe('1. Local Dev Bypass (AUTH_ENABLED !== "true")', () => {
     it('GET /api/auth/status reports local dev bypass user and authenticated/authorized', async () => {
       const authService = new AuthService({ authEnabled: false });

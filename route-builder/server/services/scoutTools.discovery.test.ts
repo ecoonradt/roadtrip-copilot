@@ -150,7 +150,7 @@ describe('Route Scout web search, secret loading, and place resolution', () => {
       // Test with count: 20 (should clamp to 10)
       const res1 = await toolLib.searchWeb({ query: 'Sedona byways', count: 20 }, context);
       expect(capturedUrl).toBe('https://api.search.brave.com/res/v1/web/search?q=Sedona%20byways&count=10');
-      expect((capturedHeaders as Record<string, string>)['X-Subscription-Token']).toBe('test-brave-key-123');
+      expect((capturedHeaders as any)?.['X-Subscription-Token']).toBe('test-brave-key-123');
       expect(res1.results).toHaveLength(1);
       expect(res1.results[0].title).toBe('Sedona Scenic Byway');
 
@@ -362,7 +362,7 @@ describe('Route Scout web search, secret loading, and place resolution', () => {
       );
 
       expect(capturedUrl).toBe('https://places.googleapis.com/v1/places:searchText');
-      const headers = capturedHeaders as Record<string, string>;
+      const headers = (capturedHeaders as any) as Record<string, string>;
       expect(headers['Content-Type']).toBe('application/json');
       expect(headers['X-Goog-Api-Key']).toBe('test-google-key-456');
       expect(headers['X-Goog-FieldMask']).toBe(
@@ -370,7 +370,7 @@ describe('Route Scout web search, secret loading, and place resolution', () => {
       );
 
       // Verify locationBias radius was clamped to exactly 50,000 meters
-      const bias = capturedBody?.locationBias as { circle: { center: { latitude: number; longitude: number }; radius: number } };
+      const bias = (capturedBody as any)?.locationBias as { circle: { center: { latitude: number; longitude: number }; radius: number } };
       expect(bias).toBeDefined();
       expect(bias.circle.radius).toBe(50000);
       expect(bias.circle.center.latitude).toBe(35.1983);
@@ -521,7 +521,7 @@ describe('Route Scout web search, secret loading, and place resolution', () => {
       expect(cache.resolvedPlaces).toHaveLength(1);
       expect(cache.resolvedPlaces[0].place_name).toBe('Maverik Adventure Stop');
     });
-    it('Finding 3 & Finding 8: disambiguates same-name branches across cities and within cities, and overwrites fabricated model metadata with authoritative record fields', () => {
+    it('disambiguates same-name branches across cities and within cities, and overwrites fabricated model metadata with authoritative record fields', () => {
       const flagstaffMaverik: ResolvedPlaceRecord = {
         query: 'Maverik Flagstaff',
         place_name: 'Maverik',
@@ -668,7 +668,7 @@ describe('Route Scout web search, secret loading, and place resolution', () => {
       expect(backfilledParsed.suggestions[0].lat).toBe(sedonaMaverik.lat);
       expect(backfilledParsed.suggestions[0].lng).toBe(sedonaMaverik.lng);
 
-      // Finding 8: Exact Place ID match with fabricated model place_name/address overwrites with authoritative record fields
+      // Exact Place ID match with fabricated model place_name/address overwrites with authoritative record fields
       const fabricatedMetaSug = hydrateSuggestionFromResolvedPlaces(
         {
           id: 'sug_fabricated',
@@ -691,7 +691,7 @@ describe('Route Scout web search, secret loading, and place resolution', () => {
       expect(fabricatedMetaSug.lat).toBe(sedonaMaverik.lat);
       expect(fabricatedMetaSug.lng).toBe(sedonaMaverik.lng);
 
-      // Finding 8: Empty record fields never overwrite existing non-empty suggestion metadata
+      // Empty record fields never overwrite existing non-empty suggestion metadata
       const sparseRecord: ResolvedPlaceRecord = {
         query: 'Sparse Stop',
         place_name: '   ',

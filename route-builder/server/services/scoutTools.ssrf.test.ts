@@ -503,7 +503,7 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
       expect(res.content.startsWith('🌵 A')).toBe(true);
       expect(res.content.length).toBe(100);
     });
-    it('Finding 1: binds URL validation to actual connection, prevents DNS rebinding across redirect hops, preserves Host/SNI, and bounds DNS lookup', async () => {
+    it('binds URL validation to actual connection, prevents DNS rebinding across redirect hops, preserves Host/SNI, and bounds DNS lookup', async () => {
       // 1A. Bounded DNS timeout and AbortSignal cancellation
       const hangingDns = vi.fn(() => new Promise<Array<{ address: string; family: number }>>(() => {}));
       await expect(
@@ -572,19 +572,20 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
         const reqStream = new PassThrough() as unknown as http.ClientRequest;
         reqStream.end = (() => {
           queueMicrotask(() => {
-            const incoming = new PassThrough() as unknown as http.IncomingMessage;
+            const incomingStream = new PassThrough();
+            const incoming = incomingStream as unknown as http.IncomingMessage;
             if (options.hostname === 'hop1.example.com') {
               incoming.statusCode = 302;
               incoming.statusMessage = 'Found';
               incoming.headers = { location: 'https://hop2.example.org/scenic-byway' };
               callback?.(incoming);
-              incoming.end();
+              incomingStream.end();
             } else {
               incoming.statusCode = 200;
               incoming.statusMessage = 'OK';
               incoming.headers = { 'content-type': 'text/html; charset=utf-8' };
               callback?.(incoming);
-              incoming.end('<html><head><title>Pinned Scenic Guide</title></head><body><p>Red Rock Byway mileposts.</p></body></html>');
+              incomingStream.end('<html><head><title>Pinned Scenic Guide</title></head><body><p>Red Rock Byway mileposts.</p></body></html>');
             }
           });
           return reqStream;
@@ -596,7 +597,7 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
       try {
         // Notice: No fetchImpl injected -> exercises pinned node:https transport!
         const toolLib = new ScoutToolLibrary({ dnsLookup: rebindingDns });
-        const res = await toolLib.readUrlContent({ url: 'https://hop1.example.com/start' }, {});
+        const res = await toolLib.readUrlContent({ url: 'https://hop1.example.com/start' }, {} as ScoutToolExecutionContext);
 
         expect(res.url).toBe('https://hop2.example.org/scenic-byway');
         expect(res.title).toBe('Pinned Scenic Guide');
@@ -659,7 +660,7 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
         await new Promise<void>((resolve) => secretServer.close(() => resolve()));
       }
     });
-    it('Finding 2: extracts HTML in linear O(n) time on pathological repeated "<" and malformed generic tags while preserving formatting', () => {
+    it('extracts HTML in linear O(n) time on pathological repeated "<" and malformed generic tags while preserving formatting', () => {
       // 40,000 repeated '<' without '>' (previously caused ~1s quadratic backtracking)
       const repeatedLtHtml = `<title>Linear Title</title><p>Intro paragraph</p>${'<'.repeat(40_000)}`;
       const resRepeated = htmlToReadableText(repeatedLtHtml);
@@ -679,7 +680,7 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
       expect(resMalformed.text).toContain('* Bell Rock\n* Cathedral Rock');
       expect(resMalformed.text).toContain('First line\nSecond line &lt;safe>');
     });
-    it('Finding 6: keeps timeout deadlines and AbortSignal active through full JSON/text body consumption and cancels stalled response bodies', async () => {
+    it('keeps timeout deadlines and AbortSignal active through full JSON/text body consumption and cancels stalled response bodies', async () => {
       // 6A. Fast headers (200 OK) followed by stalled JSON body times out at upstreamTimeoutMs and cancels body
       let bodyCancelledOnTimeout = false;
       const stalledBodyFetch: typeof fetch = vi.fn(async () => {
@@ -704,7 +705,7 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
         upstreamTimeoutMs: 25,
       });
 
-      await expect(timeoutLib.searchWeb({ query: 'Sedona trails' }, {})).rejects.toThrow(
+      await expect(timeoutLib.searchWeb({ query: 'Sedona trails' }, {} as ScoutToolExecutionContext)).rejects.toThrow(
         /Upstream request timed out after 25ms/
       );
       expect(bodyCancelledOnTimeout).toBe(true);
@@ -737,7 +738,7 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
       await expect(
         abortLib.resolveAndStandardizePlace(
           { query: 'Maverik Sedona' },
-          { abortSignal: abortController.signal }
+          { abortSignal: abortController.signal } as ScoutToolExecutionContext
         )
       ).rejects.toThrow('Request aborted');
       expect(bodyCancelledOnAbort).toBe(true);
@@ -753,6 +754,6 @@ describe('Route Scout URL safety policy, redirects, and response bounds', () => 
         braveSearchApiKey: 'test-key',
         fetchImpl: malformedJsonFetch,
       });
-      await expect(malformedLib.searchWeb({ query: 'Sedona' }, {})).rejects.toThrow();
+      await expect(malformedLib.searchWeb({ query: 'Sedona' }, {} as ScoutToolExecutionContext)).rejects.toThrow();
     });
 });

@@ -27,7 +27,7 @@ function createMockAdapter(overrides: Partial<AiHarnessAdapter> = {}): AiHarness
     name: 'Test Provider',
     isAvailable: async () => true,
     generate: async () => '{}',
-    validateModelId: (modelId: string) => modelId,
+    validateModelId: async (modelId: string) => modelId,
     getAvailableModels: async () => modelCatalog,
     getModelCatalog: () => ({
       models: modelCatalog,
@@ -61,7 +61,7 @@ describe('AI Co-Pilot Enrichment & Resilience (/api/copilot/generate)', () => {
     notes: 'Ponderosa pine lodge retreat',
   };
 
-  describe('Scenario 3: Day-Level Batching', () => {
+  describe('Day-Level Batching', () => {
     it('Processes an array of waypoints and returns matching alerts in a single invocation via the provider', async () => {
       const mockBatchResponse = JSON.stringify({
         status: 'SUCCESS',
@@ -117,7 +117,7 @@ describe('AI Co-Pilot Enrichment & Resilience (/api/copilot/generate)', () => {
     });
   });
 
-  describe('Scenario 5: Fail-Loud Policy', () => {
+  describe('Fail-Loud Policy', () => {
     it('rejects the removed template engine instead of generating offline copy', async () => {
       const app = createApp({ logger: false });
 

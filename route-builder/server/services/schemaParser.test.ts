@@ -14,13 +14,13 @@ import type { WaypointContext } from '../types/ai.js';
 
 describe('AI Schema Parser & Sanitizer', () => {
   describe('Title Sanitization & Truncation', () => {
-    it('Scenario 2A: Preserves titles that are already <= 30 characters', () => {
+    it('preserves titles that are already <= 30 characters', () => {
       const shortTitle = 'Sedona Red Rocks Ahead';
       expect(sanitizeTitle(shortTitle)).toBe('Sedona Red Rocks Ahead');
       expect(sanitizeTitle(shortTitle).length).toBeLessThanOrEqual(30);
     });
 
-    it('Scenario 2B: Catches and truncates titles exceeding 30 characters safely at word boundary', () => {
+    it('catches and truncates titles exceeding 30 characters safely at word boundary', () => {
       // 46 characters
       const longTitle = 'Approaching Beautiful Sedona Bell Rock Vista View';
       const truncated = sanitizeTitle(longTitle);
@@ -54,7 +54,7 @@ describe('AI Schema Parser & Sanitizer', () => {
   });
 
   describe('Trigger Radius Clamping', () => {
-    it('Scenario 2C: Clamps radius to strictly [0.3, 6.0] miles', () => {
+    it('clamps radius to strictly [0.3, 6.0] miles', () => {
       // Within bounds
       expect(clampRadius(2.5)).toBe(2.5);
       expect(clampRadius(0.3)).toBe(0.3);
@@ -82,7 +82,7 @@ describe('AI Schema Parser & Sanitizer', () => {
   });
 
   describe('Message Normalization', () => {
-    it('Scenario 2D: Normalizes multi-line messages to at most 2 lines', () => {
+    it('normalizes multi-line messages to at most 2 lines', () => {
       const fiveLineMessage = `Line 1: Target arrival at 4:30 PM.
 Line 2: Recommended 30-min stop for photos.
 Line 3: Extra unneeded commentary.

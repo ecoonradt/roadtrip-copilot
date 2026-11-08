@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { S3Client } from '@aws-sdk/client-s3';
 import {
   ItineraryStorageService,
+  type SaveItineraryResult,
   PreconditionFailedError,
   normalizeEtag,
   KeyedMutex,
@@ -332,7 +333,7 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       ]);
 
       const fulfilled = [res1, res2].filter(
-        (r): r is PromiseFulfilledResult<{ success: boolean; etag?: string }> =>
+        (r): r is PromiseFulfilledResult<SaveItineraryResult> =>
           r.status === 'fulfilled'
       );
       const rejected = [res1, res2].filter(
@@ -369,7 +370,7 @@ describe('Itinerary Discovery & Storage Service (/api/itineraries)', () => {
       ]);
 
       const fulfilled = [res1, res2].filter(
-        (r): r is PromiseFulfilledResult<{ success: boolean; etag?: string }> =>
+        (r): r is PromiseFulfilledResult<SaveItineraryResult> =>
           r.status === 'fulfilled'
       );
       const rejected = [res1, res2].filter(

@@ -173,6 +173,10 @@ npm run test:browser
 # Production compile (client Vite bundle + backend tsc)
 npm run build
 
+# Typecheck application and test suites
+npm run typecheck        # both app and tests
+npm run typecheck:tests  # test suites only (tsconfig.test.json & tsconfig.test.server.json)
+
 # Full verification pipeline across route-builder, infra CDK, and Android (invoked from repo root)
 ./scripts/ci_check.sh
 
@@ -194,4 +198,5 @@ npm run build
    * **Frontend Integration Tests:** Cross-component React workflow tests (such as full `<App />` state cascades, schedule export orchestration, and auth gating) live in `src/integration-tests/`. Integration tests run alongside unit tests under `npm test` and `npm run test:frontend` without requiring separate scripts.
    * **Shared Test Helpers & Fixtures:** Reusable UI fixtures, mocks, and test harnesses live in `src/test-helpers/` (e.g. `testHarness.tsx`, `aiFixtures.ts`). Backend test fixtures live in `server/test-helpers/` (e.g. `bedrockFixtures.ts`). Each tree maintains its own test helpers to preserve architectural boundary isolation.
    * **E2E Browser Tests:** Playwright end-to-end browser acceptance tests live in `e2e/` (`*.browser.ts`).
+   * **Test Typechecking:** Tests and test helpers are typechecked via dedicated project configs (`tsconfig.test.json` for `src/`, `tsconfig.test.server.json` for `server/`) with balanced strictness (`strict: true`, `noImplicitAny: true`, but relaxed unused variables and nullable assertions for mocking ergonomics). Tests are excluded from production compiler builds.
    * **Targeted Runs:** A narrow test run is `npx vitest run <file>`, not a topic script.

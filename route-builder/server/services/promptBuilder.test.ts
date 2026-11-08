@@ -17,7 +17,7 @@ describe('AI Co-Pilot Prompt Generator', () => {
     notes: 'Famous red rock buttes and hiking trailheads',
   };
 
-  it('Scenario 1: Correctly formats all contextual parameters in single waypoint prompt', () => {
+  it('correctly formats all contextual parameters in single waypoint prompt', () => {
     const prompt = buildSingleWaypointPrompt(sampleWaypoint);
 
     // Contextual parameters must be included

@@ -17,6 +17,7 @@ import {
 } from './aiService.js';
 import { ScoutService } from './scoutService.js';
 import { MalformedAiResponseError } from './schemaParser.js';
+import type { ScoutStreamEvent } from '../types/scout.js';
 import { SCOUT_TOOL_DECLARATIONS } from './scoutTools.js';
 import {
   ConverseCommand,
@@ -227,21 +228,25 @@ describe('Bedrock generate and stream', () => {
         const streamChunks: ConverseStreamOutput[] = [
           {
             contentBlockDelta: {
+              contentBlockIndex: 0,
               delta: { reasoningContent: { text: 'Internal chain of thought' } },
             },
           },
           {
             contentBlockDelta: {
+              contentBlockIndex: 0,
               delta: { text: '<thi' },
             },
           },
           {
             contentBlockDelta: {
+              contentBlockIndex: 0,
               delta: { text: 'nking>Secret Nova reasoning</thinking>Hello ' },
             },
           },
           {
             contentBlockDelta: {
+              contentBlockIndex: 0,
               delta: { text: 'driver!' },
             },
           },
@@ -252,7 +257,8 @@ describe('Bedrock generate and stream', () => {
           },
           {
             metadata: {
-              usage: { inputTokens: 120, outputTokens: 45 },
+              usage: { inputTokens: 120, outputTokens: 45, totalTokens: 165 },
+              metrics: undefined,
             },
           },
         ];
@@ -325,7 +331,7 @@ describe('Bedrock generate and stream', () => {
             messageStop: { stopReason: 'tool_use' },
           },
           {
-            metadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+            metadata: { usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 }, metrics: undefined },
           },
         ];
 
@@ -333,6 +339,7 @@ describe('Bedrock generate and stream', () => {
         const turn2Stream: ConverseStreamOutput[] = [
           {
             contentBlockDelta: {
+              contentBlockIndex: 0,
               delta: { text: 'Found great pull-offs on AZ-179.' },
             },
           },
@@ -340,7 +347,7 @@ describe('Bedrock generate and stream', () => {
             messageStop: { stopReason: 'end_turn' },
           },
           {
-            metadata: { usage: { inputTokens: 200, outputTokens: 80 } },
+            metadata: { usage: { inputTokens: 200, outputTokens: 80, totalTokens: 280 }, metrics: undefined },
           },
         ];
 
@@ -461,6 +468,7 @@ describe('Bedrock generate and stream', () => {
         const turn2Stream: ConverseStreamOutput[] = [
           {
             contentBlockDelta: {
+              contentBlockIndex: 0,
               delta: { text: 'Recovered from search error. Continuing with route audit.' },
             },
           },
@@ -494,7 +502,7 @@ describe('Bedrock generate and stream', () => {
           (e) => e.event === 'activity' && e.data.state === 'error'
         );
         expect(errActivity).toBeDefined();
-        expect(errActivity?.data.id).toBe('call_err');
+        expect((errActivity?.data as any)?.id).toBe('call_err');
 
         // Verify Turn 2 received toolResult with status: 'error' and error message
         const turn2Command = mockSend.mock.calls[1][0] as ConverseStreamCommand;
@@ -559,9 +567,9 @@ describe('Bedrock generate and stream', () => {
 
         // Stream that triggers abort during consumption
         async function* createAbortStream(): AsyncIterable<ConverseStreamOutput> {
-          yield { contentBlockDelta: { delta: { text: 'Starting analysis...' } } };
+          yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Starting analysis...' } } };
           abortController.abort();
-          yield { contentBlockDelta: { delta: { text: 'More analysis...' } } };
+          yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'More analysis...' } } };
         }
 
         const mockSend = vi.fn().mockResolvedValue({
@@ -586,7 +594,7 @@ describe('Bedrock generate and stream', () => {
 
       it('throws MalformedAiResponseError when messageStop.stopReason is max_tokens', async () => {
         const streamChunks: ConverseStreamOutput[] = [
-          { contentBlockDelta: { delta: { text: 'Starting route analysis...' } } },
+          { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Starting route analysis...' } } },
           { messageStop: { stopReason: 'max_tokens' } },
         ];
         const mockSend = vi.fn().mockImplementation(() => ({
@@ -607,7 +615,7 @@ describe('Bedrock generate and stream', () => {
 
       it('throws MalformedAiResponseError when messageStop.stopReason is content_filtered', async () => {
         const streamChunks: ConverseStreamOutput[] = [
-          { contentBlockDelta: { delta: { text: 'Inappropriate content...' } } },
+          { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Inappropriate content...' } } },
           { messageStop: { stopReason: 'content_filtered' } },
         ];
         const mockSend = vi.fn().mockImplementation(() => ({
@@ -628,7 +636,7 @@ describe('Bedrock generate and stream', () => {
 
       it('throws MalformedAiResponseError when stream ends without a terminal messageStop', async () => {
         const streamChunks: ConverseStreamOutput[] = [
-          { contentBlockDelta: { delta: { text: 'Incomplete stream truncated abruptly' } } },
+          { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Incomplete stream truncated abruptly' } } },
         ];
         const mockSend = vi.fn().mockImplementation(() => ({
           stream: createAsyncStream(streamChunks),
@@ -648,7 +656,7 @@ describe('Bedrock generate and stream', () => {
 
       it('throws MalformedAiResponseError when stopReason is tool_use but no tool calls were emitted', async () => {
         const streamChunks: ConverseStreamOutput[] = [
-          { contentBlockDelta: { delta: { text: 'I will call a tool now.' } } },
+          { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'I will call a tool now.' } } },
           { messageStop: { stopReason: 'tool_use' } },
         ];
         const mockSend = vi.fn().mockImplementation(() => ({
@@ -741,8 +749,8 @@ describe('Bedrock generate and stream', () => {
       });
 
       const adapter = new AwsBedrockHarnessAdapter({
-        client: { send: mockBedrockSend } as unknown as ConstructorParameters<typeof AwsBedrockHarnessAdapter>[0]['client'],
-        availableModels: [{ id: 'us.moonshotai.kimi-k3', name: 'Kimi K3', role: 'both', provider: 'Moonshot AI' }],
+        client: { send: mockBedrockSend } as unknown as BedrockRuntimeClient,
+        availableModels: [{ id: 'us.moonshotai.kimi-k3', name: 'Kimi K3', role: 'both', provider: 'Moonshot AI', description: 'Kimi K3' }],
       });
 
       const dispatcher = vi.fn().mockRejectedValue(

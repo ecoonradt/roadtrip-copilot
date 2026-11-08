@@ -642,7 +642,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
         name: 'Test Provider',
         isAvailable: async () => true,
         generate: async () => 'Day 2 looks well paced. Consider a lunch stop in Gallup.',
-        validateModelId: (modelId: string) => modelId,
+        validateModelId: async (modelId: string) => modelId,
         getAvailableModels: async () => [],
         getModelCatalog: () => ({
           models: [],
@@ -720,7 +720,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
         name: 'Test Provider',
         isAvailable: async () => true,
         generate: async () => '   ',
-        validateModelId: (modelId: string) => modelId,
+        validateModelId: async (modelId: string) => modelId,
         getAvailableModels: async () => [],
         getModelCatalog: () => ({
           models: [],
@@ -849,7 +849,7 @@ I have framed this as a candidate update below to convert your focused Gallup fu
         name: 'Mock Non-Streaming Adapter',
         isAvailable: async () => true,
         generate: generateSpy,
-        validateModelId: (m: string) => m,
+        validateModelId: async (m: string) => m,
         getAvailableModels: async () => [],
         getModelCatalog: () => ({
           models: [],

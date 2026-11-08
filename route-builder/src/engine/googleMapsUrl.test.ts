@@ -57,8 +57,8 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
     });
   });
 
-  describe('Invariant 3: Leg Partitioning & Chunking Limits (<= 9 Intermediate Waypoints)', () => {
-    it('Scenario 3A: 11-waypoint route generates exactly 1 leg with 9 intermediate stops', () => {
+  describe('Leg Partitioning & Chunking Limits (<= 9 Intermediate Waypoints)', () => {
+    it('generates exactly 1 leg with 9 intermediate stops for an 11-waypoint route', () => {
       // 11 points total: 1 origin, 9 intermediate, 1 destination
       const waypoints = createTestWaypoints(11);
 
@@ -86,7 +86,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       expect(result.primaryUrl).toBe(leg.url);
     });
 
-    it('Scenario 3B: 12-waypoint route cleanly splits into 2 valid Google Maps URLs with continuity', () => {
+    it('cleanly splits a 12-waypoint route into 2 valid Google Maps URLs with continuity', () => {
       // 12 points total: exceeds 11-point limit by 1
       const waypoints = createTestWaypoints(12);
 
@@ -125,7 +125,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       expect(result.primaryUrl).toBe(leg1.url);
     });
 
-    it('Scenario 3C: 15-waypoint route splits into 2 valid legs (9 intermediate on Leg 1, 3 on Leg 2)', () => {
+    it('splits a 15-waypoint route into 2 valid legs (9 intermediate on Leg 1, 3 on Leg 2)', () => {
       const waypoints = createTestWaypoints(15);
 
       const result = generateGoogleMapsUrls(waypoints);
@@ -147,7 +147,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       expect(leg2.intermediateWaypoints).toEqual(waypoints.slice(11, 14));
     });
 
-    it('Scenario 3D: 22-waypoint route splits into 3 valid legs with strict continuity', () => {
+    it('splits a 22-waypoint route into 3 valid legs with strict continuity', () => {
       const waypoints = createTestWaypoints(22);
 
       const result = generateGoogleMapsUrls(waypoints);
@@ -445,7 +445,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
         lng: -111.733,
         name: 'Oak Creek Vista',
         address: 'State, AZ-89A, Flagstaff, AZ 86001',
-        type: 'scenic_viewpoint',
+        type: 'scenic_pull_off',
         dwellMinutes: 20,
         isRouteAnchor: false,
       };
@@ -474,7 +474,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
       expect(url).toContain(encodeURIComponent('Little America Hotel, 2515 E Butler Ave, Flagstaff, AZ 86004'));
     });
 
-    it('Scenario 6: Includes generic stops (type: stop) with dwell time as physical stopping locations in navigation URLs', () => {
+    it('includes generic stops (type: stop) with dwell time as physical stopping locations in navigation URLs', () => {
       const origin: CoordinateLocation = {
         lat: 33.4357,
         lng: -112.0152,
@@ -509,7 +509,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
           lat: 33.4484,
           lng: -112.074,
           name: 'Phoenix Departure',
-          category: 'origin',
+          type: 'origin',
           dwellMinutes: 0,
         },
         {
@@ -519,7 +519,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
           placeName: 'Sedona Cafe',
           address: '100 Main St, Sedona, AZ 86336',
           placeId: 'ChIJU-n6g1cMK4cRy5T6Z8-Jq9Q',
-          category: 'meal',
+          type: 'meal',
           dwellMinutes: 45,
           isRouteAnchor: false,
         },
@@ -529,7 +529,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
           name: 'Oak Creek Vista Overlook',
           placeName: 'Oak Creek Vista Overlook',
           placeId: 'ChIJCR3fWhuQO4cRxCLXXbAfCxQ',
-          category: 'scenic_drive_by',
+          type: 'scenic_pull_off',
           dwellMinutes: 0,
           isRouteAnchor: true,
         },
@@ -540,7 +540,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
           placeName: 'Galaxy Diner',
           address: '931 W Route 66, Flagstaff, AZ 86001',
           placeId: 'ChIJ2wW_a80KK4cR24D7xO_z5Y4',
-          category: 'meal',
+          type: 'meal',
           dwellMinutes: 45,
           isRouteAnchor: false,
         },
@@ -548,7 +548,7 @@ describe('Google Maps Navigation Link Generator (googleMapsUrl.ts)', () => {
           lat: 35.1983,
           lng: -111.6513,
           name: 'Flagstaff Hotel',
-          category: 'destination',
+          type: 'destination',
           dwellMinutes: 0,
         },
       ];

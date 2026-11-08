@@ -20,7 +20,7 @@ describe('OSRM Routing Proxy (/api/routing/route)', () => {
     vi.restoreAllMocks();
   });
 
-  it('Scenario 2: Returns HTTP 200 with valid GeoJSON road geometry and drive duration', async () => {
+  it('returns HTTP 200 with valid GeoJSON road geometry and drive duration', async () => {
     const mockOsrmResponse: OsrmRawResponse = {
       code: 'Ok',
       routes: [

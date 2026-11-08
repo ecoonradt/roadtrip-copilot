@@ -526,7 +526,7 @@ describe('Scheduling acceptance workflows', () => {
     expect(header(app).isSaving).toBe(false);
   });
 
-  it('Bug A: marks created or imported trip as unsaved (isDirty true) until first successful save', async () => {
+  it('marks created or imported trip as unsaved (isDirty true) until first successful save', async () => {
     const app = await mountApp();
     expect(header(app).isDirty).toBe(false);
 
@@ -580,7 +580,7 @@ describe('Scheduling acceptance workflows', () => {
     expect(header(app).isDirty).toBe(false);
   });
 
-  it('Bug B: retains active multi-day trip and selection when an initialization retry fails after initial load', async () => {
+  it('retains active multi-day trip and selection when an initialization retry fails after initial load', async () => {
     const app = await mountApp();
 
     // Select Day 2 (index 1) of the 2-day fixture
@@ -626,10 +626,10 @@ describe('Scheduling acceptance workflows', () => {
     const app = await mountApp();
 
     expect(textOf(app.root.findByProps({ role: 'status' }))).toBe('Loading your route…');
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
-    expect(app.root.findAllByType('test-map')).toHaveLength(0);
-    expect(app.root.findAllByType('test-sidebar')).toHaveLength(0);
-    expect(app.root.findAllByType('test-selector')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-map' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-sidebar' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-selector' as any)).toHaveLength(0);
 
     await act(async () => release(fixture()));
 
@@ -650,8 +650,8 @@ describe('Scheduling acceptance workflows', () => {
     const retry = app.root.findAllByType('button').find((button) => textOf(button) === 'Retry');
     expect(retry).toBeDefined();
     expect(app.root.findAllByType('button').some((button) => textOf(button) === 'Start a new route')).toBe(true);
-    expect(app.root.findAllByType('test-selector')).toHaveLength(0);
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-selector' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
 
     let release!: (value: ReturnType<typeof fixture>) => void;
     api.fetchItinerary.mockReturnValue(new Promise<ReturnType<typeof fixture>>((resolve) => { release = resolve; }));
@@ -660,10 +660,10 @@ describe('Scheduling acceptance workflows', () => {
     });
 
     expect(textOf(app.root.findByProps({ role: 'status' }))).toBe('Loading your route…');
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
-    expect(app.root.findAllByType('test-map')).toHaveLength(0);
-    expect(app.root.findAllByType('test-sidebar')).toHaveLength(0);
-    expect(app.root.findAllByType('test-selector')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-map' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-sidebar' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-selector' as any)).toHaveLength(0);
 
     await act(async () => release(fixture()));
 
@@ -758,7 +758,7 @@ describe('Scheduling acceptance workflows', () => {
     const output = saved<SingleRouteItineraryV2>();
     expect(output.scheduling_mode).toBe('adhoc');
     expect(output.date).toBeUndefined();
-    expect(output.dates).toBeUndefined();
+    expect((output as any).dates).toBeUndefined();
     expect(output.checkpoints.map((checkpoint) => checkpoint.offset_minutes_from_start)).toEqual([0, 120, 165, 210]);
     expect(output.checkpoints.every((checkpoint) => checkpoint.target_time === undefined)).toBe(true);
     expect(localStorage.getItem('copilot_active_file')).toBe('scenic_southwest_phoenix_to_flagstaff.json');
@@ -821,7 +821,7 @@ describe('Scheduling acceptance workflows', () => {
     expect(new URL(window.location.href).searchParams.get('route')).toBeNull();
   });
 
-  it('Bug C: preserves pending routing results for inactive days when renaming an unsaved trip with new file target', async () => {
+  it('preserves pending routing results for inactive days when renaming an unsaved trip with new file target', async () => {
     let releaseDay2Route!: (val: RouteResponse) => void;
     api.fetchRoute.mockImplementation((coords: Array<{ lat: number; lng: number }>) => {
       // Coords for day 2 has lat base 33.6
@@ -892,14 +892,14 @@ describe('Scheduling acceptance workflows', () => {
     expect(saved().days[1].checkpoints[2].target_time).toBe('11:00:00');
   });
 
-  it('Defect 2: does not overwrite trip B when active trip A is deleted with deferred DELETE response and trip B is selected and edited in-flight', async () => {
+  it('does not overwrite trip B when active trip A is deleted with deferred DELETE response and trip B is selected and edited in-flight', async () => {
     const app = await mountApp();
 
     expect(trip(app).tripName).toBe('Scheduling tests');
 
     // Capture onDeleteTrip and starting generation at initiation of delete (as RouteSelectorModal does)
     const onDeleteTrip = selectorProps(app).onDeleteTrip!;
-    const startedGen = selectorProps(app).getTripGeneration ? selectorProps(app).getTripGeneration() : undefined;
+    const startedGen = selectorProps(app).getTripGeneration?.();
 
     // While DELETE is in flight, user selects trip B and edits it
     const tripB: ParsedTrip = {

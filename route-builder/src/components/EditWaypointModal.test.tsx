@@ -103,7 +103,7 @@ describe('EditWaypointModal copywriter model selector', () => {
         expect(onSelectCopywriterModel).toHaveBeenCalledWith('us.amazon.nova-pro-v1:0');
       });
 
-      it('gates Waypoint edit modal generate alert button when selectedModelId is empty (R5)', () => {
+      it('gates Waypoint edit modal generate alert button when selectedModelId is empty', () => {
         let modal!: ReactTestRenderer;
         act(() => {
           modal = create(

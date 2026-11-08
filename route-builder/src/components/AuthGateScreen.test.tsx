@@ -59,9 +59,9 @@ describe('Frontend Auth UI & Gating', () => {
     const app = await mountApp();
 
     // While auth status is in flight, studio header, sidebar, map, and AuthGateScreen are NOT rendered
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
-    expect(app.root.findAllByType('test-sidebar')).toHaveLength(0);
-    expect(app.root.findAllByType('test-map')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-sidebar' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-map' as any)).toHaveLength(0);
     expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
 
     // Instead, a clean solid blue background container (bg-slate-950) is rendered
@@ -74,7 +74,7 @@ describe('Frontend Auth UI & Gating', () => {
     expect(allText(app.root)).toBe('');
     await advanceTime(1);
     expect(allText(app.root.findByProps({ role: 'status' }))).toBe('Connecting to Roadtrip Co-Pilot…');
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
     expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
 
     // Settle the auth check with unauthenticated status
@@ -90,7 +90,7 @@ describe('Frontend Auth UI & Gating', () => {
 
     // Now AuthGateScreen is displayed and studio header is still absent
     expect(app.root.findByType(AuthGateScreen)).toBeDefined();
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
     expect(app.root.findAllByProps({ role: 'status' })).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -109,7 +109,7 @@ describe('Frontend Auth UI & Gating', () => {
     });
 
     // Does not render main studio header
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
 
     // Renders AuthGateScreen with Continue with Google link
     const gateScreen = app.root.findByType(AuthGateScreen);
@@ -142,7 +142,7 @@ describe('Frontend Auth UI & Gating', () => {
     });
 
     // Does not render main studio header
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
 
     const textContent = allText(app.root);
     expect(textContent).toContain('Private Preview — Access Restricted');
@@ -191,7 +191,7 @@ describe('Frontend Auth UI & Gating', () => {
       await Promise.resolve();
     });
 
-    const header = app.root.findByType('test-header');
+    const header = app.root.findByType('test-header' as any);
     expect(header).toBeDefined();
     expect(header.props.authEnabled).toBe(true);
     expect(header.props.authUser).toEqual(user);
@@ -228,9 +228,13 @@ describe('Frontend Auth UI & Gating', () => {
           cascadeResult={{
             stops: [],
             totalDriveSeconds: 0,
+            totalDriveMinutes: 0,
+            totalDwellMinutes: 0,
             totalTripSeconds: 0,
             totalDistanceMiles: 0,
-            arrivalTargetMet: true,
+            startTime: '09:00:00',
+            endTime: '09:00:00',
+            timezonesCrossed: [],
           }}
           googleMapsRoute={{
             legs: [],
@@ -385,7 +389,7 @@ describe('Frontend Auth UI & Gating', () => {
     expect(api.fetchItinerary).toHaveBeenCalledTimes(2);
 
     // Transitions to the studio with loaded trip and AI readiness restored
-    const headerEl = app.root.findByType('test-header');
+    const headerEl = app.root.findByType('test-header' as any);
     expect(headerEl).toBeDefined();
     expect(headerEl.props.authEnabled).toBe(true);
     expect(headerEl.props.aiAvailable).toBe(true);
@@ -441,7 +445,7 @@ describe('Frontend Auth UI & Gating', () => {
     });
 
     // Recovered trip is rendered
-    const headerEl = app.root.findByType('test-header');
+    const headerEl = app.root.findByType('test-header' as any);
     expect(headerEl.props.currentTripName).toBe('Recovered Trip Name');
 
     // Now the original pending itinerary request fails late
@@ -497,7 +501,7 @@ describe('Frontend Auth UI & Gating', () => {
     });
 
     // Studio is available because a trip is already active while the retry request is pending
-    expect(app.root.findAllByType('test-header')).toHaveLength(1);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(1);
 
     // User deliberately imports / selects another trip
     const importedTrip = {
@@ -525,7 +529,7 @@ describe('Frontend Auth UI & Gating', () => {
       await Promise.resolve();
     });
 
-    const headerEl = app.root.findByType('test-header');
+    const headerEl = app.root.findByType('test-header' as any);
     expect(headerEl.props.currentTripName).toBe('Imported User Route');
 
     // User edits the trip (e.g. changes departure time)
@@ -553,7 +557,7 @@ describe('Frontend Auth UI & Gating', () => {
     api.fetchAuthStatus.mockResolvedValue(signedInStatus);
     const app = await mountApp();
 
-    expect(app.root.findAllByType('test-header')).toHaveLength(1);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
     await advanceTime(15_000);
     expect(app.root.findAllByProps({ role: 'status' })).toHaveLength(0);
@@ -587,8 +591,8 @@ describe('Frontend Auth UI & Gating', () => {
     expect(alertText).toContain('timed out');
     expect(alertText).toContain('check your connection and retry');
     expect(retryButton(app)).toBeDefined();
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
-    expect(app.root.findAllByType('test-map')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
+    expect(app.root.findAllByType('test-map' as any)).toHaveLength(0);
     expect(api.fetchItinerary).toHaveBeenCalledTimes(1);
     expect(api.fetchAiStatus).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
@@ -612,7 +616,7 @@ describe('Frontend Auth UI & Gating', () => {
     expect(signal.aborted).toBe(true);
     expect(allText(app.root.findByProps({ role: 'alert' }))).toContain('timed out');
     await act(async () => body.resolve(signedInStatus));
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
     expect(allText(app.root)).toContain('timed out');
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -641,7 +645,7 @@ describe('Frontend Auth UI & Gating', () => {
       expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
       await advanceTime(1);
       expect(allText(app.root.findByProps({ role: 'alert' }))).toContain('timed out');
-      expect(app.root.findAllByType('test-header')).toHaveLength(0);
+      expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
       expect(api.fetchItinerary).toHaveBeenCalledTimes(initialTripCalls);
       expect(api.fetchAiStatus).toHaveBeenCalledTimes(1);
       expect(vi.getTimerCount()).toBe(0);
@@ -654,7 +658,7 @@ describe('Frontend Auth UI & Gating', () => {
     api.fetchItinerary.mockResolvedValue(recovered);
     await retryConnection(app);
 
-    const header = app.root.findByType('test-header');
+    const header = app.root.findByType('test-header' as any);
     expect(header.props.currentTripName).toBe('Recovered after repeated timeouts');
     expect(header.props.aiAvailable).toBe(true);
     expect(header.props.authUser).toEqual(signedInStatus.user);
@@ -675,7 +679,7 @@ describe('Frontend Auth UI & Gating', () => {
     api.fetchAuthStatus.mockResolvedValue({ ...signedInStatus, authenticated, authorized });
     await retryConnection(app);
 
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
     expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(1);
     expect(api.fetchItinerary).toHaveBeenCalledTimes(1);
     expect(api.fetchAiStatus).toHaveBeenCalledTimes(1);
@@ -694,8 +698,8 @@ describe('Frontend Auth UI & Gating', () => {
     api.fetchAiStatus.mockResolvedValue({ available: true });
     await retryConnection(app);
 
-    expect(app.root.findByType('test-header').props.authEnabled).toBe(false);
-    expect(app.root.findByType('test-header').props.aiAvailable).toBe(true);
+    expect(app.root.findByType('test-header' as any).props.authEnabled).toBe(false);
+    expect(app.root.findByType('test-header' as any).props.aiAvailable).toBe(true);
     expect(api.fetchItinerary).toHaveBeenCalledTimes(2);
     expect(api.fetchAiStatus).toHaveBeenCalledTimes(2);
     expect(vi.getTimerCount()).toBe(0);
@@ -729,19 +733,19 @@ describe('Frontend Auth UI & Gating', () => {
 
       if (stage === 'timeout') {
         expect(allText(app.root.findByProps({ role: 'alert' }))).toContain('timed out');
-        expect(app.root.findAllByType('test-header')).toHaveLength(0);
+        expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
         expect(api.fetchAuthStatus).toHaveBeenCalledTimes(1);
         await retryConnection(app);
       } else if (stage === 'retry pending') {
         expect(allText(app.root.findByProps({ role: 'status' }))).toBe('Connecting to Roadtrip Co-Pilot…');
         expect(app.root.findAllByType(AuthGateScreen)).toHaveLength(0);
-        expect(app.root.findAllByType('test-header')).toHaveLength(0);
+        expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
         expect(api.fetchItinerary).toHaveBeenCalledTimes(1);
         expect(api.fetchAiStatus).toHaveBeenCalledTimes(1);
       }
 
       if (stage !== 'recovered') await act(async () => current.resolve(signedInStatus));
-      const header = app.root.findByType('test-header');
+      const header = app.root.findByType('test-header' as any);
       expect(header.props.authUser).toEqual(signedInStatus.user);
       expect(header.props.currentTripName).toBe('Scheduling tests');
       expect(header.props.aiAvailable).toBe(true);
@@ -800,7 +804,7 @@ describe('Frontend Auth UI & Gating', () => {
     expect(allText(app.root)).not.toContain('Connection Issue');
     expect(vi.getTimerCount()).toBe(0);
     await act(async () => retry.resolve(signedInStatus));
-    expect(app.root.findAllByType('test-header')).toHaveLength(0);
+    expect(app.root.findAllByType('test-header' as any)).toHaveLength(0);
     expect(api.fetchItinerary).toHaveBeenCalledTimes(1);
     expect(api.fetchAiStatus).toHaveBeenCalledTimes(1);
   });

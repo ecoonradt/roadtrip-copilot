@@ -15,7 +15,7 @@ describe('Nominatim Geocoding Proxy (/api/routing/geocode)', () => {
     vi.restoreAllMocks();
   });
 
-  it('Scenario 1: Sets a valid User-Agent header and parses location coordinates correctly', async () => {
+  it('sets a valid User-Agent header and parses location coordinates correctly', async () => {
     const mockNominatimResponse: NominatimRawResult[] = [
       {
         place_id: 12345,
@@ -130,7 +130,7 @@ describe('Nominatim Geocoding Proxy (/api/routing/geocode)', () => {
     expect(res.json().error).toContain('DNS resolution failed');
   });
 
-  it('Scenario 2: Extracts establishment name, Google Maps placeName, clean address, and category for POIs', async () => {
+  it('extracts establishment name, Google Maps placeName, clean address, and category for POIs', async () => {
     const mockNominatimResponse: NominatimRawResult[] = [
       {
         place_id: 323353941,
@@ -180,7 +180,7 @@ describe('Nominatim Geocoding Proxy (/api/routing/geocode)', () => {
     });
   });
 
-  it('Scenario 3: Extracts clean street address and placeName for street address queries without breaking on house numbers', async () => {
+  it('extracts clean street address and placeName for street address queries without breaking on house numbers', async () => {
     const mockNominatimResponse: NominatimRawResult[] = [
       {
         place_id: 355370122,

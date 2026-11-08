@@ -132,6 +132,7 @@ npm test              # All Vitest suites (src/ and server/)
 npm run test:frontend # src/ only
 npm run test:backend  # server/ only
 npm run test:browser  # Browser geometry, account interactions, and session recovery
+npm run typecheck     # Typecheck both production code and test suites
 npm run build         # Production compile (client Vite bundle + backend tsc)
 ```
 

@@ -95,10 +95,10 @@ describe('RouteSelectorModal regression tests', () => {
     vi.unstubAllGlobals();
   });
 
-  it('Bug D (1): late workspace route fetch does not call onSelectTrip after modal is closed', async () => {
-    let resolveItinerary!: (val: unknown) => void;
+  it('late workspace route fetch does not call onSelectTrip after modal is closed', async () => {
+    let resolveItinerary!: (val: Record<string, unknown>) => void;
     vi.mocked(fetchItinerary).mockReturnValue(
-      new Promise((resolve) => {
+      new Promise<Record<string, unknown>>((resolve) => {
         resolveItinerary = resolve;
       })
     );
@@ -160,10 +160,10 @@ describe('RouteSelectorModal regression tests', () => {
     expect(onSelectTrip).not.toHaveBeenCalled();
   });
 
-  it('Bug D (1): parent re-render with a new onClose identity does not cancel a pending selection while open', async () => {
-    let resolveItinerary!: (val: unknown) => void;
+  it('parent re-render with a new onClose identity does not cancel a pending selection while open', async () => {
+    let resolveItinerary!: (val: Record<string, unknown>) => void;
     vi.mocked(fetchItinerary).mockReturnValue(
-      new Promise((resolve) => {
+      new Promise<Record<string, unknown>>((resolve) => {
         resolveItinerary = resolve;
       })
     );
@@ -210,7 +210,7 @@ describe('RouteSelectorModal regression tests', () => {
     expect(onSelectTrip).toHaveBeenCalledTimes(1);
   });
 
-  it('Bug A: passes { unsaved: true } when creating a new blank trip', async () => {
+  it('passes { unsaved: true } when creating a new blank trip', async () => {
     const onSelectTrip = vi.fn();
     const onClose = vi.fn();
 
@@ -258,7 +258,7 @@ describe('RouteSelectorModal regression tests', () => {
     );
   });
 
-  it('Bug A: passes { unsaved: true } when confirming an imported itinerary', async () => {
+  it('passes { unsaved: true } when confirming an imported itinerary', async () => {
     const onSelectTrip = vi.fn();
     const onClose = vi.fn();
 
@@ -324,10 +324,10 @@ describe('RouteSelectorModal regression tests', () => {
     );
   });
 
-  it('Defect 1: cancelling workspace load by closing modal clears loading indicator on reopen', async () => {
-    let resolveItinerary!: (val: unknown) => void;
+  it('cancelling workspace load by closing modal clears loading indicator on reopen', async () => {
+    let resolveItinerary!: (val: Record<string, unknown>) => void;
     vi.mocked(fetchItinerary).mockReturnValue(
-      new Promise((resolve) => {
+      new Promise<Record<string, unknown>>((resolve) => {
         resolveItinerary = resolve;
       })
     );
@@ -407,7 +407,7 @@ describe('RouteSelectorModal regression tests', () => {
     expect(reopenedLoadBtn!.props.disabled).toBe(false);
   });
 
-  it('Defect 2: captures generation before DELETE request resolves and passes it to onDeleteTrip', async () => {
+  it('captures generation before DELETE request resolves and passes it to onDeleteTrip', async () => {
     let resolveDelete!: (val: { success: boolean; fileName: string }) => void;
     vi.mocked(deleteItinerary).mockReturnValue(
       new Promise((resolve) => {

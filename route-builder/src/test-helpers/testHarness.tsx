@@ -49,25 +49,19 @@ vi.mock('../components/RouteScoutDrawer', () => ({ RouteScoutDrawer: (props: Rec
 vi.mock('qrcode', () => ({ default: { toDataURL: async () => 'data:image/png;base64,test' } }));
 import { App } from '../App';
 import { DayTabBar } from '../components/DayTabBar';
+import type { AppHeader } from '../components/AppHeader';
 
-export interface HeaderProps {
-  onSaveTrip?: () => Promise<void> | void;
-  cascadeResult: TimelineCascadeResult;
-  isLoadingRoute: boolean;
-  routeError: string | null;
-  isDirty: boolean;
-  schedulingMode: string;
-  targetArrivalTime: string;
-  departureTime: string;
-  setDepartureTime: (time: string) => void;
-  setBaseDate: (date: string) => void;
-  setSchedulingMode: (mode: 'forward' | 'backward' | 'adhoc') => void;
-  setTargetArrivalTime: (time: string) => void;
+type AppHeaderProps = React.ComponentProps<typeof AppHeader>;
+
+export type HeaderProps = Omit<AppHeaderProps, 'onSaveTrip' | 'onLogout'> & {
+  onSaveTrip: () => Promise<void>;
+  onLogout: () => Promise<void>;
+  onOpenExportModal: () => void;
+  onOpenRouteSelector: () => void;
+  onToggleScout: () => void;
   onRenameTrip: (name: string) => void;
   currentTripName: string;
-  isSaving?: boolean;
-  saveSuccess?: boolean;
-}
+};
 interface SidebarProps { onUpdateWaypoint: (id: string, update: Partial<Waypoint>) => void; onSelectLocation: (result: GeocodeResult) => void }
 interface DayProps { onSelectDay: (index: number) => void; onAddDay: () => void; onDeleteDay: (index: number) => void }
 type ModalProps = React.ComponentProps<typeof import('../components/ExportModal')['ExportModal']>;
@@ -89,16 +83,16 @@ export function fixture(): MultiDayItineraryV2 {
     scheduledStops: calculateTimelineCascade({ baseDate: `2026-10-${String(8 + day).padStart(2, '0')}`, departureTime: '09:00:00', waypoints: points(day), driveDurationsSeconds: [3600, 1800] }).stops })) });
 }
 const mounted: ReactTestRenderer[] = [];
-export function header(app: ReactTestRenderer): HeaderProps { return app.root.findByType('test-header').props as HeaderProps }
-export function sidebar(app: ReactTestRenderer): SidebarProps { return app.root.findByType('test-sidebar').props as SidebarProps }
+export function header(app: ReactTestRenderer): HeaderProps { return app.root.findByType('test-header' as any).props as HeaderProps }
+export function sidebar(app: ReactTestRenderer): SidebarProps { return app.root.findByType('test-sidebar' as any).props as SidebarProps }
 export function tabs(app: ReactTestRenderer): DayProps { return app.root.findByType(DayTabBar).props as DayProps }
-export function exportProps(app: ReactTestRenderer): ModalProps { return app.root.findByType('test-export').props as ModalProps }
+export function exportProps(app: ReactTestRenderer): ModalProps { return app.root.findByType('test-export' as any).props as ModalProps }
 export function trip(app: ReactTestRenderer): ParsedTrip { return exportProps(app).trip! }
 export function selectTrip(app: ReactTestRenderer, next: ParsedTrip, options?: { unsaved?: boolean }): void {
-  (app.root.findByType('test-selector').props as { onSelectTrip: (value: ParsedTrip, options?: { unsaved?: boolean }) => void }).onSelectTrip(next, options);
+  (app.root.findByType('test-selector' as any).props as { onSelectTrip: (value: ParsedTrip, options?: { unsaved?: boolean }) => void }).onSelectTrip(next, options);
 }
 export function selectorProps(app: ReactTestRenderer) {
-  return app.root.findByType('test-selector').props as {
+  return app.root.findByType('test-selector' as any).props as {
     isOpen: boolean;
     dismissible?: boolean;
     onClose: () => void;
@@ -109,7 +103,7 @@ export function selectorProps(app: ReactTestRenderer) {
   };
 }
 export function mapClick(app: ReactTestRenderer, lat = 33.4, lng = -112): void {
-  (app.root.findByType('test-map').props as { onMapClick: (lat: number, lng: number) => void }).onMapClick(lat, lng);
+  (app.root.findByType('test-map' as any).props as { onMapClick: (lat: number, lng: number) => void }).onMapClick(lat, lng);
 }
 export function saved<T extends ItineraryExportModel = MultiDayItineraryV2>(): T { return api.saveItinerary.mock.calls.at(-1)![1] as T }
 export async function mountApp(): Promise<ReactTestRenderer> {

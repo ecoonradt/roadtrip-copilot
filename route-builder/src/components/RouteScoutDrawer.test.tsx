@@ -56,6 +56,7 @@ const sampleWaypointWithDetails: Waypoint = {
 
 const sampleTrip: ParsedTrip = {
   tripName: 'Phoenix to Sedona Scenic Run',
+  isMultiDay: false,
   days: [
     {
       dayNumber: 1,
@@ -179,7 +180,7 @@ describe('Route Scout Drawer & UI Controls', () => {
       });
 
       it('isolates conversations across itineraries: aborts in-flight stream and prevents Trip A results leaking into Trip B', async () => {
-        let capturedSignal: AbortSignal | undefined;
+        let capturedSignal: AbortSignal | null | undefined;
         let resolveStreamPromise!: () => void;
 
         vi.stubGlobal(
@@ -297,7 +298,7 @@ describe('Route Scout Drawer & UI Controls', () => {
       });
 
       it('aborts active stream when drawer is closed (isOpen becomes false)', () => {
-        let capturedSignal: AbortSignal | undefined;
+        let capturedSignal: AbortSignal | null | undefined;
 
         vi.stubGlobal(
           'fetch',
@@ -372,7 +373,7 @@ describe('Route Scout Drawer & UI Controls', () => {
 
         expect(capturedSignal?.aborted).toBe(true);
 
-        // Reopen the drawer: verify no stuck analyzing placeholder message is retained (R7)
+        // Reopen the drawer: verify no stuck analyzing placeholder message is retained
         act(() => {
           drawer.update(
             <RouteScoutDrawer
@@ -399,7 +400,7 @@ describe('Route Scout Drawer & UI Controls', () => {
       });
 
       it('aborts active stream when scope is switched', () => {
-        let capturedSignal: AbortSignal | undefined;
+        let capturedSignal: AbortSignal | null | undefined;
 
         vi.stubGlobal(
           'fetch',
@@ -474,7 +475,7 @@ describe('Route Scout Drawer & UI Controls', () => {
 
         expect(capturedSignal?.aborted).toBe(true);
 
-        // Switch scope back to Day 1: verify no stuck analyzing placeholder is retained (R7)
+        // Switch scope back to Day 1: verify no stuck analyzing placeholder is retained
         act(() => {
           drawer.update(
             <RouteScoutDrawer
@@ -500,7 +501,7 @@ describe('Route Scout Drawer & UI Controls', () => {
         expect(day1Json).not.toContain('Route Scout is analyzing route geometry & corridor');
       });
 
-      it('preserves completed suggestions-only message across drawer close/reopen and scope switch (P2 Finding 4)', async () => {
+      it('preserves completed suggestions-only message across drawer close/reopen and scope switch', async () => {
         let resolveStreamPromise: () => void = () => {};
 
         vi.stubGlobal(
@@ -684,7 +685,7 @@ describe('Route Scout Drawer & UI Controls', () => {
         expect(jsonStr).toContain('Completed Scenic Vista');
       });
 
-      it('preserves completed cards-only answer without duplicate loading indicator during follow-up turn (P3 Finding 2)', async () => {
+      it('preserves completed cards-only answer without duplicate loading indicator during follow-up turn', async () => {
         let streamCount = 0;
         let resolveFirstStream: () => void = () => {};
 
@@ -850,7 +851,7 @@ describe('Route Scout Drawer & UI Controls', () => {
         expect(jsonStr).not.toContain('Route Scout is analyzing route geometry & corridor');
       });
 
-      it('gates Route Scout input, send button, and quick prompts when selectedModelId is empty (R5)', () => {
+      it('gates Route Scout input, send button, and quick prompts when selectedModelId is empty', () => {
         let drawer!: ReactTestRenderer;
         act(() => {
           drawer = create(
@@ -935,6 +936,7 @@ describe('Route Scout Drawer & UI Controls', () => {
 
         const tripWithLunch: ParsedTrip = {
           tripName: 'Arizona Scenic Run',
+          isMultiDay: false,
           days: [
             {
               dayNumber: 1,
@@ -952,6 +954,7 @@ describe('Route Scout Drawer & UI Controls', () => {
                   lng: -112.074,
                   target_time: '08:00:00',
                   dwell_minutes: 0,
+                  trigger_radius_miles: 1.0,
                 },
                 {
                   id: 'wp_sedona_lunch',
@@ -964,6 +967,7 @@ describe('Route Scout Drawer & UI Controls', () => {
                   place_name: 'Sedona Cafe',
                   address: '100 Main St, Sedona, AZ 86336',
                   is_route_anchor: false,
+                  trigger_radius_miles: 1.0,
                 },
                 {
                   id: 'wp_dest',
@@ -974,6 +978,7 @@ describe('Route Scout Drawer & UI Controls', () => {
                   target_time: '12:30:00',
                   dwell_minutes: 0,
                   is_route_anchor: false,
+                  trigger_radius_miles: 1.0,
                 },
               ],
             },
@@ -997,7 +1002,7 @@ describe('Route Scout Drawer & UI Controls', () => {
               onDeleteWaypoint={onDeleteWaypoint}
               onPreviewCoordinate={vi.fn()}
               aiAvailable={true}
-              aiModels={[{ id: 'us.moonshotai.kimi-k3', name: 'Kimi K3', role: 'both', provider: 'Moonshot AI' }]}
+              aiModels={[{ id: 'us.moonshotai.kimi-k3', name: 'Kimi K3', role: 'both', provider: 'Moonshot AI', description: 'Kimi K3' }]}
               selectedModelId="us.moonshotai.kimi-k3"
             />
           );

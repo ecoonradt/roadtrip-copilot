@@ -163,7 +163,7 @@ describe('Route Scout tool declarations, hydration, and isolation', () => {
       expect(cascade?.inputSchema.required).toEqual(['action', 'target_waypoint_id']);
 
       const audit = SCOUT_TOOL_DECLARATIONS.find((t) => t.name === 'audit_corridor_waypoints');
-      expect(audit?.inputSchema.properties?.day_number).toBeDefined();
+      expect((audit?.inputSchema.properties as Record<string, unknown>)?.day_number).toBeDefined();
     });
 
     it('cleanPlaceName strips parenthetical qualifiers and slash prefixes', () => {
@@ -245,7 +245,7 @@ describe('Route Scout tool declarations, hydration, and isolation', () => {
       expect(fuelSug.lat).toBe(35.195);
       expect(fuelSug.lng).toBe(-111.665);
 
-      // Scenic drive-by with is_route_anchor: true: highway coordinates preserved and kept coordinate-only (Finding 4)!
+      // Scenic drive-by with is_route_anchor: true: highway coordinates preserved and kept coordinate-only
       const scenicSug = parsed.suggestions[1];
       expect(scenicSug.name).toBe('Sedona Overlook');
       expect(scenicSug.google_place_id).toBeUndefined();
@@ -307,8 +307,6 @@ describe('Route Scout tool declarations, hydration, and isolation', () => {
       const mockAdapter: AiHarnessAdapter = {
         id: 'bedrock',
         name: 'Amazon Bedrock',
-        defaultScoutModelId: 'us.moonshotai.kimi-k3',
-        defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         isAvailable: vi.fn().mockResolvedValue(true),
         getAvailableModels: vi.fn().mockResolvedValue([]),
         getModelCatalog: vi.fn().mockReturnValue({
@@ -317,7 +315,6 @@ describe('Route Scout tool declarations, hydration, and isolation', () => {
           defaultCopywriterModelId: 'us.amazon.nova-2-lite-v1:0',
         }),
         validateModelId: vi.fn().mockResolvedValue('us.moonshotai.kimi-k3'),
-        resolveModelId: vi.fn().mockResolvedValue('us.moonshotai.kimi-k3'),
         decorateScoutPrompt: (p: string) => p,
         sanitizeResponse: (t: string) => t,
         generate: vi.fn(),
@@ -544,7 +541,7 @@ describe('Route Scout tool declarations, hydration, and isolation', () => {
       expect(parsed.suggestions[0].lat).toBe(34.8697);
       expect(parsed.suggestions[0].lng).toBe(-111.761);
     });
-    it('Finding 4: keeps scenic navigation anchors coordinate-only end-to-end from hydration through Google Maps URL generation while preserving positional Place ID alignment', () => {
+    it('keeps scenic navigation anchors coordinate-only end-to-end from hydration through Google Maps URL generation while preserving positional Place ID alignment', () => {
       const resolvedPlaces: ResolvedPlaceRecord[] = [
         {
           query: 'Oak Creek Vista',
