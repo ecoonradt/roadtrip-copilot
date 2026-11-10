@@ -37,7 +37,7 @@ import {
   type ParsedTrip,
   type ParsedDay,
 } from './engine/itineraryParser';
-import { createItinerarySessionId } from './utils/itinerarySession.js';
+import { createItinerarySessionId } from './utils/itinerarySession';
 
 function createPlaceholderTrip(): ParsedTrip {
   return {

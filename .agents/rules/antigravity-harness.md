@@ -11,7 +11,7 @@ Accepts an array of subagents under `Subagents`. Each entry must specify:
   * **Implementation Workers (Gate 1 Contract-First):** Every `flash` implementation worker prompt MUST include:
     1. Exact target file paths and literal TypeScript/Kotlin type signatures.
     2. Explicit concurrency/cleanup invariants (`AbortController` / revision counters on async UI state updates; `try/finally` + socket `close` cleanup for timers/streams).
-    3. Negative constraints: never hardcode `'us-east-1'` in regional AWS SDK clients (`new Client(region ? { region } : {})`); zero `any` types; validate user-supplied IDs against allowlists (`400 Bad Request`); preserve existing Playwright browser fixtures (`tests/browser/appHeader.browser.ts`).
+    3. Negative constraints: never hardcode `'us-east-1'` in regional AWS SDK clients (`new Client(region ? { region } : {})`); zero `any` types; validate user-supplied IDs against allowlists (`400 Bad Request`); preserve existing Playwright browser fixtures (`route-builder/e2e/appHeader.browser.ts`).
   * **Independent Reviewers (Gate 2B Optional Supplement):** When invoking a fresh-context, read-only reviewer, use a short neutral prompt (diff/base to inspect, pointers to the objective/spec and architectural rules, and a unique `tmp/` findings path for incremental output). Do not supply prior fix lists, earlier findings, or targeted checklists as the review prompt.
 * `Model` — Use `'flash'` for worker tasks (enforces project quota optimization). Use `'pro'` or `'inherit'` only when complex architectural reasoning is required.
 * `Workspace` — `'inherit'` (default) to share the workspace, or `'branch'` for isolated edits.

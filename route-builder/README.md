@@ -128,12 +128,11 @@ The application works with zero configuration by default in an AWS environment. 
 The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by Vitest unit/integration tests and Playwright browser acceptance tests:
 
 ```bash
-npm test              # Run all Vitest suites
+npm test              # All Vitest suites (src/ and server/)
+npm run test:frontend # src/ only
+npm run test:backend  # server/ only
 npm run test:browser  # Browser geometry, account interactions, and session recovery
-npm run test:backend  # Fastify auth, routing proxies, Nominatim headers, OSRM cache
-npm run test:engine   # Timeline cascade math, dwell ripples, Google Maps URL chunking
-npm run test:ai       # Prompt formatting, schema sanitization, batching, adapters, client queue, scout
-npm run test:schema   # Itinerary V2 JSON export and ADB device service
+npm run typecheck     # Typecheck both production code and test suites
 npm run build         # Production compile (client Vite bundle + backend tsc)
 ```
 
@@ -152,6 +151,6 @@ The Route Builder is architected as a decoupled client-server application:
 
 * **Frontend (`src/`):** React 18, TypeScript, Tailwind CSS, and Leaflet map rendering. Implements the deterministic timeline cascade engine, schedule ripple math, Route Scout chat drawer, and Google Maps URL chunking.
 * **Backend (`server/`):** Fastify REST server with zero-key LRU-cached routing proxies (OSRM, Nominatim), extensible AI harness adapters, Route Scout streaming SSE service, and ADB device synchronization.
-* **Testing (`tests/`):** Vitest unit/integration tests validate routing proxies, timelines, AI adapters, exports, and authentication. Playwright tests verify header geometry and account/session interactions in a real browser.
+* **Testing:** Vitest files sit next to the module they cover, under `src/` and `server/`. Cross-component React workflow tests live in `src/integration-tests/`, shared fixtures live in `src/test-helpers/` and `server/test-helpers/`, and Playwright tests in `e2e/` verify header geometry and account/session interactions in a real browser.
 
 For detailed developer specifications, directory layouts, and design contracts, see [AGENTS.md](AGENTS.md) and [docs/archive/route_builder_research_and_architecture.md](../docs/archive/route_builder_research_and_architecture.md).

@@ -112,7 +112,7 @@ sequenceDiagram
   * Writing unit tests against mock fixtures.
   * Performing mechanical refactors, type annotations, and schema formatting.
   * Executing repetitive file edits.
-* **Invocation Rule:** The orchestrator must provide worker subagents with **explicit, constrained tasks** (e.g., *"Implement the Google OIDC token verification helper in `server/services/authService.ts` matching interface X and write unit tests in `tests/authService.test.ts`"*). Avoid open-ended, ambiguous requests to worker subagents.
+* **Invocation Rule:** The orchestrator must provide worker subagents with **explicit, constrained tasks** (e.g., *"Implement the Google OIDC token verification helper in `server/services/authService.ts` matching interface X and write unit tests in `server/services/authService.test.ts`"*). Avoid open-ended, ambiguous requests to worker subagents. Vitest files are colocated with the module they test. Do not recreate `route-builder/tests/`.
 
 ### Two-Gate Quality Protocol (Preventing Review Churn)
 Earlier milestones suffered from multi-round PR review cycles when worker subagents were given underspecified prompts or when the orchestrator relied solely on happy-path test runs. The orchestrator is strictly accountable for first-pass PR quality through two mandatory gates:
@@ -129,7 +129,7 @@ Before dispatching any worker subagent, the Orchestrator must verify live extern
 4. **Security & Boundary Validation:**
    * Validate all caller-supplied identifiers (e.g., `modelId` against the configured catalog/allowlist, returning `400 Bad Request` for unknown values) at the route boundary before invoking cloud SDKs.
 5. **UI Geometry & Browser Test Compatibility:**
-   * Check how new UI controls and mount-time `fetch` calls interact with existing UI harnesses (`tests/ui/harness.tsx`) and Playwright browser tests (`tests/browser/appHeader.browser.ts`, which enforces single-row `56px` header height across `1024px–1920px` viewports and fails on any unmocked `/api/*` request).
+   * Check how new UI controls and mount-time `fetch` calls interact with existing UI harnesses (`route-builder/src/test-helpers/testHarness.tsx`) and Playwright browser tests (`route-builder/e2e/appHeader.browser.ts`, which enforces single-row `56px` header height across `1024px–1920px` viewports and fails on any unmocked `/api/*` request).
 6. **Zero Silent Fallbacks or Mock Degradation:**
    * Never instruct workers to build silent fallbacks to mock templates, client-side mocks, or local CLIs (`agy`). External API failures must fail loudly and transparently with explicit HTTP status codes (`502`, `503`, `400`). Building any fallback mechanism requires prior user consultation and explicit written approval.
 

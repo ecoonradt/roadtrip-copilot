@@ -50,4 +50,4 @@ The entire `CrossProcessFileLock` class and lockfile protocol are removed. `Loca
 * `route-builder/server/services/itineraryStorageService.ts`: Replaced `CrossProcessFileLock` with `KeyedMutex`, `KeyedMutexOptions`, and `LockTimeoutError`.
 * `route-builder/server/routes/itineraries.ts`: Instantiates `ItineraryStorageService` lazily at plugin registration time so environment variables loaded at startup (`S3_STORAGE_BUCKET`) are respected.
 * `route-builder/server/loadEnv.ts`: Side-effect module evaluated first in `server/index.ts` to ensure `.env` is loaded before application modules.
-* `route-builder/tests/backend/itineraries.test.ts`: Replaced file-lock tests with comprehensive unit tests for `KeyedMutex` (mutual exclusion, FIFO ordering, distinct key independence, error release, bounded timeout, and queue resilience).
+* `route-builder/server/routes/itineraries.test.ts`: Replaced file-lock tests with comprehensive unit tests for `KeyedMutex` (mutual exclusion, FIFO ordering, distinct key independence, error release, bounded timeout, and queue resilience).

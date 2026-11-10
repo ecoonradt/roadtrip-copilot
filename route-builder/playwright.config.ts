@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 
 export default defineConfig({
-  testDir: './tests/browser',
+  testDir: './e2e',
   testMatch: '**/*.browser.ts',
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

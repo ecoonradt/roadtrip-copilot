@@ -76,7 +76,7 @@ roadtrip-copilot/
 │   ├── .dockerignore          # Docker build exclusions
 │   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
 │   ├── README.md              # User-facing web studio documentation & setup
-│   ├── package.json           # Node scripts (dev, build, test, test:backend, test:engine, test:ai, test:schema)
+│   ├── package.json           # Node scripts (dev, build, test, test:frontend, test:backend, test:browser)
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
 │   ├── playwright.config.ts   # Fixture-backed Chromium header/account acceptance test configuration
 │   ├── server/                # Fastify TypeScript backend
@@ -84,18 +84,21 @@ roadtrip-copilot/
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
 │   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
 │   │   ├── hooks/             # Fastify preHandler hooks (authGuard.ts dual-mode OIDC + allowlist gate)
+│   │   ├── test-helpers/      # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
 │   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, aiRegistry, bedrockService, deviceService, itineraryStorageService, placeId, scoutService, scoutTools + scoutTools/ modules)
 │   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
+│   │   ├── test-helpers/      # Shared UI test fixtures and mock harnesses (testHarness.tsx)
+│   │   ├── integration-tests/ # Cross-component React workflow tests (mounted App state cascades)
 │   │   ├── components/        # AppHeader, AccountMenu, AuthGateScreen, DayTabBar, RouteSelectorModal, MapCanvas, TimelineSidebar, SearchBar, EditWaypointModal, ExportModal, RouteScoutDrawer, InlineEdit
 │   │   ├── engine/            # cascade.ts (math cascade), googleMapsUrl.ts (chunking), export.ts (V2 JSON), itineraryParser.ts (multi-day import), sampleTrip.ts (in-code sample route factory)
 │   │   ├── services/          # api.ts (HTTP client), aiQueue.ts (concurrency queue)
 │   │   ├── utils/             # itinerarySession.ts (stable trip session identity across save/rename)
 │   │   ├── constants/         # aiCopy.ts (provider-neutral AI-disabled UI copy)
 │   │   └── types/             # Frontend data models (auth, routing, ai, scout)
-│   └── tests/                 # Vitest suites (backend, engine, AI, schema/device, ui/) and Playwright header/account/session checks (browser/)
+│   └── e2e/                   # Playwright header/account/session checks (*.browser.ts). Vitest files live next to the modules they test.
 └── app/
     ├── build.gradle.kts       # App module dependencies & SDK config
     └── src/

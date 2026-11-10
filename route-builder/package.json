@@ -10,12 +10,13 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "tsc -p tsconfig.json --noEmit && vite build",
     "build:server": "tsc -p tsconfig.server.json",
+    "typecheck": "npm run typecheck:app && npm run typecheck:tests",
+    "typecheck:app": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.test.server.json --noEmit",
     "test": "vitest run",
+    "test:frontend": "vitest run src",
+    "test:backend": "vitest run server",
     "test:browser": "playwright test",
-    "test:backend": "vitest run tests/backend",
-    "test:engine": "vitest run tests/engine",
-    "test:ai": "vitest run tests/ai",
-    "test:schema": "vitest run tests/engine/export.test.ts tests/backend/device.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
