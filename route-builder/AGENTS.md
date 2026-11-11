@@ -67,92 +67,18 @@
 
 ---
 
-## 3. Directory Layout
+## 3. Subproject Architecture & Boundaries
 
-```
-route-builder/
-├── Dockerfile                  # Multi-stage Docker build with AWS Lambda Web Adapter streaming
-├── .dockerignore               # Docker build exclusions
-├── AGENTS.md                   # This handbook & subproject directory layout
-├── README.md                   # User-facing web studio documentation & setup
-├── index.html                  # HTML entrypoint
-├── package.json                # Project dependencies and test scripts
-├── tsconfig.json               # Frontend TypeScript configuration
-├── tsconfig.server.json        # Backend TypeScript configuration
-├── vite.config.ts              # Vite dev server and /api proxy configuration
-├── playwright.config.ts        # Chromium header/account acceptance tests against a fixture-backed frontend
-├── tailwind.config.js          # Dark automotive theme color palette
-├── server/
-│   ├── tsconfig.json           # Backend editor TypeScript configuration (extends tsconfig.test.server.json)
-│   ├── app.ts                  # Fastify application factory
-│   ├── index.ts                # Server entrypoint (:3001)
-│   ├── loadEnv.ts              # Node 20.12+ .env loader side-effect module
-│   ├── hooks/
-│   │   └── authGuard.ts        # Dual-mode OIDC cookie/Bearer JWT & allowlist preHandler hook
-│   ├── handlers/
-│   │   └── refreshBedrockPricing.ts # Weekly scheduled Lambda & CLI handler for Bedrock us-east-2 pricing catalog
-│   ├── test-helpers/           # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
-│   ├── routes/
-│   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
-│   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
-│   │   ├── ai.ts               # /api/copilot/generate, /api/copilot/day-title & /api/ai/status
-│   │   ├── device.ts           # /api/device (network-info, staging, download)
-│   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
-│   │   └── scout.ts            # /api/ai/scout (conversational assistant, SSE stream & quick prompts)
-│   ├── services/
-│   │   ├── authService.ts      # Google OIDC token verification, PKCE, HS256 JWT signing & SSM secret loader
-│   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
-│   │   ├── routeService.ts     # OSRM road graph query engine (literal semicolon paths)
-│   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
-│   │   ├── promptBuilder.ts    # Prompt contract generator
-│   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
-│   │   ├── bedrockService.ts   # Amazon Bedrock Converse / ConverseStream adapter & dynamic model discovery
-│   │   ├── bedrockPricing.ts   # AWS Price List API normalizer & token cost calculator for Bedrock us-east-2
-│   │   ├── bedrockPricingCache.ts # S3 & local pricing catalog cache with 5-min memory TTL & staleness checks
-│   │   ├── spendMath.ts        # Exact BigInt nanodollar arithmetic & validated global service list-rate constants
-│   │   ├── aiService.ts        # Provider-agnostic adapter registry, fail-loud generation paths & availability status
-│   │   ├── aiRegistry.ts       # Composition root registering the primary AI provider adapter
-│   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
-│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk/S3 storage
-│   │   ├── placeId.ts          # Google Place ID validator & anti-hallucination guard
-│   │   ├── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
-│   │   ├── scoutTools.ts       # 7-tool discovery & deterministic domain grounding facade & SSM secret lifecycle
-│   │   └── scoutTools/         # Modular grounding tool implementations (types, urlSafety, geo, scheduleSimulator, corridorTools)
-│   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout, spend)
-├── src/
-│   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator
-│   ├── test-helpers/           # Shared UI test fixtures and mock harnesses (testHarness.tsx)
-│   ├── integration-tests/      # Cross-component React workflow tests (mounted App state cascades)
-│   ├── components/
-│   │   ├── AppHeader.tsx       # Single-row responsive top bar with route title, metrics, and global actions
-│   │   ├── AccountMenu.tsx     # Avatar/initials trigger and keyboard-accessible account details/sign-out popover
-│   │   ├── AuthGateScreen.tsx  # Google OIDC sign-in & 403 private preview restriction screen
-│   │   ├── DayTabBar.tsx       # Multi-day leg switcher tabs
-│   │   ├── MapCanvas.tsx       # Leaflet map with custom waypoint markers & OSRM polyline
-│   │   ├── SearchBar.tsx       # Debounced address search via Nominatim proxy
-│   │   ├── TimelineSidebar.tsx # Timeline stops, streamlined quick editor, cascade telemetry, Google Maps links
-│   │   ├── RouteSelectorModal.tsx # Workspace route discovery and selection modal
-│   │   ├── EditWaypointModal.tsx # Full waypoint details, place entity precision & AI in-car alert modal
-│   │   ├── AiAlertModal.tsx    # Backward-compatible re-export of EditWaypointModal
-│   │   ├── ExportModal.tsx     # 1-click ADB push, Wi-Fi QR code, Google Maps leg QR codes
-│   │   └── RouteScoutDrawer.tsx # Right-side conversational AI assistant & suggestion cards
-│   ├── engine/
-│   │   ├── cascade.ts          # Timeline cascade & timezone border calculation
-│   │   ├── googleMapsUrl.ts    # Multi-stop URL generator with <=9 stop chunking
-│   │   ├── export.ts           # Itinerary V2 JSON exporter
-│   │   ├── itineraryParser.ts  # Multi-day and single-route JSON ingestion
-│   │   ├── sampleTrip.ts       # In-code relative (ad-hoc) sample route factory
-│   │   └── types.ts            # Mathematical & engine data contracts
-│   ├── services/
-│   │   ├── api.ts              # Frontend API client
-│   │   └── aiQueue.ts          # Client-side concurrency limiter
-│   ├── utils/
-│   │   └── itinerarySession.ts # Stable trip session identity across save/rename
-│   ├── constants/
-│   │   └── aiCopy.ts           # Provider-neutral copy for AI-disabled UI states
-│   └── types/                  # Frontend data models (auth, routing, ai, scout)
-└── e2e/                        # Playwright geometry and account interaction regressions (*.browser.ts)
-```
+The canonical, annotated repository directory layout is maintained in [`docs/reference/directory-layout.md`](../docs/reference/directory-layout.md) as the **single source of truth**.
+
+`route-builder/` is organized into three architectural boundaries:
+
+* **`server/` (Fastify TypeScript Backend on `:3001`):**
+  Houses the standalone HTTP API, dual-mode Google OIDC authentication pre-handler (`hooks/authGuard.ts`), OSRM routing proxies (`routes/routing.ts`), Route Scout conversational co-pilot (`routes/scout.ts` and `services/scoutService.ts`), Bedrock inference & token pricing engine (`services/bedrock*.ts`, `services/spendMath.ts`), and itinerary storage. Operates under `server/tsconfig.json` (editor LSP) and `tsconfig.server.json` (production build).
+* **`src/` (React Frontend on `:5173`):**
+  Houses the Leaflet map studio, timeline sidebar, itinerary parsing/cascade engine (`engine/`), and interactive UI components (`components/`). Vitest unit tests live file-adjacent to their modules (`src/**/*.test.tsx`), while cross-component workflow tests live in `src/integration-tests/`. Operates under `tsconfig.json`.
+* **`e2e/` (Playwright Acceptance Tests):**
+  Contains fixture-backed Chromium acceptance tests (`*.browser.ts`) validating layout geometry, responsive wrapping, and user interactions without requiring cloud credentials.
 
 > **Local dev workspace:** user-authored routes are written to the repo-root `itineraries/` directory
 > (git-ignored, `.gitkeep` only). `LocalFileSystemStorageService` resolves it as `../itineraries`

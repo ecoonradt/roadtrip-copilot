@@ -19,8 +19,7 @@
 ---
 
 ## 3. Directory Layout
-The full repository directory layout and component map is maintained in [`docs/reference/directory-layout.md`](docs/reference/directory-layout.md).
-Subproject directory details are maintained locally in their respective handbooks (e.g. [`route-builder/AGENTS.md`](route-builder/AGENTS.md)).
+The canonical repository directory layout and architectural component map is maintained in [`docs/reference/directory-layout.md`](docs/reference/directory-layout.md) as the single source of truth. Subproject handbooks (e.g. [`route-builder/AGENTS.md`](route-builder/AGENTS.md)) define domain principles and architectural boundaries.
 
 ---
 
