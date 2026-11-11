@@ -1075,5 +1075,86 @@ describe('Bedrock generate and stream', () => {
           }),
         ).rejects.toThrow('Upstream Bedrock 500 error');
       });
+
+      it('resolves cleanly with model output when onUsage throws on successful generate() and generateStreamWithTools() calls', async () => {
+        const mockClient = {
+          send: vi.fn(async (cmd: unknown) => {
+            if (cmd instanceof ConverseStreamCommand) {
+              return {
+                stream: createAsyncStream([
+                  { contentBlockDelta: { contentBlockIndex: 0, delta: { text: 'Stream success text' } } },
+                  { messageStop: { stopReason: 'end_turn' } },
+                  { metadata: { usage: { inputTokens: 50, outputTokens: 10 } } },
+                ]),
+              };
+            }
+            return {
+              stopReason: 'end_turn',
+              usage: { inputTokens: 40, outputTokens: 15 },
+              output: { message: { content: [{ text: 'Alert success text' }] } },
+            };
+          }),
+        } as unknown as BedrockRuntimeClient;
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: mockClient,
+          availableModels: seededModels,
+          pricingCatalog: makeTestPricingCatalog(),
+        });
+
+        // 1. Successful generate() resolves text despite throwing onUsage callback
+        const genResult = await adapter.generate('Write alert', {
+          onUsage: () => {
+            throw new Error('onUsage callback exploded in generate');
+          },
+        });
+        expect(genResult).toBe('Alert success text');
+
+        // 2. Successful generateStreamWithTools() resolves text despite throwing onUsage callback
+        const streamResult = await adapter.generateStreamWithTools(
+          'Scout prompt',
+          [],
+          async () => ({}),
+          () => {},
+          {
+            onUsage: () => {
+              throw new Error('onUsage callback exploded in generateStreamWithTools');
+            },
+          },
+        );
+        expect(streamResult.text).toBe('Stream success text');
+      });
+
+      it('rejects with "Request aborted" before client.send and skips onUsage when abortSignal aborts during pricingCache.getCatalog() in generate()', async () => {
+        const controller = new AbortController();
+        const sendFn = vi.fn();
+        const onUsageFn = vi.fn();
+
+        const mockClient = {
+          send: sendFn,
+        } as unknown as BedrockRuntimeClient;
+
+        const adapter = new AwsBedrockHarnessAdapter({
+          client: mockClient,
+          availableModels: seededModels,
+          pricingCache: {
+            getCatalog: async () => {
+              // Caller aborts while pricingCache.getCatalog is awaiting
+              controller.abort();
+              return { catalog: makeTestPricingCatalog(), isStale: false };
+            },
+          },
+        });
+
+        await expect(
+          adapter.generate('Write alert', {
+            abortSignal: controller.signal,
+            onUsage: onUsageFn,
+          }),
+        ).rejects.toThrow('Request aborted');
+
+        expect(sendFn).not.toHaveBeenCalled();
+        expect(onUsageFn).not.toHaveBeenCalled();
+      });
     });
 });

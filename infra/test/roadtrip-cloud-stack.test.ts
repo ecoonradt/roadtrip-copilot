@@ -528,12 +528,14 @@ describe('RoadtripCopilotCloudStack', () => {
     expect(outputKeys).not.toContain('GitHubActionsUserName');
   });
 
-  it('provisions RefreshBedrockPricingFunction as a standard Node.js 20 Lambda (512 MB, 60s timeout) with least-privilege IAM', () => {
+  it('provisions RefreshBedrockPricingFunction as a standard Node.js 24 Lambda (512 MB, 60s timeout) with least-privilege IAM', () => {
     const stack = createStack();
     const template = Template.fromStack(stack);
 
+    template.resourceCountIs('AWS::SNS::Subscription', 0);
+
     template.hasResourceProperties('AWS::Lambda::Function', {
-      Runtime: 'nodejs20.x',
+      Runtime: 'nodejs24.x',
       Handler: 'index.handler',
       MemorySize: 512,
       Timeout: 60,
@@ -591,6 +593,9 @@ describe('RoadtripCopilotCloudStack', () => {
   });
 
   it('schedules RefreshBedrockPricingFunction weekly via EventBridge Scheduler with LambdaInvoke grant and alerts on failure via CloudWatch + SNS', () => {
+    const unconfiguredTemplate = Template.fromStack(createStack());
+    unconfiguredTemplate.resourceCountIs('AWS::SNS::Subscription', 0);
+
     const stack = createStack({ alertEmail: 'alerts@example.com' });
     const template = Template.fromStack(stack);
 

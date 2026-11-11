@@ -75,7 +75,6 @@ export const INFERENCE_PROFILE_ALIASES: Readonly<Record<string, string>> = Objec
     'moonshotai.kimi-k3': 'us.moonshotai.kimi-k3',
     'amazon.nova-2-lite-v1:0': 'us.amazon.nova-2-lite-v1:0',
     'amazon.nova-pro-v1:0': 'us.amazon.nova-pro-v1:0',
-    'us.amazon.nova-lite-v1:0': 'amazon.nova-lite-v1:0',
     'openai.gpt-6-luna': 'us.openai.gpt-6-luna',
     'openai.gpt-6-sol': 'us.openai.gpt-6-sol',
     'openai.gpt-6.1-sol': 'us.openai.gpt-6.1-sol',
@@ -822,6 +821,10 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
       }
     }
 
+    if (abortSignal?.aborted) {
+      throw new Error('Request aborted');
+    }
+
     const command = new ConverseCommand({
       modelId,
       messages: [{ role: 'user', content: [{ text: prompt }] }],
@@ -871,29 +874,37 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
               rate
             )
           : 0;
-        await options.onUsage({
-          providerId: this.id,
-          modelId,
-          inputTokens,
-          outputTokens,
-          cacheReadInputTokens,
-          cacheWriteInputTokens,
-          costNanos,
-          ...(isStale ? { pricingStale: true } : {}),
-          usageComplete: true,
-        });
+        try {
+          await options.onUsage({
+            providerId: this.id,
+            modelId,
+            inputTokens,
+            outputTokens,
+            cacheReadInputTokens,
+            cacheWriteInputTokens,
+            costNanos,
+            ...(isStale ? { pricingStale: true } : {}),
+            usageComplete: true,
+          });
+        } catch {
+          // Do not allow an onUsage accounting callback error to fail a completed Bedrock invocation
+        }
       } else {
-        await options.onUsage({
-          providerId: this.id,
-          modelId,
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadInputTokens: 0,
-          cacheWriteInputTokens: 0,
-          costNanos: 0,
-          ...(isStale ? { pricingStale: true } : {}),
-          usageComplete: false,
-        });
+        try {
+          await options.onUsage({
+            providerId: this.id,
+            modelId,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            costNanos: 0,
+            ...(isStale ? { pricingStale: true } : {}),
+            usageComplete: false,
+          });
+        } catch {
+          // Do not allow an onUsage accounting callback error to fail a completed Bedrock invocation
+        }
       }
     }
 
@@ -1080,17 +1091,21 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
                     rate
                   )
                 : 0;
-              await options.onUsage({
-                providerId: this.id,
-                modelId: activeModelId,
-                inputTokens: iterInput,
-                outputTokens: iterOutput,
-                cacheReadInputTokens: iterCacheRead,
-                cacheWriteInputTokens: iterCacheWrite,
-                costNanos,
-                ...(isStale ? { pricingStale: true } : {}),
-                usageComplete: true,
-              });
+              try {
+                await options.onUsage({
+                  providerId: this.id,
+                  modelId: activeModelId,
+                  inputTokens: iterInput,
+                  outputTokens: iterOutput,
+                  cacheReadInputTokens: iterCacheRead,
+                  cacheWriteInputTokens: iterCacheWrite,
+                  costNanos,
+                  ...(isStale ? { pricingStale: true } : {}),
+                  usageComplete: true,
+                });
+              } catch {
+                // Do not allow an onUsage accounting callback error to fail a completed Bedrock stream iteration
+              }
             }
           }
         }
@@ -1118,17 +1133,21 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
 
       if (options?.onUsage && !usageEmittedForIteration) {
         usageEmittedForIteration = true;
-        await options.onUsage({
-          providerId: this.id,
-          modelId: activeModelId,
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadInputTokens: 0,
-          cacheWriteInputTokens: 0,
-          costNanos: 0,
-          ...(isStale ? { pricingStale: true } : {}),
-          usageComplete: false,
-        });
+        try {
+          await options.onUsage({
+            providerId: this.id,
+            modelId: activeModelId,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            costNanos: 0,
+            ...(isStale ? { pricingStale: true } : {}),
+            usageComplete: false,
+          });
+        } catch {
+          // Do not allow an onUsage accounting callback error to fail a completed Bedrock stream iteration
+        }
       }
 
       const fullVisibleTurnText = turnRawText

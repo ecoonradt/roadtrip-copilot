@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import {
   BedrockClient,
   ListFoundationModelsCommand,
@@ -10,6 +11,7 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import {
   fetchBedrockPricingCatalog,
   PricingUnavailableError,
+  PRICED_REGION,
   type BedrockPricingCatalog,
   type DiscoveredBedrockModel,
 } from '../services/bedrockPricing.js';
@@ -124,9 +126,12 @@ export async function discoverBedrockModelsForPricing(options?: {
   region?: string;
 }): Promise<DiscoveredBedrockModel[]> {
   const region =
-    options?.region ?? process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
+    options?.region ||
+    process.env.AWS_REGION ||
+    process.env.AWS_DEFAULT_REGION ||
+    PRICED_REGION;
   const bedrockClient =
-    options?.bedrockClient ?? new BedrockClient(region ? { region } : {});
+    options?.bedrockClient ?? new BedrockClient({ region });
 
   const [activeProfiles, foundationModels] = await Promise.all([
     listActiveSystemProfiles(bedrockClient),
@@ -262,6 +267,25 @@ export async function handler(
   return refreshBedrockPricing();
 }
 
+export function loadLocalEnvFileIfPresent(cwd = process.cwd()): void {
+  if (typeof process.loadEnvFile !== 'function') return;
+  const candidates =
+    path.basename(cwd) === 'route-builder'
+      ? [path.resolve(cwd, '.env')]
+      : [path.resolve(cwd, 'route-builder/.env'), path.resolve(cwd, '.env')];
+  for (const envPath of candidates) {
+    try {
+      process.loadEnvFile(envPath);
+      break;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'ENOENT') {
+        console.warn(`[refresh:pricing] Notice loading .env file (${envPath}):`, err);
+      }
+    }
+  }
+}
+
 const isDirectExecution = (() => {
   const entryArg = process.argv[1];
   if (!entryArg || process.env.AWS_LAMBDA_FUNCTION_NAME) {
@@ -271,6 +295,7 @@ const isDirectExecution = (() => {
 })();
 
 if (isDirectExecution) {
+  loadLocalEnvFileIfPresent();
   refreshBedrockPricing()
     .then((result) => {
       console.log(

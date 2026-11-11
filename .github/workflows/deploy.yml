@@ -64,4 +64,5 @@ jobs:
           ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET }}
           ALLOWED_HOSTS: ${{ vars.ALLOWED_HOSTS }}
           PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
         run: ./scripts/deploy_cloud.sh

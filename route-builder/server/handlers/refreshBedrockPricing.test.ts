@@ -2,9 +2,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BedrockClient } from '@aws-sdk/client-bedrock';
+import { BedrockClient } from '@aws-sdk/client-bedrock';
 import type { PricingClient } from '@aws-sdk/client-pricing';
-import type { BedrockPricingCatalog } from '../services/bedrockPricing.js';
+import {
+  PRICED_REGION,
+  type BedrockPricingCatalog,
+} from '../services/bedrockPricing.js';
 import {
   DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
   DEFAULT_BEDROCK_SCOUT_MODEL_ID,
@@ -12,6 +15,7 @@ import {
 import {
   discoverBedrockModelsForPricing,
   handler as refreshPricingLambdaHandler,
+  loadLocalEnvFileIfPresent,
   refreshBedrockPricing,
 } from './refreshBedrockPricing.js';
 import {
@@ -283,6 +287,58 @@ describe('Weekly Bedrock Pricing Refresh Handler & Model Discovery (refreshBedro
       else process.env.BEDROCK_SCOUT_MODEL_ID = origScout;
       if (origCopywriter === undefined) delete process.env.BEDROCK_COPYWRITER_MODEL_ID;
       else process.env.BEDROCK_COPYWRITER_MODEL_ID = origCopywriter;
+    }
+  });
+
+  it('defaults BedrockClient region to us-east-2 (PRICED_REGION) when AWS_REGION and AWS_DEFAULT_REGION are unset', async () => {
+    const origAwsRegion = process.env.AWS_REGION;
+    const origAwsDefaultRegion = process.env.AWS_DEFAULT_REGION;
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_DEFAULT_REGION;
+
+    let capturedRegion: string | undefined;
+    const sendSpy = vi.spyOn(BedrockClient.prototype, 'send').mockImplementation(async function (
+      this: BedrockClient,
+      cmd: unknown,
+    ) {
+      capturedRegion = await this.config.region();
+      const name = (cmd as { constructor?: { name?: string } })?.constructor?.name;
+      if (name === 'ListInferenceProfilesCommand') {
+        return { inferenceProfileSummaries: [] } as never;
+      }
+      return { modelSummaries: [] } as never;
+    });
+
+    try {
+      await discoverBedrockModelsForPricing();
+      expect(capturedRegion).toBe(PRICED_REGION);
+      expect(capturedRegion).toBe('us-east-2');
+    } finally {
+      sendSpy.mockRestore();
+      if (origAwsRegion !== undefined) process.env.AWS_REGION = origAwsRegion;
+      else delete process.env.AWS_REGION;
+      if (origAwsDefaultRegion !== undefined) process.env.AWS_DEFAULT_REGION = origAwsDefaultRegion;
+      else delete process.env.AWS_DEFAULT_REGION;
+    }
+  });
+
+  it('loads variables from a .env file via loadLocalEnvFileIfPresent and does not throw when no .env file exists', async () => {
+    // 1. Does not throw when no .env file exists in tempDir
+    expect(() => loadLocalEnvFileIfPresent(tempDir)).not.toThrow();
+
+    // 2. Loads variables from .env file when present in tempDir
+    const envKey = 'TEST_BEDROCK_REFRESH_VAR';
+    const envVal = 'test_value_12345';
+    delete process.env[envKey];
+
+    const envFilePath = path.join(tempDir, '.env');
+    await fs.writeFile(envFilePath, `${envKey}=${envVal}\n`, 'utf-8');
+
+    try {
+      loadLocalEnvFileIfPresent(tempDir);
+      expect(process.env[envKey]).toBe(envVal);
+    } finally {
+      delete process.env[envKey];
     }
   });
 });

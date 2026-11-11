@@ -207,7 +207,7 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
         depsLockFilePath: path.join(routeBuilderRoot, 'package-lock.json'),
         entry: path.join(routeBuilderRoot, 'server/handlers/refreshBedrockPricing.ts'),
         handler: 'handler',
-        runtime: lambda.Runtime.NODEJS_20_X,
+        runtime: lambda.Runtime.NODEJS_24_X,
         architecture: lambda.Architecture.X86_64,
         memorySize: 512,
         timeout: cdk.Duration.seconds(60),

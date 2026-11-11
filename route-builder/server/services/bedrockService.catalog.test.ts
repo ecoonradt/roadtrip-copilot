@@ -108,7 +108,7 @@ describe('Bedrock catalog, allowlist, and region', () => {
         expect(await adapter.validateModelId('mistral.mistral-large-3-675b-instruct')).toBe('mistral.mistral-large-3-675b-instruct');
         expect(await adapter.validateModelId('moonshotai.kimi-k2.5')).toBe('moonshotai.kimi-k2.5');
         expect(await adapter.validateModelId('amazon.nova-lite-v1:0')).toBe('amazon.nova-lite-v1:0');
-        expect(await adapter.validateModelId('us.amazon.nova-lite-v1:0')).toBe('amazon.nova-lite-v1:0');
+        await expect(adapter.validateModelId('us.amazon.nova-lite-v1:0')).rejects.toThrow(InvalidModelError);
       });
 
       it('rejects empty string, whitespace, and unknown model IDs with InvalidModelError (HTTP 400)', async () => {
