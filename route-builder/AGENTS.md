@@ -83,6 +83,7 @@ route-builder/
 ├── playwright.config.ts        # Chromium header/account acceptance tests against a fixture-backed frontend
 ├── tailwind.config.js          # Dark automotive theme color palette
 ├── server/
+│   ├── tsconfig.json           # Backend editor TypeScript configuration (extends tsconfig.test.server.json)
 │   ├── app.ts                  # Fastify application factory
 │   ├── index.ts                # Server entrypoint (:3001)
 │   ├── loadEnv.ts              # Node 20.12+ .env loader side-effect module

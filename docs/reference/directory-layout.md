@@ -80,6 +80,7 @@ roadtrip-copilot/
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
 │   ├── playwright.config.ts   # Fixture-backed Chromium header/account acceptance test configuration
 │   ├── server/                # Fastify TypeScript backend
+│   │   ├── tsconfig.json      # Backend editor TypeScript configuration (extends tsconfig.test.server.json)
 │   │   ├── app.ts             # Fastify app factory with CORS, authGuard hook, and routes
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
 │   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
