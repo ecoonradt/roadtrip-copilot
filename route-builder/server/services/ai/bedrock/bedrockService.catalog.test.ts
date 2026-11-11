@@ -14,9 +14,9 @@ import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
   AiService,
   type AiHarnessAdapter,
-} from './aiService.js';
-import { ScoutService } from './scoutService.js';
-import { MalformedAiResponseError } from './schemaParser.js';
+} from '../aiService.js';
+import { ScoutService } from '../../scoutService.js';
+import { MalformedAiResponseError } from '../schemaParser.js';
 import {
   ConverseCommand,
   ConverseStreamCommand,
@@ -32,7 +32,7 @@ import {
   sampleTripContext,
   sampleTools,
   createAsyncStream,
-} from '../test-helpers/bedrockFixtures.js';
+} from '../../../test-helpers/bedrockFixtures.js';
 import type { BedrockModelTokenRate } from './bedrockPricing.js';
 
 describe('Bedrock catalog, allowlist, and region', () => {

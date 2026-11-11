@@ -3,11 +3,11 @@ import {
   PRICED_REGION,
   type BedrockModelTokenRate,
   type BedrockPricingCatalog,
-} from '../services/bedrockPricing.js';
+} from '../services/ai/bedrock/bedrockPricing.js';
 import {
   DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
   DEFAULT_BEDROCK_SCOUT_MODEL_ID,
-} from '../services/bedrockService.js';
+} from '../services/ai/bedrock/bedrockService.js';
 import type {
   WaypointContext,
   ToolDeclaration,

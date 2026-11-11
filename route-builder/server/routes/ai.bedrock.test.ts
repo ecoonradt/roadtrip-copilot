@@ -9,14 +9,14 @@ import {
   sanitizeBedrockResponse,
   formatBedrockToolLabel,
   toFoundationModelId,
-} from '../services/bedrockService.js';
+} from '../services/ai/bedrock/bedrockService.js';
 import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
   AiService,
   type AiHarnessAdapter,
-} from '../services/aiService.js';
+} from '../services/ai/aiService.js';
 import { ScoutService } from '../services/scoutService.js';
-import { MalformedAiResponseError } from '../services/schemaParser.js';
+import { MalformedAiResponseError } from '../services/ai/schemaParser.js';
 import { createApp } from '../app.js';
 import {
   ConverseCommand,
@@ -33,7 +33,7 @@ import {
   sampleTools,
   createAsyncStream,
 } from '../test-helpers/bedrockFixtures.js';
-import { PricingUnavailableError } from '../services/bedrockPricing.js';
+import { PricingUnavailableError } from '../services/ai/bedrock/bedrockPricing.js';
 
 describe('Bedrock Fastify routes', () => {
     it('GET /api/ai/status returns available: true, engine: "bedrock", 18 models, and ADR-0010 defaults', async () => {

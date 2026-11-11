@@ -16,7 +16,7 @@ import {
 import {
   TEST_PRICING_REFRESHED_MS,
   makeTestPricingCatalog,
-} from '../test-helpers/bedrockFixtures.js';
+} from '../../../test-helpers/bedrockFixtures.js';
 
 describe('BedrockPricingCache (S3 & local persistence, memory TTL, staleness & reload retention)', () => {
   let tempDir = '';

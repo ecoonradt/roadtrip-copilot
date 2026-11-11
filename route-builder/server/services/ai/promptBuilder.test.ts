@@ -4,7 +4,7 @@ import {
   buildBatchWaypointPrompt,
   formatHighwayPronunciation,
 } from './promptBuilder.js';
-import type { WaypointContext } from '../types/ai.js';
+import type { WaypointContext } from '../../types/ai.js';
 
 describe('AI Co-Pilot Prompt Generator', () => {
   const sampleWaypoint: WaypointContext = {

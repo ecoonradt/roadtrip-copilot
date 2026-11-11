@@ -10,7 +10,7 @@ import {
   MalformedAiResponseError,
   extractJsonString,
 } from './schemaParser.js';
-import type { WaypointContext } from '../types/ai.js';
+import type { WaypointContext } from '../../types/ai.js';
 
 describe('AI Schema Parser & Sanitizer', () => {
   describe('Title Sanitization & Truncation', () => {

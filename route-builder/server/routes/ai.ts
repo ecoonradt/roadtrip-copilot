@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { AiService, InvalidModelError } from '../services/aiService.js';
-import { defaultAiService } from '../services/aiRegistry.js';
-import { MalformedAiResponseError } from '../services/schemaParser.js';
+import { AiService, InvalidModelError } from '../services/ai/aiService.js';
+import { defaultAiService } from '../services/ai/aiRegistry.js';
+import { MalformedAiResponseError } from '../services/ai/schemaParser.js';
 import type { WaypointContext, DayTitleContext } from '../types/ai.js';
 
 export interface AiPluginOptions {

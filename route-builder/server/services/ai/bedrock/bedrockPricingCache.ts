@@ -10,7 +10,7 @@ import {
   validateBedrockPricingCatalog,
   type BedrockPricingCatalog,
 } from './bedrockPricing.js';
-import { KeyedMutex } from './itineraryStorageService.js';
+import { KeyedMutex } from '../../itineraryStorageService.js';
 
 export const PRICING_CACHE_S3_KEY = 'pricing/bedrock-us-east-2.json';
 export const PRICING_CACHE_MEMORY_TTL_MS = 5 * 60 * 1000;

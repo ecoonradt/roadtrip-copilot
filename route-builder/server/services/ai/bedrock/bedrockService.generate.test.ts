@@ -14,11 +14,11 @@ import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
   AiService,
   type AiHarnessAdapter,
-} from './aiService.js';
-import { ScoutService } from './scoutService.js';
-import { MalformedAiResponseError } from './schemaParser.js';
-import type { ScoutStreamEvent } from '../types/scout.js';
-import { SCOUT_TOOL_DECLARATIONS } from './scoutTools.js';
+} from '../aiService.js';
+import { ScoutService } from '../../scoutService.js';
+import { MalformedAiResponseError } from '../schemaParser.js';
+import type { ScoutStreamEvent } from '../../../types/scout.js';
+import { SCOUT_TOOL_DECLARATIONS } from '../../scoutTools.js';
 import {
   ConverseCommand,
   ConverseStreamCommand,
@@ -34,9 +34,9 @@ import {
   sampleTripContext,
   sampleTools,
   createAsyncStream,
-} from '../test-helpers/bedrockFixtures.js';
+} from '../../../test-helpers/bedrockFixtures.js';
 import { calculateBedrockCallCostNanos } from './bedrockPricing.js';
-import type { AiUsageEvent } from '../types/spend.js';
+import type { AiUsageEvent } from '../../../types/spend.js';
 
 describe('Bedrock generate and stream', () => {
     describe('sanitizeBedrockResponse & Tool Formatting Helpers', () => {

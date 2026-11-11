@@ -9,9 +9,9 @@ import type {
   GenerateOptions,
   GenerateStreamWithToolsResult,
   AiStatusResult,
-} from '../types/ai.js';
-import type { ScoutStreamEvent } from '../types/scout.js';
-import type { AiUsageEvent } from '../types/spend.js';
+} from '../../types/ai.js';
+import type { ScoutStreamEvent } from '../../types/scout.js';
+import type { AiUsageEvent } from '../../types/spend.js';
 import {
   buildSingleWaypointPrompt,
   buildBatchWaypointPrompt,

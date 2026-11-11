@@ -14,8 +14,8 @@ import {
   PRICED_REGION,
   type BedrockPricingCatalog,
   type DiscoveredBedrockModel,
-} from '../services/bedrockPricing.js';
-import { BedrockPricingCache } from '../services/bedrockPricingCache.js';
+} from '../services/ai/bedrock/bedrockPricing.js';
+import { BedrockPricingCache } from '../services/ai/bedrock/bedrockPricingCache.js';
 
 const DEFAULT_SCOUT_MODEL_ID = 'us.moonshotai.kimi-k3';
 const DEFAULT_COPYWRITER_MODEL_ID = 'us.amazon.nova-2-lite-v1:0';

@@ -8,7 +8,7 @@ import {
   AiService,
   InvalidModelError,
   type AiHarnessAdapter,
-} from '../services/aiService.js';
+} from '../services/ai/aiService.js';
 import { ScoutService } from '../services/scoutService.js';
 import type { ScoutChatResponse, ScoutTripContext } from '../types/scout.js';
 

@@ -8,9 +8,9 @@ import {
   validateScoutPlaceId,
   isValidGooglePlaceId,
 } from './scoutService.js';
-import { AiService, type AiHarnessAdapter } from './aiService.js';
-import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from './bedrockService.js';
-import { MalformedAiResponseError } from './schemaParser.js';
+import { AiService, type AiHarnessAdapter } from './ai/aiService.js';
+import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from './ai/bedrock/bedrockService.js';
+import { MalformedAiResponseError } from './ai/schemaParser.js';
 import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { vi } from 'vitest';
 import { createApp } from '../app.js';

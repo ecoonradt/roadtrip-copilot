@@ -9,7 +9,7 @@ import {
   formatUsd,
   parseDecimalUsdStringToNanos,
   toSafeNumberNanos,
-} from './spendMath.js';
+} from '../../spendMath.js';
 
 export interface BedrockModelTokenRate {
   modelId: string;

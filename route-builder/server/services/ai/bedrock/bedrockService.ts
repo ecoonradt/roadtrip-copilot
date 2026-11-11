@@ -24,10 +24,10 @@ import type {
   ToolDeclaration,
   GenerateOptions,
   GenerateStreamWithToolsResult,
-} from '../types/ai.js';
-import type { ScoutStreamEvent } from '../types/scout.js';
-import type { AiHarnessAdapter } from './aiService.js';
-import { InvalidModelError } from './aiService.js';
+} from '../../../types/ai.js';
+import type { ScoutStreamEvent } from '../../../types/scout.js';
+import type { AiHarnessAdapter } from '../aiService.js';
+import { InvalidModelError } from '../aiService.js';
 import {
   calculateBedrockCallCostNanos,
   PricingUnavailableError,
@@ -38,7 +38,7 @@ import {
   BedrockPricingCache,
   type BedrockPricingProvider,
 } from './bedrockPricingCache.js';
-import { MalformedAiResponseError } from './schemaParser.js';
+import { MalformedAiResponseError } from '../schemaParser.js';
 
 export { InvalidModelError, PricingUnavailableError };
 
