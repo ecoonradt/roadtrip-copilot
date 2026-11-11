@@ -47,7 +47,7 @@ Chosen Option: **Option B**.
 * Enterprise-gated models in the catalog will return a clear, actionable Bedrock error message if selected in the UI before the account owner enables them in the AWS Bedrock Console. The default models are catalog-listed, and account access is verified dynamically by `/api/ai/status`; failures are surfaced rather than silently substituted.
 
 ## 5. Implementation Notes & Code Touchpoints
-* `route-builder/server/services/bedrockService.ts`:
+* `route-builder/server/services/ai/bedrock/bedrockService.ts`:
   * Default `BEDROCK_SCOUT_MODEL_ID` = `'us.moonshotai.kimi-k3'`; default `BEDROCK_COPYWRITER_MODEL_ID` = `'us.amazon.nova-2-lite-v1:0'`.
   * Normalize known bare inference-profile model IDs to their `us.` prefix and validate requested `modelId` values against the curated catalog + configured environment model IDs (`400 Bad Request` on unknown model IDs).
   * Set appropriate `maxTokens` (`4096` for copywriting/text and Route Scout multi-turn tool streaming). Amazon Nova models enforce an upper limit of 5,000 output tokens (`maxTokens <= 5000`), so `4096` ensures maximum headroom across both Moonshot and Nova models without tripping validation caps.

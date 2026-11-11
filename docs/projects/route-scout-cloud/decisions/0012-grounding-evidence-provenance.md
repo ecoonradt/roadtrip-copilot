@@ -28,6 +28,6 @@ Positive: prevents self-confirming wrong-branch matches without a new API or inf
 
 ## 5. Implementation Notes & Code Touchpoints
 
-* `route-builder/server/services/scoutTools/geo.ts`: returned-field-only qualifier evidence, including duplicate groups.
-* `route-builder/server/services/scoutService.placeMatching.test.ts`: query-echo rejection and positive authoritative-evidence regressions.
+* `route-builder/server/services/scout/tools/geo.ts`: returned-field-only qualifier evidence, including duplicate groups.
+* `route-builder/server/services/scout/scoutService.placeMatching.test.ts`: query-echo rejection and positive authoritative-evidence regressions.
 * This does not authorize mock results, fallback routing, new tool schemas, or changes to deployment/Region policy. Other transport, cancellation, and timezone bug fixes stay recorded in WP-04.

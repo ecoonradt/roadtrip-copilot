@@ -16,7 +16,7 @@ Before opening the application to multiple users in Phase 2 (Milestone 5: Stripe
 
 Observing real per-user unit costs during single-user usage provides concrete empirical data to calibrate Phase 2 user pricing without promotional credits or free-tier allowances masking true marginal costs.
 
-At the same time, the application's AI layer is built around the provider-neutral `AiHarnessAdapter` seam (`route-builder/server/services/aiService.ts`). While `AwsBedrockHarnessAdapter` is the only adapter shipped today, future adapters may integrate other AI backends that report usage and pricing through entirely different mechanisms (such as returning dollar cost directly in response headers/payloads, using provider pricing endpoints, or applying flat per-call rates).
+At the same time, the application's AI layer is built around the provider-neutral `AiHarnessAdapter` seam (`route-builder/server/services/ai/aiService.ts`). While `AwsBedrockHarnessAdapter` is the only adapter shipped today, future adapters may integrate other AI backends that report usage and pricing through entirely different mechanisms (such as returning dollar cost directly in response headers/payloads, using provider pricing endpoints, or applying flat per-call rates).
 
 ## 2. Decision Drivers
 
@@ -43,7 +43,7 @@ Chosen Option: **Option C**.
 
 2. **Bedrock-Specific Pricing Inside `AwsBedrockHarnessAdapter`:**
    * `AwsBedrockHarnessAdapter` resolves token prices from a cached Bedrock pricing JSON catalog (`s3://<AppDataBucket>/pricing/bedrock-us-east-2.json` in cloud mode; `itineraries/.spend/pricing/bedrock-us-east-2.json` in local dev).
-   * In AWS (`infra/`), an EventBridge Scheduler rule triggers a lightweight on-demand Lambda function weekly in `us-east-2` to fetch current Bedrock pricing for discovered models and update `pricing/bedrock-us-east-2.json` in S3, monitored by a CloudWatch Alarm + SNS notification topic on function errors. In local development, `npm run refresh:pricing` runs the same handler to populate `itineraries/.spend/pricing/bedrock-us-east-2.json`. The web application never queries the AWS Price List API on demand during user requests.
+   * In AWS (`infra/`), an EventBridge Scheduler rule triggers a lightweight on-demand Lambda function weekly in `us-east-2` to fetch current Bedrock pricing for discovered models and update `pricing/bedrock-us-east-2.json` in S3, monitored by a CloudWatch Alarm + SNS notification topic on function errors (subscribing optional `ALERT_EMAIL` when configured, which requires clicking the SNS email confirmation link; if `ALERT_EMAIL` is unset, the topic has no subscribers and sends no notifications). In local development, `npm run refresh:pricing` runs the same handler to populate `itineraries/.spend/pricing/bedrock-us-east-2.json`. The web application never queries the AWS Price List API on demand during user requests.
    * `AwsBedrockHarnessAdapter.getAvailableModels()` and `validateModelId()` filter out any discovered model that lacks resolved pricing in the catalog so unpriced models cannot be selected or invoked.
    * If a scheduled refresh fails when a previous valid catalog exists, `AwsBedrockHarnessAdapter` continues using the last valid cached rates and sets `pricingStale: true` on emitted `AiUsageEvent` records (and logs a warning).
 

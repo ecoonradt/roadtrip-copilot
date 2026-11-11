@@ -104,7 +104,7 @@ This document is the **Tier 2 Phase Roadmap** for the **Route Scout Cloud Archit
 ### Milestone 4 (M4): Discovery + Deterministic Domain Grounding Tool Library
 * **Objective:** Implement the 7 backend Fastify tools (2 web discovery + 5 deterministic road-trip domain grounding tools) executed in parallel via `Promise.all`, plus server-side Place ID/address post-hydration and `delete_waypoint` suggestion support.
 * **Definition of Done (DoD):**
-  1. Discovery tools (`search_web`, `read_url_content`) and Domain Grounding tools (`resolve_and_standardize_place` via Google Places API New with strict `X-Goog-FieldMask`, `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, `audit_corridor_waypoints`) implemented in `server/services/scoutTools.ts`.
+  1. Discovery tools (`search_web`, `read_url_content`) and Domain Grounding tools (`resolve_and_standardize_place` via Google Places API New with strict `X-Goog-FieldMask`, `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, `audit_corridor_waypoints`) implemented in `server/services/scout/scoutTools.ts` (and `server/services/scout/tools/`).
   2. Parallel tool execution (`Promise.all`) streams real-time SSE `activity` events to the client as each tool starts and finishes.
   3. Server-side suggestion hydration deterministically injects verified `google_place_id` (`ChIJ...`), `place_name`, `address`, and `lat`/`lng` cached from `resolve_and_standardize_place` into final `json:suggestions` cards.
   4. `ScoutSuggestion` schema and React UI support `"delete_waypoint"` alongside `"add_waypoint"` and `"update_waypoint"`.

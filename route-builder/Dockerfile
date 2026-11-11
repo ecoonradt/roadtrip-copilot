@@ -1,5 +1,5 @@
 # Stage 1: Build Fastify TypeScript server
-FROM public.ecr.aws/docker/library/node:20-slim AS builder
+FROM public.ecr.aws/docker/library/node:24-slim AS builder
 
 WORKDIR /app/route-builder
 
@@ -11,7 +11,7 @@ COPY server ./server
 RUN npm run build:server && npm prune --omit=dev
 
 # Stage 2: Production runtime with AWS Lambda Web Adapter
-FROM public.ecr.aws/docker/library/node:20-slim
+FROM public.ecr.aws/docker/library/node:24-slim
 
 COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
 

@@ -41,11 +41,11 @@ Fastify implements `AwsBedrockHarnessAdapter` implementing `AiHarnessAdapter` vi
 
 ## 5. Implementation Notes & Code Touchpoints
 * Blueprint: [route_scout_cloud_architecture.md](../route_scout_cloud_architecture.md#3-the-single-bill-ai-solution-amazon-bedrock--configurable-model-selection)
-* Adapter & tool services to build: `route-builder/server/services/bedrockService.ts`, `route-builder/server/services/scoutTools.ts`
+* Adapter & tool services to build: `route-builder/server/services/ai/bedrock/bedrockService.ts`, `route-builder/server/services/scout/scoutTools.ts`
 * Existing files to extend:
-  * `route-builder/server/services/aiService.ts` & `route-builder/server/types/ai.ts`: `AiHarnessAdapter` is the provider contract (see §6); `AiEngineId` is a string provider id resolved through the adapter registry, with runtime model selection via `GET /api/ai/status` and the optional `generateStreamWithTools()` hook.
-  * `route-builder/server/services/aiRegistry.ts`: Composition root that registers `AwsBedrockHarnessAdapter` as the primary provider.
-  * `route-builder/server/services/scoutService.ts`: Route streaming tool-call execution through the resolved adapter's `generateStreamWithTools`, with no direct concrete-adapter import and no local CLI path.
+  * `route-builder/server/services/ai/aiService.ts` & `route-builder/server/types/ai.ts`: `AiHarnessAdapter` is the provider contract (see §6); `AiEngineId` is a string provider id resolved through the adapter registry, with runtime model selection via `GET /api/ai/status` and the optional `generateStreamWithTools()` hook.
+  * `route-builder/server/services/ai/aiRegistry.ts`: Composition root that registers `AwsBedrockHarnessAdapter` as the primary provider.
+  * `route-builder/server/services/scout/scoutService.ts`: Route streaming tool-call execution through the resolved adapter's `generateStreamWithTools`, with no direct concrete-adapter import and no local CLI path.
 * Environment variables: `BEDROCK_SCOUT_MODEL_ID`, `BEDROCK_COPYWRITER_MODEL_ID`, `AWS_REGION`
 
 ---

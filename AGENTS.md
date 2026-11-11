@@ -29,7 +29,7 @@ The canonical repository directory layout and architectural component map is mai
 * **Java:** OpenJDK 17 (`java -version`, `javac -version`).
 * **Android SDK:** Installed at `$ANDROID_HOME` or OS default (Linux: `$HOME/Android/Sdk`, macOS: `~/Library/Android/sdk`, Windows: `%LOCALAPPDATA%\Android\Sdk`).
 * **ADB:** Available in system PATH (`adb devices`).
-* **Node.js & npm:** Node v18+ (Node 20+ LTS recommended) and npm v9+.
+* **Node.js & npm:** Node 24 LTS (`>=24`, standardized across CI, Docker, and AWS Lambda) and npm v10+.
 * **AWS CLI / Credentials:** Configured AWS credentials with Amazon Bedrock access in `us-east-2` (production uses the Lambda execution role; local development uses the ambient AWS credential chain).
 
 ### Android Native Commands
@@ -67,6 +67,10 @@ The canonical repository directory layout and architectural component map is mai
   ```bash
   cd route-builder && npm run build
   ```
+* **Run ESLint Architectural Boundary Checks:**
+  ```bash
+  cd route-builder && npm run lint
+  ```
 * **Run All Vitest Tests:**
   ```bash
   cd route-builder && npm test
@@ -87,7 +91,7 @@ The canonical repository directory layout and architectural component map is mai
   ```bash
   ./scripts/ci_check.sh
   ```
-  Runs the full verification pipeline across all subprojects: `route-builder` tests & production build, `infra` CDK unit tests & CloudFormation synthesis, and Android unit tests (`./gradlew testDebugUnitTest`).
+  Runs the full verification pipeline across all subprojects: `route-builder` ESLint boundary checks, Vitest suites, test typechecks & production build, `infra` CDK unit tests & CloudFormation synthesis, and Android unit tests (`./gradlew testDebugUnitTest`).
 * **CDK Infrastructure Testing & CloudFormation Synthesis:**
   ```bash
   cd infra && npm test && npx cdk synth
@@ -97,7 +101,7 @@ The canonical repository directory layout and architectural component map is mai
   ```bash
   ./scripts/deploy_cloud.sh
   ```
-  Deploys the full serverless stack to the project's assigned AWS Region: builds the web studio, runs `cdk deploy`, syncs the S3 static hosting bucket, invalidates CloudFront cache, and verifies deployment via `/api/health` live HTTP smoke check.
+  Deploys the full serverless stack to the project's assigned AWS Region: builds the web studio, runs `cdk deploy`, syncs the S3 static hosting bucket, invalidates CloudFront cache, and verifies deployment via `/api/health` live HTTP smoke check. Set optional `ALERT_EMAIL` (or GitHub Actions variable `vars.ALERT_EMAIL`) to subscribe an email address to `PricingRefreshAlertTopic` (requires clicking the SNS confirmation email; if unset, the CloudWatch failure alarm still triggers, but no email notifications are sent).
 
 ---
 

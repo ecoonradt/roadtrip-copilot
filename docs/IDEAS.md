@@ -11,7 +11,7 @@ This document captures architectural concepts, feature proposals, and community 
 * **Objective:** Decouple CI verification so each subsystem runs its test suite only when PRs or commits touch relevant paths:
   * **Web Studio & Cloud Infrastructure Job:**
     * Trigger paths: `route-builder/**`, `infra/**`, `scripts/ci_check.sh`, `scripts/deploy_cloud.sh`.
-    * Steps: Node 20 setup, `npm test` across Fastify and React, `npm run build`, CDK unit assertions (`vitest run`), and `cdk synth`.
+    * Steps: Node 24 setup, `npm run lint`, `npm test` across Fastify and React, `npm run build`, CDK unit assertions (`vitest run`), and `cdk synth`.
   * **Android Native Co-Pilot Job:**
     * Trigger paths: `app/**`, `gradle/**`, `build.gradle.kts`, `settings.gradle.kts`.
     * Steps: JDK 17 setup, Android SDK setup (e.g. `android-actions/setup-android@v3` with command-line tools and platform API 34), Gradle dependency caching, and `./gradlew testDebugUnitTest`.

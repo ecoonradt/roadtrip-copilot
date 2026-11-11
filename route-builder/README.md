@@ -21,8 +21,8 @@ A full-stack, desktop-first itinerary planning and authoring studio for **Roadtr
 
 ### Prerequisites
 
-* **Node.js:** v18.0.0 or newer (v20+ LTS recommended)
-* **npm:** v9.0.0 or newer
+* **Node.js:** v24 LTS (`>=24`, standardized across CI, Docker, and AWS Lambda)
+* **npm:** v10.0.0 or newer
   * **Linux:** `sudo apt install -y nodejs npm` (or via NodeSource)
   * **macOS:** `brew install node`
   * **Windows:** `winget install OpenJS.NodeJS.LTS`
@@ -128,6 +128,7 @@ The application works with zero configuration by default in an AWS environment. 
 The codebase enforces strict TypeScript (`strict: true`, **zero `any` types**) and is covered by Vitest unit/integration tests and Playwright browser acceptance tests:
 
 ```bash
+npm run lint          # ESLint architectural boundary checks
 npm test              # All Vitest suites (src/ and server/)
 npm run test:frontend # src/ only
 npm run test:backend  # server/ only
@@ -136,12 +137,12 @@ npm run typecheck     # Typecheck both production code and test suites
 npm run build         # Production compile (client Vite bundle + backend tsc)
 ```
 
-Browser tests require Node.js 20+ and a one-time `npx playwright install chromium` (on Linux CI, use `npx playwright install --with-deps chromium`). They start their own frontend on `127.0.0.1:5174`, use local API fixtures, and need no running backend, AWS credentials, or Google sign-in. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use an existing compatible Chromium executable instead. These tests run separately from `npm test` and the unified CI script.
+Browser tests require Node.js 24+ and a one-time `npx playwright install chromium` (on Linux CI, use `npx playwright install --with-deps chromium`). They start their own frontend on `127.0.0.1:5174`, use local API fixtures, and need no running backend, AWS credentials, or Google sign-in. Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use an existing compatible Chromium executable instead. These tests run separately from `npm test` and the unified CI script.
 
 ### Full-Stack CI Verification & Cloud Deployment
 From the repository root, run the unified verification pipeline and cloud deployment scripts:
-* **Full Verification Pipeline (`../scripts/ci_check.sh`):** Runs Route Builder tests and build, `infra/` AWS CDK unit assertions and CloudFormation synthesis, and Android unit tests.
-* **AWS Serverless Deployment (`../scripts/deploy_cloud.sh`):** Deploys the application to AWS using AWS CDK (`infra/`), packaging the Fastify backend via `Dockerfile` with AWS Lambda Web Adapter (LWA) response streaming, hosting the static React frontend on S3 behind CloudFront, and executing a live `/api/health` smoke check.
+* **Full Verification Pipeline (`../scripts/ci_check.sh`):** Runs Route Builder ESLint architectural boundary checks, Vitest suites, test typechecks, and production build, `infra/` AWS CDK unit assertions and CloudFormation synthesis, and Android unit tests.
+* **AWS Serverless Deployment (`../scripts/deploy_cloud.sh`):** Deploys the application to AWS using AWS CDK (`infra/`), packaging the Fastify backend via `Dockerfile` with AWS Lambda Web Adapter (LWA) response streaming and the weekly Bedrock pricing refresh Lambda (`RefreshBedrockPricingFunction`), hosting the static React frontend on S3 behind CloudFront, and executing a live `/api/health` smoke check. Set optional `ALERT_EMAIL` (or GitHub Actions `vars.ALERT_EMAIL`) to subscribe an address to `PricingRefreshAlertTopic` (requires clicking the SNS confirmation email; if unset, `PricingRefreshFailureAlarm` has no subscribers and sends no notifications).
 
 ---
 

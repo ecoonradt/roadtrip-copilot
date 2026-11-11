@@ -62,7 +62,7 @@ roadtrip-copilot/
 │   ├── bin/
 │   │   └── infra.ts           # CDK app entrypoint & stack instantiation (selected Region)
 │   ├── lib/
-│   │   └── roadtrip-cloud-stack.ts # CloudFront, S3, Fastify Lambda (LWA streaming) & OIDC stack
+│   │   └── roadtrip-cloud-stack.ts # CloudFront, S3, Fastify Lambda (LWA streaming), weekly Bedrock pricing refresh Lambda + CloudWatch/SNS alarm, & OIDC stack
 │   ├── test/
 │   │   └── roadtrip-cloud-stack.test.ts # Vitest CDK infrastructure assertions
 │   ├── cdk.json               # AWS CDK execution configuration
@@ -94,7 +94,7 @@ roadtrip-copilot/
 │   │   │   │   └── bedrock/   # Amazon Bedrock provider implementation (bedrockService, bedrockPricing, bedrockPricingCache)
 │   │   │   └── scout/         # Route Scout conversational co-pilot (scoutService, placeId, scoutTools)
 │   │   │       └── tools/     # Grounding & web discovery tool modules (corridorTools, geo, scheduleSimulator, urlSafety, types)
-│   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout, spend — 0 any types)
+│   │   └── types/             # Strict TypeScript interfaces (index, auth, routing, ai, scout, spend — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
 │   │   ├── test-helpers/      # Shared UI test fixtures and mock harnesses (testHarness.tsx)

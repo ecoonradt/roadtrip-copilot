@@ -28,7 +28,7 @@
 * AI generation adheres to the `AiHarnessAdapter` provider contract (`server/services/ai/aiService.ts`). Adapters model **providers that expose multiple models at different price/performance points**, never a single CLI or a single model ([ADR-0001 §6](../docs/projects/route-scout-cloud/decisions/0001-amazon-bedrock-single-bill-ai.md#6-amendment-2026-10-23-no-offline-copy-engine-provider-only-adapter-seam)).
   * Required members: `id`, `name`, `isAvailable`, `generate`, `validateModelId`, `getAvailableModels`, `getModelCatalog`, `decorateScoutPrompt`, `sanitizeResponse`. Only `generateStreamWithTools` is optional.
   * **Folder Organization:**
-    * `server/services/ai/`: Contains provider-agnostic abstractions and contracts (`aiService.ts`, `promptBuilder.ts`, `schemaParser.ts`, `index.ts`), plus the composition root (`aiRegistry.ts`).
+    * `server/services/ai/`: Contains provider-agnostic abstractions and contracts (`aiService.ts`, `promptBuilder.ts`, `schemaParser.ts`), plus the composition root (`aiRegistry.ts`).
     * `server/services/ai/<provider>/`: Dedicated directory for each provider implementation (e.g. `server/services/ai/bedrock/` containing `bedrockService.ts`, `bedrockPricing.ts`, `bedrockPricingCache.ts`, and their test suites).
   * **Guidance for Adding New AI Providers:**
     1. Create a dedicated folder `server/services/ai/<provider>/`.
