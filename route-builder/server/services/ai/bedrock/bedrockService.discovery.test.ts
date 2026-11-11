@@ -15,7 +15,7 @@ import {
   AiService,
   type AiHarnessAdapter,
 } from '../aiService.js';
-import { ScoutService } from '../../scoutService.js';
+import { ScoutService } from '../../scout/scoutService.js';
 import { MalformedAiResponseError } from '../schemaParser.js';
 import { createApp } from '../../../app.js';
 import {

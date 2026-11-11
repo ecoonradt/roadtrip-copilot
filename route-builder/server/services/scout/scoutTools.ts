@@ -1,5 +1,5 @@
 import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
-import { defaultRouteService } from './routeService.js';
+import { defaultRouteService } from '../routeService.js';
 import { isValidGooglePlaceId } from './placeId.js';
 
 import {
@@ -15,21 +15,21 @@ import {
   type ScoutToolExecutionContext,
   type ResolvedPlaceRecord,
   type SafeUrlValidationResult,
-} from './scoutTools/types.js';
+} from './tools/types.js';
 
 import {
   requestPinnedUrl,
   readUrlContentTool,
-} from './scoutTools/urlSafety.js';
+} from './tools/urlSafety.js';
 
 import {
   cleanPlaceName,
-} from './scoutTools/geo.js';
+} from './tools/geo.js';
 
 import {
   simulateScheduleCascadeTool,
   type ScheduleCascadeResult,
-} from './scoutTools/scheduleSimulator.js';
+} from './tools/scheduleSimulator.js';
 
 import {
   snapToHighwayCorridorTool,
@@ -38,14 +38,14 @@ import {
   type SnapToHighwayCorridorResult,
   type DetourImpactResult,
   type AuditCorridorWaypointsResult,
-} from './scoutTools/corridorTools.js';
+} from './tools/corridorTools.js';
 
 // Re-export all symbols from submodules for 100% backward compatibility
-export * from './scoutTools/types.js';
-export * from './scoutTools/urlSafety.js';
-export * from './scoutTools/geo.js';
-export * from './scoutTools/scheduleSimulator.js';
-export * from './scoutTools/corridorTools.js';
+export * from './tools/types.js';
+export * from './tools/urlSafety.js';
+export * from './tools/geo.js';
+export * from './tools/scheduleSimulator.js';
+export * from './tools/corridorTools.js';
 
 function raceWithAbort<T>(promise: Promise<T>, abortSignal?: AbortSignal): Promise<T> {
   if (!abortSignal) return promise;

@@ -15,10 +15,10 @@ import {
   AiService,
   type AiHarnessAdapter,
 } from '../aiService.js';
-import { ScoutService } from '../../scoutService.js';
+import { ScoutService } from '../../scout/scoutService.js';
 import { MalformedAiResponseError } from '../schemaParser.js';
 import type { ScoutStreamEvent } from '../../../types/scout.js';
-import { SCOUT_TOOL_DECLARATIONS } from '../../scoutTools.js';
+import { SCOUT_TOOL_DECLARATIONS } from '../../scout/scoutTools.js';
 import {
   ConverseCommand,
   ConverseStreamCommand,

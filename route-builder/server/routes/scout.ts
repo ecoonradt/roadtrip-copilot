@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { ScoutService } from '../services/scoutService.js';
+import { ScoutService } from '../services/scout/scoutService.js';
 import { InvalidModelError, UnknownAiProviderError } from '../services/ai/aiService.js';
 import { MalformedAiResponseError } from '../services/ai/schemaParser.js';
 import type { ScoutChatRequest, ScoutScope } from '../types/scout.js';

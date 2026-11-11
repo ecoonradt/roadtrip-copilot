@@ -6,12 +6,12 @@ import type {
   ScoutStreamEvent,
   ScoutActivity,
   ScoutWaypointSummary,
-} from '../types/scout.js';
-import type { ToolDeclaration } from '../types/ai.js';
-import type { GenerationOptions, AiHarnessAdapter } from './ai/aiService.js';
-import { AiService } from './ai/aiService.js';
-import { createDefaultAiService } from './ai/aiRegistry.js';
-import { MalformedAiResponseError } from './ai/schemaParser.js';
+} from '../../types/scout.js';
+import type { ToolDeclaration } from '../../types/ai.js';
+import type { GenerationOptions, AiHarnessAdapter } from '../ai/aiService.js';
+import { AiService } from '../ai/aiService.js';
+import { createDefaultAiService } from '../ai/aiRegistry.js';
+import { MalformedAiResponseError } from '../ai/schemaParser.js';
 import { isValidGooglePlaceId, validateScoutPlaceId } from './placeId.js';
 import {
   SCOUT_TOOL_DECLARATIONS,

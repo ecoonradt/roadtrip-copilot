@@ -1,8 +1,8 @@
 import type dns from 'node:dns';
 import type { SSMClient } from '@aws-sdk/client-ssm';
-import type { RouteService } from '../routeService.js';
-import type { ToolDeclaration } from '../../types/ai.js';
-import type { ScoutScope, ScoutTripContext, ScoutWaypointSummary } from '../../types/scout.js';
+import type { RouteService } from '../../routeService.js';
+import type { ToolDeclaration } from '../../../types/ai.js';
+import type { ScoutScope, ScoutTripContext, ScoutWaypointSummary } from '../../../types/scout.js';
 
 export type ScoutToolDeclaration = ToolDeclaration;
 export type { ScoutScope, ScoutTripContext, ScoutWaypointSummary };

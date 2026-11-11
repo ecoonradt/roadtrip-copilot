@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   simulateScheduleCascadeTool,
   type ScheduleCascadeResult,
-} from './scoutTools/scheduleSimulator.js';
-import type { RouteService } from './routeService.js';
-import type { ScoutToolExecutionContext, ScoutTripContext } from './scoutTools/types.js';
-import type { RouteResponse } from '../types/index.js';
+} from './tools/scheduleSimulator.js';
+import type { RouteService } from '../routeService.js';
+import type { ScoutToolExecutionContext, ScoutTripContext } from './tools/types.js';
+import type { RouteResponse } from '../../types/index.js';
 
 const TRIP_DATE = '2026-07-01'; // Phoenix is UTC-7 (MST), Utah is UTC-6 (MDT)
 const ST_GEORGE_LAT = 37.1;

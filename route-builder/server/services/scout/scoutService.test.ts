@@ -8,14 +8,14 @@ import {
   validateScoutPlaceId,
   isValidGooglePlaceId,
 } from './scoutService.js';
-import { AiService, type AiHarnessAdapter } from './ai/aiService.js';
-import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from './ai/bedrock/bedrockService.js';
-import { MalformedAiResponseError } from './ai/schemaParser.js';
+import { AiService, type AiHarnessAdapter } from '../ai/aiService.js';
+import { AwsBedrockHarnessAdapter, sanitizeBedrockResponse } from '../ai/bedrock/bedrockService.js';
+import { MalformedAiResponseError } from '../ai/schemaParser.js';
 import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { vi } from 'vitest';
-import { createApp } from '../app.js';
-import type { ToolDeclaration, GenerateStreamWithToolsResult, AiModelOption } from '../types/ai.js';
-import type { ScoutChatRequest, ScoutScope, ScoutTripContext, ScoutStreamEvent } from '../types/scout.js';
+import { createApp } from '../../app.js';
+import type { ToolDeclaration, GenerateStreamWithToolsResult, AiModelOption } from '../../types/ai.js';
+import type { ScoutChatRequest, ScoutScope, ScoutTripContext, ScoutStreamEvent } from '../../types/scout.js';
 
 describe('Route Scout Service & Prompts', () => {
   const sampleTripContext: ScoutTripContext = {

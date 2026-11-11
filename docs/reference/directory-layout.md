@@ -88,9 +88,11 @@ roadtrip-copilot/
 │   │   ├── handlers/          # Standalone AWS Lambda & CLI handlers (refreshBedrockPricing.ts weekly pricing refresh)
 │   │   ├── test-helpers/      # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
-│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, spendMath, deviceService, itineraryStorageService, placeId, scoutService, scoutTools + scoutTools/ modules)
-│   │   │   └── ai/            # Provider-neutral AI abstraction & alert copywriting (aiService, aiRegistry, promptBuilder, schemaParser)
-│   │   │       └── bedrock/   # Amazon Bedrock provider implementation (bedrockService, bedrockPricing, bedrockPricingCache)
+│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, spendMath, deviceService, itineraryStorageService)
+│   │   │   ├── ai/            # Provider-neutral AI abstraction & alert copywriting (aiService, aiRegistry, promptBuilder, schemaParser)
+│   │   │   │   └── bedrock/   # Amazon Bedrock provider implementation (bedrockService, bedrockPricing, bedrockPricingCache)
+│   │   │   └── scout/         # Route Scout conversational co-pilot (scoutService, placeId, scoutTools)
+│   │   │       └── tools/     # Grounding & web discovery tool modules (corridorTools, geo, scheduleSimulator, urlSafety, types)
 │   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout, spend — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
