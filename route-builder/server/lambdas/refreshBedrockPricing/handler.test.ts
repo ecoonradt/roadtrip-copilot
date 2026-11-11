@@ -7,26 +7,26 @@ import type { PricingClient } from '@aws-sdk/client-pricing';
 import {
   PRICED_REGION,
   type BedrockPricingCatalog,
-} from '../services/ai/bedrock/bedrockPricing.js';
+} from '../../services/ai/bedrock/bedrockPricing.js';
 import {
   DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
   DEFAULT_BEDROCK_SCOUT_MODEL_ID,
-} from '../services/ai/bedrock/bedrockService.js';
+} from '../../services/ai/bedrock/bedrockService.js';
 import {
   discoverBedrockModelsForPricing,
   handler as refreshPricingLambdaHandler,
   loadLocalEnvFileIfPresent,
   refreshBedrockPricing,
-} from './refreshBedrockPricing.js';
+} from './handler.js';
 import {
   TEST_KIMI_RATE,
   TEST_NOVA_RATE,
   TEST_PRICING_REFRESHED_MS,
   makeDefaultPricingClientMock,
   makeTestPriceEntry,
-} from '../test-helpers/bedrockFixtures.js';
+} from '../../test-helpers/bedrockFixtures.js';
 
-describe('Weekly Bedrock Pricing Refresh Handler & Model Discovery (refreshBedrockPricing.ts)', () => {
+describe('Weekly Bedrock Pricing Refresh Lambda & Model Discovery (lambdas/refreshBedrockPricing/handler.ts)', () => {
   let tempDir = '';
 
   beforeEach(async () => {

@@ -62,6 +62,6 @@ Chosen Option: **Option C**.
 
 * Work Package: [`WP-04.5-user-spend-tracking.md`](../plan/active/WP-04.5-user-spend-tracking.md)
 * Spend types & math: `route-builder/server/types/spend.ts`, `route-builder/server/services/spendMath.ts`
-* Bedrock internal pricing & refresh handler: `route-builder/server/services/ai/bedrock/bedrockPricing.ts`, `route-builder/server/services/ai/bedrock/bedrockPricingCache.ts`, `route-builder/server/handlers/refreshBedrockPricing.ts`, `infra/lib/roadtrip-cloud-stack.ts`
+* Bedrock internal pricing & refresh lambda: `route-builder/server/services/ai/bedrock/bedrockPricing.ts`, `route-builder/server/services/ai/bedrock/bedrockPricingCache.ts`, `route-builder/server/lambdas/refreshBedrockPricing/handler.ts`, `infra/lib/roadtrip-cloud-stack.ts`
 * Ledger & instrumentation: `route-builder/server/services/spendLedgerService.ts`, `route-builder/server/services/ai/aiService.ts`, `route-builder/server/services/ai/bedrock/bedrockService.ts`, `route-builder/server/services/scout/scoutService.ts`, `route-builder/server/services/scout/scoutTools.ts`, `route-builder/server/services/itineraryStorageService.ts`
 * Inspection API & script: `route-builder/server/routes/spend.ts`, `scripts/check_spend.sh`

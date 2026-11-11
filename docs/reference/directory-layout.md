@@ -76,7 +76,8 @@ roadtrip-copilot/
 │   ├── .dockerignore          # Docker build exclusions
 │   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
 │   ├── README.md              # User-facing web studio documentation & setup
-│   ├── package.json           # Node scripts (dev, build, test, test:frontend, test:backend, test:browser)
+│   ├── package.json           # Node scripts (dev, build, lint, test, test:frontend, test:backend, test:browser)
+│   ├── eslint.config.mjs      # ESLint architectural boundary rules (eslint-plugin-boundaries)
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
 │   ├── playwright.config.ts   # Fixture-backed Chromium header/account acceptance test configuration
 │   ├── server/                # Fastify TypeScript backend
@@ -85,7 +86,7 @@ roadtrip-copilot/
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
 │   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
 │   │   ├── hooks/             # Fastify preHandler hooks (authGuard.ts dual-mode OIDC + allowlist gate)
-│   │   ├── handlers/          # Standalone AWS Lambda & CLI handlers (refreshBedrockPricing.ts weekly pricing refresh)
+│   │   ├── lambdas/           # Standalone AWS Lambda & CLI entrypoints (each in an isolated subfolder, e.g. refreshBedrockPricing/handler.ts)
 │   │   ├── test-helpers/      # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
 │   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, spendMath, deviceService, itineraryStorageService)

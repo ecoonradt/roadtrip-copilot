@@ -82,7 +82,7 @@ The canonical, annotated repository directory layout is maintained in [`docs/ref
 `route-builder/` is organized into three architectural boundaries:
 
 * **`server/` (Fastify TypeScript Backend on `:3001`):**
-  Houses the standalone HTTP API, dual-mode Google OIDC authentication pre-handler (`hooks/authGuard.ts`), OSRM routing proxies (`routes/routing.ts`), Route Scout conversational co-pilot (`routes/scout.ts` and `services/scout/`), AI abstraction & provider adapters (`services/ai/` and `services/ai/bedrock/`), spend tracking math (`services/spendMath.ts`), and itinerary storage. Operates under `server/tsconfig.json` (editor LSP) and `tsconfig.server.json` (production build).
+  Houses the standalone HTTP API, dual-mode Google OIDC authentication pre-handler (`hooks/authGuard.ts`), OSRM routing proxies (`routes/routing.ts`), Route Scout conversational co-pilot (`routes/scout.ts` and `services/scout/`), AI abstraction & provider adapters (`services/ai/` and `services/ai/bedrock/`), standalone AWS Lambda entrypoints (`lambdas/<name>/handler.ts`, boundary-enforced via `eslint.config.mjs`), spend tracking math (`services/spendMath.ts`), and itinerary storage. Operates under `server/tsconfig.json` (editor LSP) and `tsconfig.server.json` (production build).
 * **`src/` (React Frontend on `:5173`):**
   Houses the Leaflet map studio, timeline sidebar, itinerary parsing/cascade engine (`engine/`), and interactive UI components (`components/`). Vitest unit tests live file-adjacent to their modules (`src/**/*.test.tsx`), while cross-component workflow tests live in `src/integration-tests/`. Operates under `tsconfig.json`.
 * **`e2e/` (Playwright Acceptance Tests):**
@@ -99,6 +99,9 @@ The canonical, annotated repository directory layout is maintained in [`docs/ref
 ```bash
 # Start both Frontend (:5173) and Backend (:3001)
 npm run dev
+
+# Run ESLint architectural boundary checks
+npm run lint
 
 # Run all Vitest suites (frontend src/ and backend server/)
 npm test
