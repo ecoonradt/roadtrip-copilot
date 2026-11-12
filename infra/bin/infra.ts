@@ -85,6 +85,10 @@ const bedrockCopywriterModelId =
   process.env.BEDROCK_COPYWRITER_MODEL_ID ||
   (app.node.tryGetContext('bedrockCopywriterModelId') as string | undefined);
 
+const alertEmail =
+  process.env.ALERT_EMAIL ||
+  (app.node.tryGetContext('alertEmail') as string | undefined);
+
 new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   env: { account, region: selectedRegion },
   authEnabled,
@@ -105,5 +109,6 @@ new RoadtripCopilotCloudStack(app, 'RoadtripCopilotCloudStack', {
   braveSearchApiKeySsmParam,
   bedrockScoutModelId,
   bedrockCopywriterModelId,
+  alertEmail,
 });
 

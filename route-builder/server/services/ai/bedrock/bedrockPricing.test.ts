@@ -14,7 +14,7 @@ import {
   type BedrockModelTokenRate,
   type DiscoveredBedrockModel,
 } from './bedrockPricing.js';
-import { SpendValueError } from './spendMath.js';
+import { SpendValueError } from '../../spendMath.js';
 
 const REFRESHED_AT = '2026-11-02T00:00:00.000Z';
 

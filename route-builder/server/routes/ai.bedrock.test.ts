@@ -9,14 +9,14 @@ import {
   sanitizeBedrockResponse,
   formatBedrockToolLabel,
   toFoundationModelId,
-} from '../services/bedrockService.js';
+} from '../services/ai/bedrock/bedrockService.js';
 import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
   AiService,
   type AiHarnessAdapter,
-} from '../services/aiService.js';
-import { ScoutService } from '../services/scoutService.js';
-import { MalformedAiResponseError } from '../services/schemaParser.js';
+} from '../services/ai/aiService.js';
+import { ScoutService } from '../services/scout/scoutService.js';
+import { MalformedAiResponseError } from '../services/ai/schemaParser.js';
 import { createApp } from '../app.js';
 import {
   ConverseCommand,
@@ -26,11 +26,14 @@ import {
 } from '@aws-sdk/client-bedrock-runtime';
 import {
   TEST_MOCK_MODELS,
+  TEST_NOVA_RATE,
+  makeTestPricingCatalog,
   sampleWaypoint,
   sampleTripContext,
   sampleTools,
   createAsyncStream,
 } from '../test-helpers/bedrockFixtures.js';
+import { PricingUnavailableError } from '../services/ai/bedrock/bedrockPricing.js';
 
 describe('Bedrock Fastify routes', () => {
     it('GET /api/ai/status returns available: true, engine: "bedrock", 18 models, and ADR-0010 defaults', async () => {
@@ -724,5 +727,216 @@ describe('Bedrock Fastify routes', () => {
       // Assert zero discovery and zero runtime SDK calls were made
       expect(mockControlClient.send).not.toHaveBeenCalled();
       expect(mockRuntimeSend).not.toHaveBeenCalled();
+    });
+
+    it('returns HTTP 503 on GET /api/ai/status, GET /api/ai/health, and AI/Scout endpoints when pricing is unavailable or model is unpriced, and HTTP 400 on unknown models', async () => {
+      const seededModels = [
+        {
+          id: DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          name: 'Kimi K3',
+          provider: 'Moonshot AI',
+          description: 'Moonshot AI Kimi K3',
+          role: 'both' as const,
+        },
+        {
+          id: DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+          name: 'Nova 2 Lite',
+          provider: 'Amazon',
+          description: 'Amazon Nova 2 Lite',
+          role: 'both' as const,
+        },
+        {
+          id: 'us.anthropic.claude-sonnet-4-6',
+          name: 'Claude Sonnet 4.6',
+          provider: 'Anthropic',
+          description: 'Anthropic Claude Sonnet 4.6',
+          role: 'both' as const,
+        },
+      ];
+
+      const failingPricingCache = {
+        getCatalog: vi.fn(async () => {
+          throw new PricingUnavailableError('Bedrock pricing catalog not found in S3');
+        }),
+      };
+
+      const unavailableAdapter = new AwsBedrockHarnessAdapter({
+        client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
+        availableModels: seededModels,
+        pricingCache: failingPricingCache,
+      });
+      const unavailableAiService = new AiService({ adapters: [unavailableAdapter] });
+      const unavailableScoutService = new ScoutService({ aiService: unavailableAiService });
+      const app = createApp({
+        logger: false,
+        aiService: unavailableAiService,
+        scoutService: unavailableScoutService,
+      });
+
+      const statusRes = await app.inject({ method: 'GET', url: '/api/ai/status' });
+      expect(statusRes.statusCode).toBe(503);
+      expect(statusRes.json()).toMatchObject({
+        available: false,
+        engine: 'bedrock',
+        providerName: 'Amazon Bedrock',
+      });
+      expect(statusRes.json().message).toContain('Bedrock pricing catalog not found in S3');
+
+      const healthRes = await app.inject({ method: 'GET', url: '/api/ai/health' });
+      expect(healthRes.statusCode).toBe(503);
+      expect(healthRes.json()).toMatchObject({
+        status: 'unavailable',
+        available: false,
+        engine: 'bedrock',
+      });
+
+      const genRes = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/generate',
+        payload: { waypoint: { id: 'wp1', name: 'Vista Point' } },
+      });
+      expect(genRes.statusCode).toBe(503);
+
+      const titleRes = await app.inject({
+        method: 'POST',
+        url: '/api/copilot/day-title',
+        payload: { dayNumber: 1, stops: [{ name: 'Sedona' }] },
+      });
+      expect(titleRes.statusCode).toBe(503);
+
+      const scoutChatRes = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit stops' }],
+          tripContext: { tripName: 'Test Trip', waypoints: [] },
+        },
+      });
+      expect(scoutChatRes.statusCode).toBe(503);
+
+      const scoutStreamRes = await app.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit stops' }],
+          tripContext: { tripName: 'Test Trip', waypoints: [] },
+        },
+      });
+      expect(scoutStreamRes.statusCode).toBe(503);
+
+      await app.close();
+
+      // When defaults ARE priced: unpriced model returns 503, unknown model returns 400 across both Copilot and Scout routes
+      const partialAdapter = new AwsBedrockHarnessAdapter({
+        client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
+        availableModels: seededModels,
+        pricingCatalog: makeTestPricingCatalog({
+          unpricedModelIds: ['us.anthropic.claude-sonnet-4-6'],
+        }),
+      });
+      const partialAiService = new AiService({ adapters: [partialAdapter] });
+      const partialScoutService = new ScoutService({ aiService: partialAiService });
+      const app2 = createApp({
+        logger: false,
+        aiService: partialAiService,
+        scoutService: partialScoutService,
+      });
+
+      const okStatus = await app2.inject({ method: 'GET', url: '/api/ai/status' });
+      expect(okStatus.statusCode).toBe(200);
+      expect(okStatus.json().available).toBe(true);
+      expect(okStatus.json().models).toHaveLength(2);
+
+      const unpricedGen = await app2.inject({
+        method: 'POST',
+        url: '/api/copilot/generate',
+        payload: {
+          waypoint: { id: 'wp1', name: 'Vista Point' },
+          modelId: 'us.anthropic.claude-sonnet-4-6',
+        },
+      });
+      expect(unpricedGen.statusCode).toBe(503);
+      expect(unpricedGen.json().error).toContain('us.anthropic.claude-sonnet-4-6');
+
+      const unknownGen = await app2.inject({
+        method: 'POST',
+        url: '/api/copilot/generate',
+        payload: {
+          waypoint: { id: 'wp1', name: 'Vista Point' },
+          modelId: 'nonexistent.model-v1',
+        },
+      });
+      expect(unknownGen.statusCode).toBe(400);
+
+      const unpricedScoutChat = await app2.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit stops' }],
+          tripContext: { tripName: 'Test Trip', waypoints: [] },
+          modelId: 'us.anthropic.claude-sonnet-4-6',
+        },
+      });
+      expect(unpricedScoutChat.statusCode).toBe(503);
+      expect(unpricedScoutChat.json().error).toContain('us.anthropic.claude-sonnet-4-6');
+
+      const unknownScoutChat = await app2.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit stops' }],
+          tripContext: { tripName: 'Test Trip', waypoints: [] },
+          modelId: 'nonexistent.model-v1',
+        },
+      });
+      expect(unknownScoutChat.statusCode).toBe(400);
+
+      const unpricedScoutStream = await app2.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit stops' }],
+          tripContext: { tripName: 'Test Trip', waypoints: [] },
+          modelId: 'us.anthropic.claude-sonnet-4-6',
+        },
+      });
+      expect(unpricedScoutStream.statusCode).toBe(503);
+      expect(unpricedScoutStream.json().error).toContain('us.anthropic.claude-sonnet-4-6');
+
+      const unknownScoutStream = await app2.inject({
+        method: 'POST',
+        url: '/api/ai/scout/chat/stream',
+        payload: {
+          scope: { type: 'day', dayNumber: 1 },
+          messages: [{ role: 'user', content: 'Audit stops' }],
+          tripContext: { tripName: 'Test Trip', waypoints: [] },
+          modelId: 'nonexistent.model-v1',
+        },
+      });
+      expect(unknownScoutStream.statusCode).toBe(400);
+
+      await app2.close();
+
+      // When default Scout model is missing from pricing catalog while Copywriter is priced -> GET /api/ai/status returns 503
+      const missingDefaultScoutAdapter = new AwsBedrockHarnessAdapter({
+        client: { send: vi.fn() } as unknown as BedrockRuntimeClient,
+        availableModels: seededModels,
+        pricingCatalog: makeTestPricingCatalog({
+          models: {
+            [DEFAULT_BEDROCK_COPYWRITER_MODEL_ID]: TEST_NOVA_RATE,
+          },
+          unpricedModelIds: [DEFAULT_BEDROCK_SCOUT_MODEL_ID],
+        }),
+      });
+      const missingDefaultService = new AiService({ adapters: [missingDefaultScoutAdapter] });
+      const statusWithMissingDefault = await missingDefaultService.getStatus();
+      expect(statusWithMissingDefault.available).toBe(false);
+      expect(statusWithMissingDefault.statusCode).toBe(503);
+      expect(statusWithMissingDefault.message).toContain(DEFAULT_BEDROCK_SCOUT_MODEL_ID);
     });
 });

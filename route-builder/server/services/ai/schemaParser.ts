@@ -1,4 +1,4 @@
-import type { CopilotAlert, WaypointContext } from '../types/ai.js';
+import type { CopilotAlert, WaypointContext } from '../../types/ai.js';
 
 /**
  * Raised when a provider response does not satisfy the co-pilot alert contract.

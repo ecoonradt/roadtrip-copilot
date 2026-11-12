@@ -374,13 +374,13 @@ The cloud architecture on AWS is **10x to 30x faster** than the local CLI harnes
 The Fastify server architecture integrates dual-mode authentication, S3 persistence, configurable Amazon Bedrock streaming with tools, and immediate SSE heartbeats:
 
 ```typescript
-// Conceptual Bedrock Adapter in server/services/bedrockService.ts
+// Conceptual Bedrock Adapter in server/services/ai/bedrock/bedrockService.ts
 import {
   BedrockRuntimeClient,
   ConverseStreamCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import type { AiHarnessAdapter } from './aiService.js';
-import type { ScoutStreamEvent } from '../types/scout.js';
+import type { AiHarnessAdapter } from '../aiService.js';
+import type { ScoutStreamEvent } from '../../../types/scout.js';
 
 export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   readonly id = 'bedrock';
@@ -441,7 +441,7 @@ export class AwsBedrockHarnessAdapter implements AiHarnessAdapter {
   - Implement `AwsBedrockHarnessAdapter` using `@aws-sdk/client-bedrock-runtime` (`ConverseStreamCommand`).
   - Support configurable model selection (`BEDROCK_SCOUT_MODEL_ID`, `BEDROCK_COPYWRITER_MODEL_ID`, plus UI model picker).
 - [ ] **Step 4: Discovery + Deterministic Domain Tool Library**
-  - Implement the 7 tools in `server/services/scoutTools.ts`:
+  - Implement the 7 tools in `server/services/scout/scoutTools.ts` (and `server/services/scout/tools/`):
     - Web Discovery: `search_web` and `read_url_content`.
     - Domain Grounding: `resolve_and_standardize_place` (Google Places API New with free-tier hard quota cap in GCP), `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, and `audit_corridor_waypoints`.
   - Add `"delete_waypoint"` action support to `ScoutSuggestion` parser alongside `"add_waypoint"` and `"update_waypoint"`.

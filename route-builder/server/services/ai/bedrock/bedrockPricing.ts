@@ -9,7 +9,7 @@ import {
   formatUsd,
   parseDecimalUsdStringToNanos,
   toSafeNumberNanos,
-} from './spendMath.js';
+} from '../../spendMath.js';
 
 export interface BedrockModelTokenRate {
   modelId: string;
@@ -67,6 +67,8 @@ export const REQUIRED_BEDROCK_PRICING_SERVICE_CODES = [
 ] as const;
 
 export class PricingUnavailableError extends Error {
+  readonly statusCode = 503;
+
   constructor(message: string) {
     super(message);
     this.name = 'PricingUnavailableError';

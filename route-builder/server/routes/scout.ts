@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { ScoutService } from '../services/scoutService.js';
-import { InvalidModelError, UnknownAiProviderError } from '../services/aiService.js';
-import { MalformedAiResponseError } from '../services/schemaParser.js';
+import { ScoutService } from '../services/scout/scoutService.js';
+import { InvalidModelError, UnknownAiProviderError } from '../services/ai/aiService.js';
+import { MalformedAiResponseError } from '../services/ai/schemaParser.js';
 import type { ScoutChatRequest, ScoutScope } from '../types/scout.js';
 
 export interface ScoutPluginOptions {
@@ -97,6 +97,9 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
         ) {
           return reply.status(400).send({ error: (err as Error).message });
         }
+        if ((err as { statusCode?: number })?.statusCode === 503) {
+          return reply.status(503).send({ error: (err as Error).message });
+        }
         throw err;
       }
 
@@ -119,6 +122,9 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
         }
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
+        }
+        if ((err as { statusCode?: number })?.statusCode === 503) {
+          return reply.status(503).send({ error: (err as Error).message });
         }
         if (err instanceof MalformedAiResponseError) {
           fastify.log.error({ err }, `AI provider returned an unusable Route Scout response: ${err.message}`);
@@ -205,6 +211,9 @@ export const scoutRoutes: FastifyPluginAsync<ScoutPluginOptions> = async (
         (err as { statusCode?: number })?.statusCode === 400
       ) {
         return reply.status(400).send({ error: (err as Error).message });
+      }
+      if ((err as { statusCode?: number })?.statusCode === 503) {
+        return reply.status(503).send({ error: (err as Error).message });
       }
       throw err;
     } finally {

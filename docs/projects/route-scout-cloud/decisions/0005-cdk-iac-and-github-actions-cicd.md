@@ -41,7 +41,7 @@ Chosen Option: **Option C (Milestone 0 CDK + GitHub Actions Foundation with Cont
 
 ## 5. Implementation Notes & Code Touchpoints
 * **CDK Workspace:** `infra/` (`bin/infra.ts`, `lib/roadtrip-cloud-stack.ts`, `cdk.json`, `package.json`, `tsconfig.json`, `test/roadtrip-cloud-stack.test.ts`).
-* **Fastify Lambda Packaging:** `route-builder/Dockerfile` (Node 20 slim + AWS Lambda Web Adapter extension with `AWS_LWA_INVOKE_MODE=response_stream` and `PORT=3001`).
+* **Fastify Lambda Packaging:** `route-builder/Dockerfile` (Node 24 slim + AWS Lambda Web Adapter extension with `AWS_LWA_INVOKE_MODE=response_stream` and `PORT=3001`).
 * **Unified Scripts:**
   * `scripts/ci_check.sh`: Runs `route-builder` tests + build, Android unit tests (`./gradlew testDebugUnitTest`), and `infra` CDK tests + `cdk synth`.
   * `scripts/deploy_cloud.sh`: Builds `route-builder`, runs `cdk deploy`, syncs `route-builder/dist/` to the S3 static bucket, invalidates CloudFront, and runs a live `/api/health` smoke check.

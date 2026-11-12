@@ -1,4 +1,4 @@
-import type { DayTitleContext, WaypointContext } from '../types/ai.js';
+import type { DayTitleContext, WaypointContext } from '../../types/ai.js';
 
 /**
  * Phonetic pronunciation hint for highways commonly found in road trip routes.

@@ -18,7 +18,7 @@ When setting up Roadtrip Co-Pilot in a new or clean AWS account:
 
 ### 1. Prerequisites
 * AWS CLI installed and configured with administrator credentials (`aws sts get-caller-identity`).
-* Node.js 20+ and npm 9+.
+* Node.js 24 LTS (`>=24`) and npm 10+.
 * Docker running locally (for building the Lambda container image asset).
 
 ### 2. Bootstrap AWS CDK
@@ -41,6 +41,7 @@ This script:
 In your GitHub repository settings (**Settings -> Secrets and variables -> Actions -> Variables**):
 * Set `AWS_ROLE_ARN` = `arn:aws:iam::<ACCOUNT_ID>:role/roadtrip-copilot-github-actions-deploy`
 * Set `AWS_REGION` = `us-east-2`
+* *(Optional)* Set `ALERT_EMAIL` to subscribe an email address to `PricingRefreshAlertTopic` for weekly Bedrock pricing refresh failure alarms (requires clicking the AWS SNS confirmation link; if unset, no email notifications are sent).
 
 > **Note on GitHub Secrets:** Static `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets are **not required**. Authentication is 100% keyless via short-lived OIDC web identity tokens.
 

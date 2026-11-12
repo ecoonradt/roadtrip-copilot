@@ -6,12 +6,12 @@ import type {
   ScoutStreamEvent,
   ScoutActivity,
   ScoutWaypointSummary,
-} from '../types/scout.js';
-import type { ToolDeclaration } from '../types/ai.js';
-import type { GenerationOptions, AiHarnessAdapter } from './aiService.js';
-import { AiService } from './aiService.js';
-import { createDefaultAiService } from './aiRegistry.js';
-import { MalformedAiResponseError } from './schemaParser.js';
+} from '../../types/scout.js';
+import type { ToolDeclaration } from '../../types/ai.js';
+import type { GenerationOptions, AiHarnessAdapter } from '../ai/aiService.js';
+import { AiService } from '../ai/aiService.js';
+import { createDefaultAiService } from '../ai/aiRegistry.js';
+import { MalformedAiResponseError } from '../ai/schemaParser.js';
 import { isValidGooglePlaceId, validateScoutPlaceId } from './placeId.js';
 import {
   SCOUT_TOOL_DECLARATIONS,
@@ -857,7 +857,7 @@ export class ScoutService {
         this.tools,
         turnDispatcher,
         () => {},
-        { modelId: activeModelId, abortSignal: options.abortSignal }
+        { modelId: activeModelId, abortSignal: options.abortSignal, onUsage: options.onUsage }
       );
       const { reply, suggestions, thought } = parseScoutResponse(
         adapter.sanitizeResponse(streamRes.text),
@@ -883,6 +883,7 @@ export class ScoutService {
     const rawOutput = await adapter.generate(domainPrompt, {
       modelId: activeModelId,
       abortSignal: options.abortSignal,
+      onUsage: options.onUsage,
     });
     const { reply, suggestions, thought } = parseScoutResponse(
       adapter.sanitizeResponse(rawOutput),
@@ -964,7 +965,7 @@ export class ScoutService {
           onEvent(streamEvt);
         }
       },
-      { modelId: activeModelId, abortSignal: options.abortSignal }
+      { modelId: activeModelId, abortSignal: options.abortSignal, onUsage: options.onUsage }
     );
 
     if (options.abortSignal?.aborted) {

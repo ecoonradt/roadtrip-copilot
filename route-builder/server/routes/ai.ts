@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { AiService, InvalidModelError } from '../services/aiService.js';
-import { defaultAiService } from '../services/aiRegistry.js';
-import { MalformedAiResponseError } from '../services/schemaParser.js';
+import { AiService, InvalidModelError } from '../services/ai/aiService.js';
+import { defaultAiService } from '../services/ai/aiRegistry.js';
+import { MalformedAiResponseError } from '../services/ai/schemaParser.js';
 import type { WaypointContext, DayTitleContext } from '../types/ai.js';
 
 export interface AiPluginOptions {
@@ -41,6 +41,9 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
         }
+        if ((err as { statusCode?: number })?.statusCode === 503) {
+          return reply.status(503).send({ error: (err as Error).message });
+        }
         throw err;
       }
 
@@ -67,6 +70,9 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
       } catch (err: unknown) {
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
+        }
+        if ((err as { statusCode?: number })?.statusCode === 503) {
+          return reply.status(503).send({ error: (err as Error).message });
         }
         if (err instanceof MalformedAiResponseError) {
           fastify.log.error({ err }, `AI provider returned an unusable alert payload: ${err.message}`);
@@ -101,6 +107,9 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
         }
+        if ((err as { statusCode?: number })?.statusCode === 503) {
+          return reply.status(503).send({ error: (err as Error).message });
+        }
         throw err;
       }
       try {
@@ -112,6 +121,9 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
       } catch (err: unknown) {
         if (err instanceof InvalidModelError || (err as { statusCode?: number })?.statusCode === 400) {
           return reply.status(400).send({ error: (err as Error).message });
+        }
+        if ((err as { statusCode?: number })?.statusCode === 503) {
+          return reply.status(503).send({ error: (err as Error).message });
         }
         if (err instanceof MalformedAiResponseError) {
           fastify.log.error({ err }, `AI provider returned an unusable day-title payload: ${err.message}`);
@@ -128,8 +140,8 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
     '/api/ai/status',
     async (request, reply) => {
       const { apiKey } = request.query || {};
-      const status = await aiService.getStatus(apiKey);
-      return reply.status(200).send(status);
+      const { statusCode, ...status } = await aiService.getStatus(apiKey);
+      return reply.status(statusCode ?? 200).send(status);
     }
   );
 
@@ -138,8 +150,8 @@ export const aiRoutes: FastifyPluginAsync<AiPluginOptions> = async (
     '/api/ai/health',
     async (request, reply) => {
       const { apiKey } = request.query || {};
-      const status = await aiService.getStatus(apiKey);
-      return reply.status(200).send({
+      const { statusCode, ...status } = await aiService.getStatus(apiKey);
+      return reply.status(statusCode ?? 200).send({
         status: status.available ? 'ok' : 'unavailable',
         ...status,
       });

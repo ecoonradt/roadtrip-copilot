@@ -79,6 +79,9 @@ export PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
 if [ -n "${ORIGIN_VERIFY_SECRET:-}" ]; then
   export ORIGIN_VERIFY_SECRET
 fi
+if [ -n "${ALERT_EMAIL:-}" ]; then
+  export ALERT_EMAIL
+fi
 
 # 3. Build React Web Studio
 echo "Building Route Builder Web Studio..."

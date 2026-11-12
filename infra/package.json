@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build": "tsc --noEmit",
     "test": "vitest run",
@@ -10,14 +13,16 @@
     "deploy": "cdk deploy --require-approval never --outputs-file cdk-outputs.json"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.177.0",
+    "aws-cdk-lib": "^2.276.0",
     "constructs": "^10.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
-    "aws-cdk": "^2.177.0",
+    "aws-cdk": "^2.276.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vite": "^6.4.6",
+    "vitest": "^5.1.0"
   }
 }

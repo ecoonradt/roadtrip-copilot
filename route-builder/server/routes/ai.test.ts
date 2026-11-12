@@ -3,7 +3,7 @@ import { createApp } from '../app.js';
 import {
   AiService,
   type AiHarnessAdapter,
-} from '../services/aiService.js';
+} from '../services/ai/aiService.js';
 import type {
   AiModelOption,
   WaypointContext,

@@ -26,10 +26,10 @@ import {
   isInTransitOrAnchorSuggestion,
   isValidGooglePlaceId,
 } from './scoutService.js';
-import { formatBedrockToolLabel, AwsBedrockHarnessAdapter } from './bedrockService.js';
-import { RouteService } from './routeService.js';
-import { AiService, type AiHarnessAdapter } from './aiService.js';
-import type { ScoutTripContext, ScoutChatRequest, ScoutStreamEvent } from '../types/scout.js';
+import { formatBedrockToolLabel, AwsBedrockHarnessAdapter } from '../ai/bedrock/bedrockService.js';
+import { RouteService } from '../routeService.js';
+import { AiService, type AiHarnessAdapter } from '../ai/aiService.js';
+import type { ScoutTripContext, ScoutChatRequest, ScoutStreamEvent } from '../../types/scout.js';
 
 const sampleTripContext: ScoutTripContext = {
   tripName: 'Arizona Scenic Highway Run',

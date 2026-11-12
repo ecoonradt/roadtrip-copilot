@@ -22,7 +22,7 @@ ERROR: failed to build: failed to solve: public.ecr.aws/awsguru/aws-lambda-adapt
 ```
 
 `route-builder/Dockerfile` pulls every external image from `public.ecr.aws`:
-`docker/library/node:20-slim` (builder + runtime) and `awsguru/aws-lambda-adapter:0.8.4`
+`docker/library/node:24-slim` (builder + runtime) and `awsguru/aws-lambda-adapter:0.8.4`
 (the AWS Lambda Web Adapter extension that provides response streaming for Fastify).
 
 Amazon ECR Public documents that *unauthenticated* pullers are capped at **500 GB of data per

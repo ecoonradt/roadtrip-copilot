@@ -22,6 +22,7 @@ done
 
 echo "=== [1/3] Route Builder Tests & Build ==="
 cd "$ROOT_DIR/route-builder"
+npm run lint
 npm test
 npm run typecheck:tests
 npm run build

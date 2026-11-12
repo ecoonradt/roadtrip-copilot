@@ -62,7 +62,7 @@ roadtrip-copilot/
 │   ├── bin/
 │   │   └── infra.ts           # CDK app entrypoint & stack instantiation (selected Region)
 │   ├── lib/
-│   │   └── roadtrip-cloud-stack.ts # CloudFront, S3, Fastify Lambda (LWA streaming) & OIDC stack
+│   │   └── roadtrip-cloud-stack.ts # CloudFront, S3, Fastify Lambda (LWA streaming), weekly Bedrock pricing refresh Lambda + CloudWatch/SNS alarm, & OIDC stack
 │   ├── test/
 │   │   └── roadtrip-cloud-stack.test.ts # Vitest CDK infrastructure assertions
 │   ├── cdk.json               # AWS CDK execution configuration
@@ -76,18 +76,25 @@ roadtrip-copilot/
 │   ├── .dockerignore          # Docker build exclusions
 │   ├── AGENTS.md              # Route Builder subproject agent handbook & directory structure
 │   ├── README.md              # User-facing web studio documentation & setup
-│   ├── package.json           # Node scripts (dev, build, test, test:frontend, test:backend, test:browser)
+│   ├── package.json           # Node scripts (dev, build, lint, test, test:frontend, test:backend, test:browser)
+│   ├── eslint.config.mjs      # ESLint architectural boundary rules (eslint-plugin-boundaries)
 │   ├── vite.config.ts         # Vite configuration with /api reverse proxy to port 3001
 │   ├── playwright.config.ts   # Fixture-backed Chromium header/account acceptance test configuration
 │   ├── server/                # Fastify TypeScript backend
+│   │   ├── tsconfig.json      # Backend editor TypeScript configuration (extends tsconfig.test.server.json)
 │   │   ├── app.ts             # Fastify app factory with CORS, authGuard hook, and routes
 │   │   ├── index.ts           # Server entrypoint (listening on 0.0.0.0:3001)
-│   │   ├── loadEnv.ts         # Node 20.12+ .env loader side-effect module
+│   │   ├── loadEnv.ts         # .env loader side-effect module via process.loadEnvFile
 │   │   ├── hooks/             # Fastify preHandler hooks (authGuard.ts dual-mode OIDC + allowlist gate)
+│   │   ├── lambdas/           # Standalone AWS Lambda & CLI entrypoints (each in an isolated subfolder, e.g. refreshBedrockPricing/handler.ts)
 │   │   ├── test-helpers/      # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
 │   │   ├── routes/            # Fastify plugins (auth.ts, routing.ts, ai.ts, device.ts, itineraries.ts, scout.ts)
-│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, aiService, aiRegistry, bedrockService, deviceService, itineraryStorageService, placeId, scoutService, scoutTools + scoutTools/ modules)
-│   │   └── types/             # Strict TypeScript interfaces (auth, routing, ai, scout — 0 any types)
+│   │   ├── services/          # Business logic (authService, routeService, geocodeService, routeCache, spendMath, deviceService, itineraryStorageService)
+│   │   │   ├── ai/            # Provider-neutral AI abstraction & alert copywriting (aiService, aiRegistry, promptBuilder, schemaParser)
+│   │   │   │   └── bedrock/   # Amazon Bedrock provider implementation (bedrockService, bedrockPricing, bedrockPricingCache)
+│   │   │   └── scout/         # Route Scout conversational co-pilot (scoutService, placeId, scoutTools)
+│   │   │       └── tools/     # Grounding & web discovery tool modules (corridorTools, geo, scheduleSimulator, urlSafety, types)
+│   │   └── types/             # Strict TypeScript interfaces (index, auth, routing, ai, scout, spend — 0 any types)
 │   ├── src/                   # React frontend
 │   │   ├── App.tsx            # Main application layout, auth gate & state coordinator
 │   │   ├── test-helpers/      # Shared UI test fixtures and mock harnesses (testHarness.tsx)

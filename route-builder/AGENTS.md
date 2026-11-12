@@ -24,28 +24,36 @@
 * **Responsive Workspace:** Resizable sidebar (320px–680px) with `localStorage` persistence and double-click reset.
 * **Single-Row Header:** Keep the trip title shrinkable and compact secondary controls at narrower widths. Account details and Sign out live in a click-to-open avatar/initials popover with keyboard support; never hide overflowing actions with clipping.
 
-### D. Pluggable AI Harness Adapters
-* AI generation adheres to the `AiHarnessAdapter` provider contract (`server/services/aiService.ts`). Adapters model **providers that expose multiple models at different price/performance points**, never a single CLI or a single model ([ADR-0001 §6](../docs/projects/route-scout-cloud/decisions/0001-amazon-bedrock-single-bill-ai.md#6-amendment-2026-10-23-no-offline-copy-engine-provider-only-adapter-seam)).
+### D. Pluggable AI Harness Adapters & Organization
+* AI generation adheres to the `AiHarnessAdapter` provider contract (`server/services/ai/aiService.ts`). Adapters model **providers that expose multiple models at different price/performance points**, never a single CLI or a single model ([ADR-0001 §6](../docs/projects/route-scout-cloud/decisions/0001-amazon-bedrock-single-bill-ai.md#6-amendment-2026-10-23-no-offline-copy-engine-provider-only-adapter-seam)).
   * Required members: `id`, `name`, `isAvailable`, `generate`, `validateModelId`, `getAvailableModels`, `getModelCatalog`, `decorateScoutPrompt`, `sanitizeResponse`. Only `generateStreamWithTools` is optional.
-  * `AiService` is provider-agnostic: it owns the adapter registry and resolves `preferredEngine` (`'auto'`/undefined → the primary adapter; anything else must be registered, else HTTP 400). `server/services/aiRegistry.ts` is the sole composition root and registers `AwsBedrockHarnessAdapter` as the primary provider. Swapping providers is a registry change, not a change to generation, parsing, Scout, or UI code.
-  * `AwsBedrockHarnessAdapter` (`server/services/bedrockService.ts`): The only adapter that ships today. Uses Amazon Bedrock's unified `ConverseCommand` and `ConverseStreamCommand` (`@aws-sdk/client-bedrock-runtime`), defaults to `us.moonshotai.kimi-k3` for Route Scout and `us.amazon.nova-2-lite-v1:0` for alert copywriting (`ADR-0010`, `ADR-0011`), normalizes bare foundation model IDs to system-defined `us.` inference profiles where required, and dynamically discovers available models from AWS Bedrock filtered by account availability and explicit policy exclusions (`GET /api/ai/status`).
+  * **Folder Organization:**
+    * `server/services/ai/`: Contains provider-agnostic abstractions and contracts (`aiService.ts`, `promptBuilder.ts`, `schemaParser.ts`), plus the composition root (`aiRegistry.ts`).
+    * `server/services/ai/<provider>/`: Dedicated directory for each provider implementation (e.g. `server/services/ai/bedrock/` containing `bedrockService.ts`, `bedrockPricing.ts`, `bedrockPricingCache.ts`, and their test suites).
+  * **Guidance for Adding New AI Providers:**
+    1. Create a dedicated folder `server/services/ai/<provider>/`.
+    2. Implement `AiHarnessAdapter` modeling the provider's multi-model catalog and execution lifecycle.
+    3. Keep all provider-specific SDK clients, pricing calculation logic, and rate caches private to that directory.
+    4. Register the new adapter instance in `server/services/ai/aiRegistry.ts`. Never leak provider-specific classes or types into domain logic, routes, or frontend UI.
+  * `AiService` is provider-agnostic: it owns the adapter registry and resolves `preferredEngine` (`'auto'`/undefined → the primary adapter; anything else must be registered, else HTTP 400). `server/services/ai/aiRegistry.ts` is the sole composition root and registers `AwsBedrockHarnessAdapter` as the primary provider. Swapping providers is a registry change, not a change to generation, parsing, Scout, or UI code.
+  * `AwsBedrockHarnessAdapter` (`server/services/ai/bedrock/bedrockService.ts`): The only adapter that ships today. Uses Amazon Bedrock's unified `ConverseCommand` and `ConverseStreamCommand` (`@aws-sdk/client-bedrock-runtime`), defaults to `us.moonshotai.kimi-k3` for Route Scout and `us.amazon.nova-2-lite-v1:0` for alert copywriting (`ADR-0010`, `ADR-0011`), normalizes bare foundation model IDs to system-defined `us.` inference profiles where required, and dynamically discovers available models from AWS Bedrock filtered by account availability and explicit policy exclusions (`GET /api/ai/status`).
   * Legacy local CLI (`agy`), Gemini Studio adapters, and the deterministic template generator were removed in M3 under Rule 12. There is no offline AI copy path: a provider failure or malformed payload surfaces as an error (HTTP 502), never as substitute content.
   * Provider-neutral UI: all AI-disabled copy lives in `src/constants/aiCopy.ts` and names no vendor. Never hardcode a provider name in components.
   * Graceful UI Disabling: AI features (alert copywriting and Route Scout) require the active provider to be reachable with an account that can invoke the selected model; when unavailable, the studio disables all AI buttons with informative tooltips. `/api/ai/status` reports `available: false` and the upstream error rather than advertising unverified models.
 * Enforces constraints: titles $\le 30$ chars, spoken messages 15–25 words ($\le 2$ lines), trigger radii clamped to $[0.3, 6.0]$ miles. Client-side `AiQueue` limits concurrency.
 
 ### E. Route Scout Conversational Co-Pilot & Adapter Seam
-* **Role & Scoping:** A dedicated conversational road-trip co-pilot (`RouteScoutDrawer.tsx`, `scoutService.ts`, `scoutTools.ts`, `/api/ai/scout/*`) operating in two distinct scopes:
+* **Role & Scoping:** A dedicated conversational road-trip co-pilot (`RouteScoutDrawer.tsx`, `services/scout/scoutService.ts`, `services/scout/scoutTools.ts`, `/api/ai/scout/*`) operating in two distinct scopes:
   * **Day Scope:** Evaluates overall driving pace, scenic corridors, overlook opportunities, and meal/fuel deserts.
   * **Waypoint Scope:** Audits road accessibility (paved vs. dirt), parking pull-offs, lighting/golden hour timing, and coordinate precision.
 * **Pluggable Adapter Seam:** The core road-trip domain prompt (`buildScoutDomainPrompt`) is kept strictly pure and harness-agnostic. All harness-specific tool permissions and execution rules live behind the `AiHarnessAdapter` lifecycle hooks:
   * `AwsBedrockHarnessAdapter.generateStreamWithTools`: Executes multi-turn `ConverseStreamCommand` tool loops (`MAX_TOOL_ITERATIONS = 5`, `MAX_TOOLS_PER_ITERATION = 8`, parallel `Promise.all` tool dispatch) with `activity`, `thought`, and `delta` SSE streaming and `<thinking>`/`<think>` reasoning tag hygiene.
   * `decorateScoutPrompt(domainPrompt)`: The Bedrock adapter returns the domain prompt unchanged. Harness-specific tool allowlists and execution rules live in the adapter/dispatcher seam, never in `buildScoutDomainPrompt`.
   * `sanitizeResponse(rawText)`: Strips internal harness preambles, `<thinking>`/`<think>` XML blocks, and trailing meta-commentary from driver-facing prose. `ScoutService` passes it into `buildScoutDomainPrompt` / `parseScoutResponse` as an optional sanitizer, so the domain layer defaults to identity and stays provider-neutral.
-* **Discovery & Deterministic Domain Grounding Tool Library (`scoutTools.ts`):** Provides 7 server-side tools executed in parallel (`Promise.all`) during Bedrock tool turns:
+* **Discovery & Deterministic Domain Grounding Tool Library (`services/scout/scoutTools.ts` & `services/scout/tools/`):** Provides 7 server-side tools executed in parallel (`Promise.all`) during Bedrock tool turns:
   * **Web Discovery (`search_web`, `read_url_content`):** Queries the Brave Search API (`BRAVE_SEARCH_API_KEY` or SSM `/roadtrip-copilot/brave-search-api-key`) and fetches external HTTP/HTTPS pages with strict SSRF, DNS-rebinding, redirect, port, content-type, and 512 KB response size guards.
   * **Deterministic Domain Grounding (`resolve_and_standardize_place`, `snap_to_highway_corridor`, `calculate_detour_impact`, `simulate_schedule_cascade`, `audit_corridor_waypoints`):** Resolves physical establishments via Google Places API (New) Text Search (`GOOGLE_PLACES_API_KEY` or SSM `/roadtrip-copilot/google-places-api-key`) with a strict `X-Goog-FieldMask` and 50 km radius clamp, snaps scenic pull-offs and route anchors to OSRM highway geometry (`/nearest/v1/driving`) with highway designator disambiguation (`US-89` vs `I-89` vs `AZ-89`), computes exact detour distance/duration deltas via `RouteService`, simulates schedule cascades and timezone crossings in memory, and audits corridor waypoints with bounded concurrency (`MAX_AUDIT_CONCURRENCY = 4`).
-* **Server-Side Suggestion Hydration & Interactive Cards (`add_waypoint` / `update_waypoint` / `delete_waypoint`):** Per-turn `TurnGroundingCache` deterministically hydrates `add_waypoint` and `update_waypoint` suggestion cards with verified `ChIJ...` Place IDs (`placeId.ts`), clean `place_name`, street `address`, and entrance coordinates resolved during the turn without cross-request leakage. Supports 1-click **Add to Route**, **Update Stop**, and **Remove Stop** (`delete_waypoint`) with dynamic map preview pins, an in-app "Test on Google Maps" query link, and automatic Place ID extraction from pasted Maps URLs.
+* **Server-Side Suggestion Hydration & Interactive Cards (`add_waypoint` / `update_waypoint` / `delete_waypoint`):** Per-turn `TurnGroundingCache` deterministically hydrates `add_waypoint` and `update_waypoint` suggestion cards with verified `ChIJ...` Place IDs (`services/scout/placeId.ts`), clean `place_name`, street `address`, and entrance coordinates resolved during the turn without cross-request leakage. Supports 1-click **Add to Route**, **Update Stop**, and **Remove Stop** (`delete_waypoint`) with dynamic map preview pins, an in-app "Test on Google Maps" query link, and automatic Place ID extraction from pasted Maps URLs.
 * **SSE Streaming & Keep-Alive Heartbeats:** Streams tokens over `/api/ai/scout/chat/stream` with immediate `: ping\n\n` and periodic `: keep-alive\n\n` SSE comments to keep CloudFront and Lambda Function URL streams alive during multi-turn tool calls.
 
 ### F. Timeline Cascade, Navigation Links & Device Handoff
@@ -67,86 +75,18 @@
 
 ---
 
-## 3. Directory Layout
+## 3. Subproject Architecture & Boundaries
 
-```
-route-builder/
-├── Dockerfile                  # Multi-stage Docker build with AWS Lambda Web Adapter streaming
-├── .dockerignore               # Docker build exclusions
-├── AGENTS.md                   # This handbook & subproject directory layout
-├── README.md                   # User-facing web studio documentation & setup
-├── index.html                  # HTML entrypoint
-├── package.json                # Project dependencies and test scripts
-├── tsconfig.json               # Frontend TypeScript configuration
-├── tsconfig.server.json        # Backend TypeScript configuration
-├── vite.config.ts              # Vite dev server and /api proxy configuration
-├── playwright.config.ts        # Chromium header/account acceptance tests against a fixture-backed frontend
-├── tailwind.config.js          # Dark automotive theme color palette
-├── server/
-│   ├── app.ts                  # Fastify application factory
-│   ├── index.ts                # Server entrypoint (:3001)
-│   ├── loadEnv.ts              # Node 20.12+ .env loader side-effect module
-│   ├── hooks/
-│   │   └── authGuard.ts        # Dual-mode OIDC cookie/Bearer JWT & allowlist preHandler hook
-│   ├── test-helpers/           # Shared backend test fixtures and harnesses (bedrockFixtures.ts)
-│   ├── routes/
-│   │   ├── auth.ts             # /api/auth (status, Google OAuth2 PKCE redirect/callback, mobile token, logout)
-│   │   ├── routing.ts          # /api/routing (Nominatim geocode & OSRM route proxies)
-│   │   ├── ai.ts               # /api/copilot/generate, /api/copilot/day-title & /api/ai/status
-│   │   ├── device.ts           # /api/device (network-info, staging, download)
-│   │   ├── itineraries.ts      # /api/itineraries (workspace discovery)
-│   │   └── scout.ts            # /api/ai/scout (conversational assistant, SSE stream & quick prompts)
-│   ├── services/
-│   │   ├── authService.ts      # Google OIDC token verification, PKCE, HS256 JWT signing & SSM secret loader
-│   │   ├── geocodeService.ts   # Nominatim integration with compliant User-Agent
-│   │   ├── routeService.ts     # OSRM road graph query engine (literal semicolon paths)
-│   │   ├── routeCache.ts       # LRU coordinate cache with toFixed(5) precision
-│   │   ├── promptBuilder.ts    # Prompt contract generator
-│   │   ├── schemaParser.ts     # Title truncation (<=30 chars), radius clamping, TTS cleanup
-│   │   ├── bedrockService.ts   # Amazon Bedrock Converse / ConverseStream adapter & dynamic model discovery
-│   │   ├── aiService.ts        # Provider-agnostic adapter registry, fail-loud generation paths & availability status
-│   │   ├── aiRegistry.ts       # Composition root registering the primary AI provider adapter
-│   │   ├── deviceService.ts    # Local IP network discovery and in-memory itinerary staging
-│   │   ├── itineraryStorageService.ts # Multi-day JSON parsing and disk/S3 storage
-│   │   ├── placeId.ts          # Google Place ID validator & anti-hallucination guard
-│   │   ├── scoutService.ts     # Route Scout prompt builder, parser, and streaming service
-│   │   ├── scoutTools.ts       # 7-tool discovery & deterministic domain grounding facade & SSM secret lifecycle
-│   │   └── scoutTools/         # Modular grounding tool implementations (types, urlSafety, geo, scheduleSimulator, corridorTools)
-│   └── types/                  # Strict server TypeScript types (auth, routing, ai, scout)
-├── src/
-│   ├── App.tsx                 # Main layout, auth gate & interactive map state coordinator
-│   ├── test-helpers/           # Shared UI test fixtures and mock harnesses (testHarness.tsx)
-│   ├── integration-tests/      # Cross-component React workflow tests (mounted App state cascades)
-│   ├── components/
-│   │   ├── AppHeader.tsx       # Single-row responsive top bar with route title, metrics, and global actions
-│   │   ├── AccountMenu.tsx     # Avatar/initials trigger and keyboard-accessible account details/sign-out popover
-│   │   ├── AuthGateScreen.tsx  # Google OIDC sign-in & 403 private preview restriction screen
-│   │   ├── DayTabBar.tsx       # Multi-day leg switcher tabs
-│   │   ├── MapCanvas.tsx       # Leaflet map with custom waypoint markers & OSRM polyline
-│   │   ├── SearchBar.tsx       # Debounced address search via Nominatim proxy
-│   │   ├── TimelineSidebar.tsx # Timeline stops, streamlined quick editor, cascade telemetry, Google Maps links
-│   │   ├── RouteSelectorModal.tsx # Workspace route discovery and selection modal
-│   │   ├── EditWaypointModal.tsx # Full waypoint details, place entity precision & AI in-car alert modal
-│   │   ├── AiAlertModal.tsx    # Backward-compatible re-export of EditWaypointModal
-│   │   ├── ExportModal.tsx     # 1-click ADB push, Wi-Fi QR code, Google Maps leg QR codes
-│   │   └── RouteScoutDrawer.tsx # Right-side conversational AI assistant & suggestion cards
-│   ├── engine/
-│   │   ├── cascade.ts          # Timeline cascade & timezone border calculation
-│   │   ├── googleMapsUrl.ts    # Multi-stop URL generator with <=9 stop chunking
-│   │   ├── export.ts           # Itinerary V2 JSON exporter
-│   │   ├── itineraryParser.ts  # Multi-day and single-route JSON ingestion
-│   │   ├── sampleTrip.ts       # In-code relative (ad-hoc) sample route factory
-│   │   └── types.ts            # Mathematical & engine data contracts
-│   ├── services/
-│   │   ├── api.ts              # Frontend API client
-│   │   └── aiQueue.ts          # Client-side concurrency limiter
-│   ├── utils/
-│   │   └── itinerarySession.ts # Stable trip session identity across save/rename
-│   ├── constants/
-│   │   └── aiCopy.ts           # Provider-neutral copy for AI-disabled UI states
-│   └── types/                  # Frontend data models (auth, routing, ai, scout)
-└── e2e/                        # Playwright geometry and account interaction regressions (*.browser.ts)
-```
+The canonical, annotated repository directory layout is maintained in [`docs/reference/directory-layout.md`](../docs/reference/directory-layout.md) as the **single source of truth**.
+
+`route-builder/` is organized into three architectural boundaries:
+
+* **`server/` (Fastify TypeScript Backend on `:3001`):**
+  Houses the standalone HTTP API, dual-mode Google OIDC authentication pre-handler (`hooks/authGuard.ts`), OSRM routing proxies (`routes/routing.ts`), Route Scout conversational co-pilot (`routes/scout.ts` and `services/scout/`), AI abstraction & provider adapters (`services/ai/` and `services/ai/bedrock/`), standalone AWS Lambda entrypoints (`lambdas/<name>/handler.ts`, boundary-enforced via `eslint.config.mjs`), spend tracking math (`services/spendMath.ts`), and itinerary storage. Operates under `server/tsconfig.json` (editor LSP) and `tsconfig.server.json` (production build).
+* **`src/` (React Frontend on `:5173`):**
+  Houses the Leaflet map studio, timeline sidebar, itinerary parsing/cascade engine (`engine/`), and interactive UI components (`components/`). Vitest unit tests live file-adjacent to their modules (`src/**/*.test.tsx`), while cross-component workflow tests live in `src/integration-tests/`. Operates under `tsconfig.json`.
+* **`e2e/` (Playwright Acceptance Tests):**
+  Contains fixture-backed Chromium acceptance tests (`*.browser.ts`) validating layout geometry, responsive wrapping, and user interactions without requiring cloud credentials.
 
 > **Local dev workspace:** user-authored routes are written to the repo-root `itineraries/` directory
 > (git-ignored, `.gitkeep` only). `LocalFileSystemStorageService` resolves it as `../itineraries`
@@ -159,6 +99,9 @@ route-builder/
 ```bash
 # Start both Frontend (:5173) and Backend (:3001)
 npm run dev
+
+# Run ESLint architectural boundary checks
+npm run lint
 
 # Run all Vitest suites (frontend src/ and backend server/)
 npm test

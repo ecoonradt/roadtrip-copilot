@@ -4,9 +4,16 @@ import * as cdk from 'aws-cdk-lib';
 import {
   aws_cloudfront as cloudfront,
   aws_cloudfront_origins as origins,
+  aws_cloudwatch as cloudwatch,
+  aws_cloudwatch_actions as cloudwatch_actions,
   aws_iam as iam,
   aws_lambda as lambda,
+  aws_lambda_nodejs as lambda_nodejs,
   aws_s3 as s3,
+  aws_scheduler as scheduler,
+  aws_scheduler_targets as scheduler_targets,
+  aws_sns as sns,
+  aws_sns_subscriptions as sns_subscriptions,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
@@ -31,6 +38,7 @@ export interface RoadtripCopilotCloudStackProps extends cdk.StackProps {
   braveSearchApiKeySsmParam?: string;
   bedrockScoutModelId?: string;
   bedrockCopywriterModelId?: string;
+  alertEmail?: string;
 }
 
 export const DEFAULT_BEDROCK_SCOUT_MODEL_ID = 'us.moonshotai.kimi-k3';
@@ -40,6 +48,10 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
   public readonly staticSiteBucket: s3.Bucket;
   public readonly appDataBucket: s3.Bucket;
   public readonly fastifyApiFunction: lambda.DockerImageFunction;
+  public readonly refreshPricingFunction: lambda_nodejs.NodejsFunction;
+  public readonly refreshPricingSchedule: scheduler.Schedule;
+  public readonly pricingRefreshAlertTopic: sns.Topic;
+  public readonly pricingRefreshFailureAlarm: cloudwatch.Alarm;
   public readonly functionUrl: lambda.FunctionUrl;
   public readonly distribution: cloudfront.Distribution;
   public readonly apiForwardedHostFunction: cloudfront.Function;
@@ -183,6 +195,103 @@ export class RoadtripCopilotCloudStack extends cdk.Stack {
       }),
     );
 
+    // 3b. RefreshBedrockPricingFunction (Weekly Scheduled Standard Node.js Lambda, ADR-0013)
+    // Uses standard NodejsFunction rather than the Fastify Docker image because the Docker image
+    // bakes in AWS Lambda Web Adapter (/opt/extensions/lambda-adapter) expecting an HTTP server on :3001.
+    const routeBuilderRoot = path.resolve(__dirname, '../../route-builder');
+    this.refreshPricingFunction = new lambda_nodejs.NodejsFunction(
+      this,
+      'RefreshBedrockPricingFunction',
+      {
+        projectRoot: routeBuilderRoot,
+        depsLockFilePath: path.join(routeBuilderRoot, 'package-lock.json'),
+        entry: path.join(routeBuilderRoot, 'server/lambdas/refreshBedrockPricing/handler.ts'),
+        handler: 'handler',
+        runtime: lambda.Runtime.NODEJS_24_X,
+        architecture: lambda.Architecture.X86_64,
+        memorySize: 512,
+        timeout: cdk.Duration.seconds(60),
+        environment: {
+          NODE_ENV: 'production',
+          S3_STORAGE_BUCKET: this.appDataBucket.bucketName,
+          BEDROCK_SCOUT_MODEL_ID:
+            props?.bedrockScoutModelId || DEFAULT_BEDROCK_SCOUT_MODEL_ID,
+          BEDROCK_COPYWRITER_MODEL_ID:
+            props?.bedrockCopywriterModelId || DEFAULT_BEDROCK_COPYWRITER_MODEL_ID,
+        },
+        bundling: {
+          minify: true,
+          externalModules: [],
+        },
+      },
+    );
+
+    this.refreshPricingFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject', 's3:PutObject'],
+        resources: [`${this.appDataBucket.bucketArn}/pricing/*`],
+      }),
+    );
+
+    this.refreshPricingFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock:ListFoundationModels', 'bedrock:ListInferenceProfiles'],
+        resources: ['*'],
+      }),
+    );
+
+    this.refreshPricingFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['pricing:GetProducts', 'pricing:DescribeServices'],
+        resources: ['*'],
+      }),
+    );
+
+    this.refreshPricingSchedule = new scheduler.Schedule(
+      this,
+      'RefreshBedrockPricingSchedule',
+      {
+        schedule: scheduler.ScheduleExpression.cron({
+          minute: '0',
+          hour: '6',
+          weekDay: 'MON',
+        }),
+        timeWindow: scheduler.TimeWindow.off(),
+        description: 'Weekly refresh of the Amazon Bedrock us-east-2 token pricing catalog in S3',
+        target: new scheduler_targets.LambdaInvoke(this.refreshPricingFunction, {
+          retryAttempts: 2,
+        }),
+      },
+    );
+
+    this.pricingRefreshAlertTopic = new sns.Topic(this, 'PricingRefreshAlertTopic', {
+      displayName: 'Roadtrip Co-Pilot Bedrock Pricing Refresh Alerts',
+    });
+    if (props?.alertEmail) {
+      this.pricingRefreshAlertTopic.addSubscription(
+        new sns_subscriptions.EmailSubscription(props.alertEmail),
+      );
+    }
+
+    this.pricingRefreshFailureAlarm = new cloudwatch.Alarm(
+      this,
+      'PricingRefreshFailureAlarm',
+      {
+        metric: this.refreshPricingFunction.metricErrors({
+          period: cdk.Duration.minutes(5),
+          statistic: 'Sum',
+        }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarmDescription:
+          'Alerts when the weekly Amazon Bedrock pricing catalog refresh Lambda fails',
+      },
+    );
+    this.pricingRefreshFailureAlarm.addAlarmAction(
+      new cloudwatch_actions.SnsAction(this.pricingRefreshAlertTopic),
+    );
+
     // 4. CloudFront Functions
     // SPA client routing function for static site:
     // Restricts client-side route rewrites strictly to defaultBehavior (S3 static site).
@@ -282,6 +391,16 @@ function handler(event) {
     new cdk.CfnOutput(this, 'LambdaFunctionUrl', {
       value: this.functionUrl.url,
       description: 'The Fastify Lambda function URL',
+    });
+
+    new cdk.CfnOutput(this, 'RefreshBedrockPricingFunctionName', {
+      value: this.refreshPricingFunction.functionName,
+      description: 'The weekly Bedrock pricing catalog refresh Lambda function name',
+    });
+
+    new cdk.CfnOutput(this, 'PricingRefreshAlertTopicArn', {
+      value: this.pricingRefreshAlertTopic.topicArn,
+      description: 'The SNS topic ARN for Bedrock pricing refresh failure alerts',
     });
   }
 }

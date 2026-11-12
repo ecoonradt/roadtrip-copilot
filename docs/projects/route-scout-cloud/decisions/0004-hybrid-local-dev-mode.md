@@ -44,4 +44,4 @@ Every cloud service added during the `route-scout-cloud` project must preserve f
 * Blueprint: [route_scout_cloud_architecture.md](../route_scout_cloud_architecture.md#local-feature-development-mode-vs-production-aws-runtime)
 * Storage isolation: `route-builder/server/services/itineraryStorageService.ts` (uses local disk when `S3_STORAGE_BUCKET` is unset).
 * Auth bypass: `route-builder/server/hooks/authGuard.ts` (bypasses OIDC cookie/JWT gate when `AUTH_ENABLED !== 'true'`).
-* Bedrock local auth: `route-builder/server/services/bedrockService.ts` (uses default AWS SDK credential chain).
+* Bedrock local auth: `route-builder/server/services/ai/bedrock/bedrockService.ts` (uses default AWS SDK credential chain).

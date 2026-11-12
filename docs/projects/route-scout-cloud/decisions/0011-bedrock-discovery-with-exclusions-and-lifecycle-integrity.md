@@ -46,8 +46,8 @@ Chosen Option: **Option B**, as explicitly requested by the owner.
 
 ## 5. Implementation Touchpoints & Verification Status
 
-* `route-builder/server/services/bedrockService.ts`: discovery, canonical IDs, exclusions, availability caching, and model validation behind the provider adapter.
-* `route-builder/server/services/aiService.ts`, `server/routes/ai.ts`, and `server/routes/scout.ts`: effective model resolution and pre-invocation/pre-SSE validation.
+* `route-builder/server/services/ai/bedrock/bedrockService.ts`: discovery, canonical IDs, exclusions, availability caching, and model validation behind the provider adapter.
+* `route-builder/server/services/ai/aiService.ts`, `server/routes/ai.ts`, and `server/routes/scout.ts`: effective model resolution and pre-invocation/pre-SSE validation.
 * `route-builder/src/App.tsx`, `src/components/RouteScoutDrawer.tsx`, and `src/components/EditWaypointModal.tsx`: selectors and explicit unavailable-choice handling.
 * `infra/lib/roadtrip-cloud-stack.ts` and its tests: read-only discovery permissions.
 

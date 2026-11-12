@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,green\" \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch server/index.ts",
@@ -13,10 +16,12 @@
     "typecheck": "npm run typecheck:app && npm run typecheck:tests",
     "typecheck:app": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.test.server.json --noEmit",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:frontend": "vitest run src",
     "test:backend": "vitest run server",
     "test:browser": "playwright test",
+    "refresh:pricing": "tsx server/lambdas/refreshBedrockPricing/handler.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -51,12 +56,19 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
+    "eslint": "^10.14.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-boundaries": "^7.4.2",
     "postcss": "^8.4.49",
     "react-test-renderer": "18.3.1",
     "tailwindcss": "^3.4.16",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.72.2",
     "vite": "^6.0.1",
-    "vitest": "^2.1.8"
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "minimatch": "^11.0.8"
   }
 }

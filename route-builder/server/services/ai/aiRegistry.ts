@@ -1,5 +1,5 @@
 import { AiService } from './aiService.js';
-import { AwsBedrockHarnessAdapter } from './bedrockService.js';
+import { AwsBedrockHarnessAdapter } from './bedrock/bedrockService.js';
 
 /**
  * Composition root for AI provider adapters.

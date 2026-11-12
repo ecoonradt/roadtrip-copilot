@@ -1,4 +1,4 @@
-import type { RouteService } from '../routeService.js';
+import type { RouteService } from '../../routeService.js';
 import { detectTimezone } from './geo.js';
 import type { ScoutToolExecutionContext, ScoutWaypointSummary } from './types.js';
 

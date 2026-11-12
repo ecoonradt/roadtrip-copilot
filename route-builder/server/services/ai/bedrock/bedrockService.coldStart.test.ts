@@ -14,10 +14,10 @@ import type { BedrockClient } from '@aws-sdk/client-bedrock';
 import {
   AiService,
   type AiHarnessAdapter,
-} from './aiService.js';
-import { ScoutService } from './scoutService.js';
-import { MalformedAiResponseError } from './schemaParser.js';
-import { createApp } from '../app.js';
+} from '../aiService.js';
+import { ScoutService } from '../../scout/scoutService.js';
+import { MalformedAiResponseError } from '../schemaParser.js';
+import { createApp } from '../../../app.js';
 import {
   ConverseCommand,
   ConverseStreamCommand,
@@ -30,7 +30,7 @@ import {
   sampleTripContext,
   sampleTools,
   createAsyncStream,
-} from '../test-helpers/bedrockFixtures.js';
+} from '../../../test-helpers/bedrockFixtures.js';
 
 describe('Bedrock cold-start discovery on HTTP routes', () => {
     it('cold Lambda instance rejects unknown modelId before invoking Bedrock runtime', async () => {
