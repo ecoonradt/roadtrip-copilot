@@ -1,4 +1,4 @@
-// Load local .env file if present in route-builder (Node 20.12+)
+// Load local .env file if present in route-builder via process.loadEnvFile
 try {
   if (typeof process.loadEnvFile === 'function') {
     process.loadEnvFile(new URL('../.env', import.meta.url));
